@@ -1,0 +1,177 @@
+import json
+from datetime import timedelta
+
+from django.test import TestCase
+from django.utils import timezone
+
+from .models import Instruction
+
+
+class InstructionApiTests(TestCase):
+    def post_json(self, path, data):
+        return self.client.post(
+            path,
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+    def test_instruction_flow(self):
+        created = self.post_json(
+            "/api/instructions/",
+            {"action": "tabs", "operation": "new"},
+        )
+
+        self.assertEqual(created.status_code, 201)
+        instruction_id = created.json()["id"]
+
+        next_instruction = self.client.get("/api/instructions/next/")
+        self.assertEqual(next_instruction.status_code, 200)
+        self.assertEqual(next_instruction.json()["id"], instruction_id)
+        self.assertEqual(next_instruction.json()["status"], "processing")
+
+        completed = self.post_json(
+            f"/api/instructions/{instruction_id}/result/",
+            {"result": {"url": "about:blank"}},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["status"], "completed")
+
+        repeated = self.post_json(
+            f"/api/instructions/{instruction_id}/result/",
+            {"result": {"url": "about:blank"}},
+        )
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["status"], "completed")
+
+        detail = self.client.get(f"/api/instructions/{instruction_id}/")
+        self.assertEqual(detail.json()["result"], {"url": "about:blank"})
+        self.assertEqual(self.client.get("/api/instructions/next/").status_code, 204)
+
+    def test_failed_instruction(self):
+        instruction = Instruction.objects.create(action="tabs")
+        self.client.get("/api/instructions/next/")
+
+        response = self.post_json(
+            f"/api/instructions/{instruction.id}/result/",
+            {"error": "Browser is unavailable"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "failed")
+        self.assertEqual(response.json()["error"], "Browser is unavailable")
+
+    def test_rejects_invalid_instruction(self):
+        response = self.post_json(
+            "/api/instructions/",
+            {"action": "javascript", "tid": 12, "script": ""},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "javascript.script")
+
+    def test_rejects_removed_actions(self):
+        for instruction in (
+            {"action": "click", "selector": "button"},
+            {"action": "goto", "url": "https://example.com"},
+            {"action": "html"},
+        ):
+            with self.subTest(action=instruction["action"]):
+                response = self.post_json("/api/instructions/", instruction)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"], "Invalid request")
+                self.assertEqual(
+                    response.json()["details"][0]["type"],
+                    "union_tag_invalid",
+                )
+
+    def test_reclaims_stale_instruction(self):
+        instruction = Instruction.objects.create(
+            action="tabs",
+            status=Instruction.Status.PROCESSING,
+        )
+        Instruction.objects.filter(id=instruction.id).update(
+            updated_at=timezone.now() - timedelta(minutes=2)
+        )
+
+        response = self.client.get("/api/instructions/next/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], instruction.id)
+
+    def test_accepts_grouped_tab_operations(self):
+        list_tabs = self.post_json(
+            "/api/instructions/", {"action": "tabs", "operation": "list"}
+        )
+        new_tab = self.post_json(
+            "/api/instructions/", {"action": "tabs", "operation": "new"}
+        )
+        close_tab = self.post_json(
+            "/api/instructions/",
+            {"action": "tabs", "operation": "close", "tid": 12},
+        )
+
+        self.assertEqual(list_tabs.status_code, 201)
+        self.assertEqual(list_tabs.json()["payload"]["operation"], "list")
+        self.assertEqual(new_tab.status_code, 201)
+        self.assertEqual(new_tab.json()["payload"]["operation"], "new")
+        self.assertEqual(close_tab.status_code, 201)
+        self.assertEqual(close_tab.json()["payload"]["tid"], 12)
+
+    def test_close_tab_requires_tid(self):
+        response = self.post_json(
+            "/api/instructions/",
+            {"action": "tabs", "operation": "close"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "tabs")
+
+    def test_new_tab_rejects_tid(self):
+        response = self.post_json(
+            "/api/instructions/",
+            {"action": "tabs", "operation": "new", "tid": 12},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "tabs")
+
+    def test_rejects_result_with_error(self):
+        instruction = Instruction.objects.create(action="tabs")
+        self.client.get("/api/instructions/next/")
+
+        response = self.post_json(
+            f"/api/instructions/{instruction.id}/result/",
+            {"result": [], "error": "Browser is unavailable"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "body")
+
+    def test_accepts_javascript_instruction(self):
+        response = self.post_json(
+            "/api/instructions/",
+            {
+                "action": "javascript",
+                "tid": 12,
+                "script": "document.title",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["action"], "javascript")
+        self.assertEqual(response.json()["payload"]["script"], "document.title")
+
+    def test_javascript_requires_target_tab(self):
+        response = self.post_json(
+            "/api/instructions/",
+            {"action": "javascript", "script": "document.title"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "javascript.tid")
