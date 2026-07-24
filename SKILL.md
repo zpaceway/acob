@@ -153,17 +153,17 @@ When several tabs match, use the title or exact URL to disambiguate. Ask the use
 ### Create A Tab
 
 ```json
-{ "action": "tabs", "operation": "new" }
+{ "action": "tabs", "operation": "new", "url": "https://example.com" }
 ```
 
-The extension creates an `about:blank` tab and returns its tab details. It deliberately avoids Chrome's privileged new-tab page so that `javascript` can immediately target the returned `tid`.
+`url` is optional. When provided, the extension creates the tab at that URL, waits for it to load, and returns its tab details. When omitted, it creates an `about:blank` tab so that `javascript` can immediately target the returned `tid`.
 
 Example shell workflow:
 
 ```bash
 created=$(curl -sS -X POST "$INSTRUCTIONS_URL/" \
   -H 'Content-Type: application/json' \
-  -d '{"action":"tabs","operation":"new"}')
+  -d '{"action":"tabs","operation":"new","url":"https://example.com"}')
 
 instruction_id=$(jq -r '.id' <<<"$created")
 completed=$(wait_for_instruction "$instruction_id")
@@ -265,7 +265,7 @@ curl -sS -X POST "$INSTRUCTIONS_URL/" \
 
 ## Navigation
 
-Navigate a new or existing tab by assigning its location:
+Navigate an existing tab by assigning its location:
 
 ```json
 {
@@ -275,7 +275,7 @@ Navigate a new or existing tab by assigning its location:
 }
 ```
 
-For a new tab, first run `tabs.new`, wait for completion, extract `result.tid`, and then submit the JavaScript navigation instruction.
+For a new tab, pass `url` to `tabs.new` so creation and navigation complete in one instruction. Use JavaScript location assignment when navigating an existing tab.
 
 JavaScript navigation does not wait for the destination document to finish loading. After the navigation instruction completes:
 
@@ -503,6 +503,7 @@ Fix the payload instead of retrying unchanged. Common validation errors include:
 - Empty `script`.
 - Missing `tid` for `tabs.close` or `tabs.focus`.
 - Supplying `tid` to `tabs.list` or `tabs.new`.
+- Supplying `url` to any tab operation other than `tabs.new`.
 - Using an unsupported action name.
 - Adding unknown fields.
 
@@ -529,7 +530,7 @@ If an instruction remains pending, confirm that the extension is enabled and the
 - Wait for each dependent instruction to finish.
 - Never submit JavaScript that can loop or wait forever; bound every promise, retry, observer, and polling loop with a timeout or attempt limit.
 - Use `click` for pointer interactions that must follow normal browser hit-testing.
-- Use `tabs.new` followed by `javascript` for new navigation.
+- Pass `url` to `tabs.new` for new-tab navigation.
 - Use JavaScript location assignment for existing-tab navigation.
 - Account for navigation not waiting for page load.
 - Prefer structured, minimal extraction over full HTML.

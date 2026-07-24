@@ -64,19 +64,20 @@ Supported instructions:
 ```json
 {"action":"tabs","operation":"list"}
 {"action":"tabs","operation":"new"}
+{"action":"tabs","operation":"new","url":"https://example.com"}
 {"action":"tabs","operation":"focus","tid":123}
 {"action":"tabs","operation":"close","tid":123}
 {"action":"click","tid":123,"selector":"button[type=submit]"}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
-Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, active state, and focused state. `active` means selected within its window; `focused` is only true when that tab is active and its window is focused. The `new` operation opens an `about:blank` tab and returns its details. The `focus` operation activates a tab and focuses its containing window. Focusing or closing a tab requires its `tid`.
+Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, active state, and focused state. `active` means selected within its window; `focused` is only true when that tab is active and its window is focused. The `new` operation accepts an optional non-empty `url`, waits for the new tab to load, and returns its details; without a URL it opens `about:blank`. The `focus` operation activates a tab and focuses its containing window. Focusing or closing a tab requires its `tid`.
 
 `click` requires a positive `tid` and a non-empty CSS `selector`. The extension focuses the target tab, scrolls the selected element into view, and sends mouse movement, press, and release input at the center of its rendered border box. The browser performs normal coordinate hit-testing, so an overlay or another element visually above the selected element receives the click instead. The result includes the selector and click coordinates.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab. Its result must be JSON-serializable. The extension uses Chromium's debugger permission so execution is not blocked by the page's content security policy.
 
-To navigate a new or existing tab:
+To navigate an existing tab:
 
 ```json
 {

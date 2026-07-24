@@ -40,6 +40,7 @@ class TabsInstruction(ApiModel):
     action: Literal["tabs"]
     operation: Literal["list", "close", "focus", "new"]
     tid: Tid | None = None
+    url: NonEmptyString | None = None
 
     @model_validator(mode="after")
     def validate_operation(self) -> Self:
@@ -48,6 +49,8 @@ class TabsInstruction(ApiModel):
             raise ValueError(f"tid is required to {self.operation} a tab")
         if self.operation not in targeted_operations and self.tid is not None:
             raise ValueError("tid is only valid when closing or focusing a tab")
+        if self.operation != "new" and self.url is not None:
+            raise ValueError("url is only valid when creating a tab")
         return self
 
 

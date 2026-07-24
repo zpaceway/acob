@@ -213,6 +213,45 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "tabs")
 
+    def test_new_tab_accepts_url(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "tabs",
+                "operation": "new",
+                "url": "https://example.com/path",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["payload"],
+            {"operation": "new", "url": "https://example.com/path"},
+        )
+
+    def test_other_tab_operations_reject_url(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "tabs",
+                "operation": "list",
+                "url": "https://example.com",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "tabs")
+
+    def test_new_tab_rejects_empty_url(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "tabs", "operation": "new", "url": "  "},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["details"][0]["field"], "tabs.url")
+
     def test_rejects_result_with_error(self):
         instruction = Instruction.objects.create(bid=self.BID, action="tabs")
         self.client.get(self.instruction_path("next/"))

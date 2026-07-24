@@ -1,6 +1,7 @@
 const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
 
-let polling = false;
+let activeExecutions = 0;
+const MAX_CONCURRENT_EXECUTIONS = 10;
 let offscreenPromise = null;
 let backendUnavailable = false;
 let configurationPromise = null;
@@ -270,7 +271,9 @@ async function runInstruction(instruction) {
     }
 
     if (operation === "new") {
-      const createdTab = await chrome.tabs.create({ url: "about:blank" });
+      const createdTab = await chrome.tabs.create({
+        url: payload.url ?? "about:blank",
+      });
       const loadedTab = await waitForTab(createdTab.id);
       return tabDetails(loadedTab);
     }
@@ -320,11 +323,11 @@ async function sendResult(instructionId, body, configuration) {
 }
 
 async function poll() {
-  if (polling) {
+  if (activeExecutions >= MAX_CONCURRENT_EXECUTIONS) {
     return;
   }
 
-  polling = true;
+  activeExecutions++;
   try {
     const configuration = await getConfiguration();
     const apiUrl = instructionApiUrl(configuration);
@@ -361,7 +364,7 @@ async function poll() {
     }
     console.error(error);
   } finally {
-    polling = false;
+    activeExecutions--;
   }
 }
 
