@@ -1,8 +1,41 @@
-const API_URL = "http://127.0.0.1:58347/api/instructions";
+const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
 
 let polling = false;
 let offscreenPromise = null;
 let backendUnavailable = false;
+let configurationPromise = null;
+
+function generateBrowserId() {
+  return crypto.randomUUID().replaceAll("-", "");
+}
+
+async function initializeConfiguration() {
+  const stored = await chrome.storage.local.get(["baseUrl", "bid"]);
+  const configuration = {
+    baseUrl: stored.baseUrl || DEFAULT_BASE_URL,
+    bid: stored.bid || generateBrowserId(),
+  };
+
+  if (!stored.baseUrl || !stored.bid) {
+    await chrome.storage.local.set(configuration);
+  }
+
+  return configuration;
+}
+
+async function getConfiguration() {
+  if (!configurationPromise) {
+    configurationPromise = initializeConfiguration();
+  }
+
+  await configurationPromise;
+  return chrome.storage.local.get(["baseUrl", "bid"]);
+}
+
+function instructionApiUrl(configuration) {
+  const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
+  return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
+}
 
 async function createOffscreenDocument() {
   const documentUrl = chrome.runtime.getURL("offscreen.html");
@@ -164,10 +197,11 @@ async function runInstruction(instruction) {
   throw new Error(`Unknown action: ${action}`);
 }
 
-async function sendResult(instructionId, body) {
+async function sendResult(instructionId, body, configuration) {
+  const apiUrl = instructionApiUrl(configuration);
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(`${API_URL}/${instructionId}/result/`, {
+      const response = await fetch(`${apiUrl}/${instructionId}/result/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -196,7 +230,9 @@ async function poll() {
 
   polling = true;
   try {
-    const response = await fetch(`${API_URL}/next/`);
+    const configuration = await getConfiguration();
+    const apiUrl = instructionApiUrl(configuration);
+    const response = await fetch(`${apiUrl}/next/`);
     if (backendUnavailable) {
       console.info("ACOB server connected");
       backendUnavailable = false;
@@ -218,7 +254,7 @@ async function poll() {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-    await sendResult(instruction.id, body);
+    await sendResult(instruction.id, body, configuration);
   } catch (error) {
     if (error instanceof TypeError) {
       if (!backendUnavailable) {
@@ -233,9 +269,17 @@ async function poll() {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "poll") {
     poll();
+  }
+  if (message.type === "getConfiguration") {
+    getConfiguration().then(sendResponse, (error) => {
+      sendResponse({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return true;
   }
 });
 

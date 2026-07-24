@@ -6,12 +6,10 @@ The server stores instructions in SQLite. The extension polls for an instruction
 
 ## Setup
 
-Install dependencies and prepare the database:
+Install dependencies:
 
 ```bash
 uv sync
-uv run manage.py migrate
-uv run manage.py runserver
 ```
 
 Load the extension in Chromium 116 or newer:
@@ -19,15 +17,24 @@ Load the extension in Chromium 116 or newer:
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Select **Load unpacked** and choose the `extension/` directory.
+4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-The server must be available at `http://127.0.0.1:58347`.
+Prepare the database and start the server:
+
+```bash
+uv run manage.py migrate
+uv run manage.py runserver 127.0.0.1:58347
+```
+
+The extension defaults to `http://127.0.0.1:58347`; its popup can change the server URL. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
 ## API
 
-Create an instruction with `POST /api/instructions/`:
+Set `BID` to the browser ID shown in the extension popup. Create an instruction with `POST /api/browsers/<bid>/instructions/`:
 
 ```bash
-curl -X POST http://127.0.0.1:58347/api/instructions/ \
+BID=0123456789ab4def8123456789abcdef
+curl -X POST "http://127.0.0.1:58347/api/browsers/$BID/instructions/" \
   -H 'Content-Type: application/json' \
   -d '{"action":"tabs","operation":"list"}'
 ```
@@ -68,9 +75,9 @@ For example, an input can be updated and notified with:
 Use the ID returned when creating an instruction to retrieve its status and result:
 
 ```bash
-curl http://127.0.0.1:58347/api/instructions/1/
+curl "http://127.0.0.1:58347/api/browsers/$BID/instructions/1/"
 ```
 
 Invalid requests return an `Invalid request` error with a `details` list containing the field, message, and validation type for each problem.
 
-This initial version has no authentication and is intended for local development only.
+The browser ID must be a lowercase dashless UUIDv4. API clients select a browser by using its ID in every instruction route.

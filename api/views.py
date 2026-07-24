@@ -53,7 +53,7 @@ def instruction_response(
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def create_instruction(request: HttpRequest) -> JsonResponse:
+def create_instruction(request: HttpRequest, bid: str) -> JsonResponse:
     try:
         request_model = instruction_adapter.validate_json(request.body)
     except ValidationError as error:
@@ -65,6 +65,7 @@ def create_instruction(request: HttpRequest) -> JsonResponse:
         exclude_none=True,
     )
     instruction = Instruction.objects.create(
+        bid=bid,
         action=request_model.action,
         payload=payload,
     )
@@ -74,9 +75,10 @@ def create_instruction(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 def instruction_detail(
     _request: HttpRequest,
+    bid: str,
     instruction_id: int,
 ) -> JsonResponse:
-    instruction = Instruction.objects.filter(id=instruction_id).first()
+    instruction = Instruction.objects.filter(id=instruction_id, bid=bid).first()
     if instruction is None:
         return error_response("Instruction not found", status=404)
 
@@ -84,16 +86,19 @@ def instruction_detail(
 
 
 @require_http_methods(["GET"])
-def next_instruction(_request: HttpRequest) -> HttpResponse:
+def next_instruction(_request: HttpRequest, bid: str) -> HttpResponse:
     while True:
         stale_before = timezone.now() - CLAIM_TIMEOUT
         candidate = (
             Instruction.objects.filter(
-                Q(status=Instruction.Status.PENDING)
-                | Q(
-                    status=Instruction.Status.PROCESSING,
-                    updated_at__lt=stale_before,
-                )
+                Q(bid=bid),
+                (
+                    Q(status=Instruction.Status.PENDING)
+                    | Q(
+                        status=Instruction.Status.PROCESSING,
+                        updated_at__lt=stale_before,
+                    )
+                ),
             )
             .values("id", "status", "updated_at")
             .first()
@@ -101,7 +106,7 @@ def next_instruction(_request: HttpRequest) -> HttpResponse:
         if candidate is None:
             return HttpResponse(status=204)
 
-        claim = Q(id=candidate["id"], status=candidate["status"])
+        claim = Q(id=candidate["id"], bid=bid, status=candidate["status"])
         if candidate["status"] == Instruction.Status.PROCESSING:
             claim &= Q(updated_at=candidate["updated_at"])
 
@@ -120,9 +125,10 @@ def next_instruction(_request: HttpRequest) -> HttpResponse:
 @require_http_methods(["POST"])
 def complete_instruction(
     request: HttpRequest,
+    bid: str,
     instruction_id: int,
 ) -> JsonResponse:
-    instruction = Instruction.objects.filter(id=instruction_id).first()
+    instruction = Instruction.objects.filter(id=instruction_id, bid=bid).first()
     if instruction is None:
         return error_response("Instruction not found", status=404)
 

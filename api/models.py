@@ -2,6 +2,8 @@ from typing import ClassVar
 
 from django.db import models
 
+from .validators import validate_bid
+
 
 class Instruction(models.Model):
     id: int
@@ -16,6 +18,7 @@ class Instruction(models.Model):
         COMPLETED = "completed"
         FAILED = "failed"
 
+    bid = models.CharField(max_length=32, db_index=True, validators=[validate_bid])
     action = models.CharField(max_length=16, choices=Action)
     payload = models.JSONField(default=dict)
     status = models.CharField(

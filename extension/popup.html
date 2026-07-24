@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACOB Settings</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">Browser bridge</span>
+        <h1>ACOB</h1>
+      </header>
+
+      <form id="settings-form">
+        <label for="base-url">Server URL</label>
+        <input
+          id="base-url"
+          name="baseUrl"
+          type="url"
+          placeholder="http://127.0.0.1:58347"
+          required
+        />
+        <p class="hint">The extension polls this server for instructions.</p>
+
+        <label for="bid">Browser ID</label>
+        <div class="bid-row">
+          <input id="bid" type="text" readonly />
+          <button id="copy-bid" class="secondary" type="button">Copy</button>
+        </div>
+        <p class="hint">Use this ID in API routes to target this browser.</p>
+
+        <div class="actions">
+          <button id="rotate-bid" class="danger" type="button">Rotate ID</button>
+          <button type="submit">Save URL</button>
+        </div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

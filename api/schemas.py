@@ -64,6 +64,7 @@ class InstructionResultRequest(ApiModel):
 
 class InstructionResponse(ApiModel):
     id: int
+    bid: str
     # Stored instructions can outlive the request schema that accepted them.
     action: str
     payload: dict[str, JsonValue]
@@ -78,6 +79,7 @@ class InstructionResponse(ApiModel):
         return cls.model_validate(
             {
                 "id": instruction.id,
+                "bid": instruction.bid,
                 "action": instruction.action,
                 "payload": instruction.payload,
                 "status": instruction.status,
