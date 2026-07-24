@@ -4,7 +4,7 @@ ACOB (Agent Controlled Browser) is a small Django server and Chromium extension 
 
 The server stores instructions in SQLite. The extension polls for an instruction every second, runs it, and sends the result back.
 
-## Setup
+## Local setup
 
 Install dependencies:
 
@@ -12,19 +12,39 @@ Install dependencies:
 uv sync
 ```
 
-Load the extension in Chromium 116 or newer:
+Prepare the database and start the development server:
+
+```bash
+make dev
+```
+
+The server listens on `http://127.0.0.1:58347`. Override the address with Make variables when needed, for example `make dev HOST=0.0.0.0 PORT=8000`. Use `make run` instead to serve the application with Uvicorn.
+
+## Docker
+
+Build the image and start the server with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The Compose service applies migrations through `make run` and exposes the server at `http://127.0.0.1:58347`. To run it in the background and follow its logs:
+
+```bash
+docker compose up --build --detach
+docker compose logs --follow acob
+```
+
+Stop and remove the service with `docker compose down`. The SQLite database is stored inside the container, so its data is lost when the container is removed or replaced.
+
+## Browser extension
+
+With either server running, load the extension in Chromium 116 or newer:
 
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Select **Load unpacked** and choose the `extension/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
-
-Prepare the database and start the server:
-
-```bash
-uv run manage.py migrate
-uv run manage.py runserver 127.0.0.1:58347
-```
 
 The extension defaults to `http://127.0.0.1:58347`; its popup can change the server URL. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
