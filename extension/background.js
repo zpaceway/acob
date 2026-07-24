@@ -170,14 +170,30 @@ async function runInstruction(instruction) {
     const operation = payload.operation;
 
     if (operation === "list") {
-      const tabs = await chrome.tabs.query({});
-      return tabs.map(tabDetails);
+      const [tabs, windows] = await Promise.all([
+        chrome.tabs.query({}),
+        chrome.windows.getAll(),
+      ]);
+      const focusedWindowIds = new Set(
+        windows.filter((window) => window.focused).map((window) => window.id),
+      );
+      return tabs.map((tab) => ({
+        ...tabDetails(tab),
+        focused: tab.active && focusedWindowIds.has(tab.windowId),
+      }));
     }
 
     if (operation === "close") {
       const tab = await chrome.tabs.get(payload.tid);
       await chrome.tabs.remove(tab.id);
       return { closed: true, tab: tabDetails(tab) };
+    }
+
+    if (operation === "focus") {
+      const tab = await chrome.tabs.get(payload.tid);
+      await chrome.windows.update(tab.windowId, { focused: true });
+      const focusedTab = await chrome.tabs.update(tab.id, { active: true });
+      return tabDetails(focusedTab);
     }
 
     if (operation === "new") {

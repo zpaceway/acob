@@ -19,7 +19,7 @@ Instructions are asynchronous. A successful `POST` means the server accepted the
 
 The API has only two actions:
 
-- `tabs`: list, create, or close tabs.
+- `tabs`: list, create, focus, or close tabs.
 - `javascript`: evaluate JavaScript in a specific tab.
 
 The former `goto`, `click`, and `html` actions are removed and must not be used.
@@ -132,11 +132,14 @@ Each returned tab contains:
   "tid": 431973774,
   "window_id": 431973627,
   "active": true,
+  "focused": true,
   "title": "Example Domain",
   "url": "https://example.com/",
   "domain": "example.com"
 }
 ```
+
+`active` means the tab is selected within its own window. `focused` is only true for the active tab in Chromium's currently focused window.
 
 Always list tabs before modifying an existing tab. Select the target using stable evidence such as domain, URL, and title. Do not assume the active tab is the requested tab, and do not alter unrelated tabs.
 
@@ -168,13 +171,21 @@ completed=$(wait_for_instruction "$instruction_id")
 tid=$(jq -r '.result.tid' <<<"$completed")
 ```
 
+### Focus A Tab
+
+```json
+{ "action": "tabs", "operation": "focus", "tid": 431973774 }
+```
+
+The extension activates the selected tab, focuses its containing window, and returns the updated tab details. Use the `tid` from `tabs.list`; do not infer it from tab position.
+
 ### Close A Tab
 
 ```json
 { "action": "tabs", "operation": "close", "tid": 431973774 }
 ```
 
-Only `close` accepts a `tid` in the `tabs` action. Both `list` and `new` reject a `tid` as invalid input.
+Both `focus` and `close` require a `tid`. The `list` and `new` operations reject a `tid` as invalid input.
 
 Close tabs only when the user explicitly requests it or when a temporary tab created for the task is no longer needed and closing it cannot discard user state.
 
@@ -480,7 +491,7 @@ Fix the payload instead of retrying unchanged. Common validation errors include:
 - Missing `operation` for `tabs`.
 - Missing or non-positive `tid` for `javascript`.
 - Empty `script`.
-- Missing `tid` for `tabs.close`.
+- Missing `tid` for `tabs.close` or `tabs.focus`.
 - Supplying `tid` to `tabs.list` or `tabs.new`.
 - Using removed actions such as `goto`, `click`, or `html`.
 - Adding unknown fields.

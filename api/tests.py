@@ -163,6 +163,10 @@ class InstructionApiTests(TestCase):
             self.instruction_path(),
             {"action": "tabs", "operation": "close", "tid": 12},
         )
+        focus_tab = self.post_json(
+            self.instruction_path(),
+            {"action": "tabs", "operation": "focus", "tid": 12},
+        )
 
         self.assertEqual(list_tabs.status_code, 201)
         self.assertEqual(list_tabs.json()["payload"]["operation"], "list")
@@ -170,6 +174,9 @@ class InstructionApiTests(TestCase):
         self.assertEqual(new_tab.json()["payload"]["operation"], "new")
         self.assertEqual(close_tab.status_code, 201)
         self.assertEqual(close_tab.json()["payload"]["tid"], 12)
+        self.assertEqual(focus_tab.status_code, 201)
+        self.assertEqual(focus_tab.json()["payload"]["operation"], "focus")
+        self.assertEqual(focus_tab.json()["payload"]["tid"], 12)
 
     def test_tab_operation_is_required(self):
         response = self.post_json(self.instruction_path(), {"action": "tabs"})
@@ -183,6 +190,16 @@ class InstructionApiTests(TestCase):
         response = self.post_json(
             self.instruction_path(),
             {"action": "tabs", "operation": "close"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "tabs")
+
+    def test_focus_tab_requires_tid(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "tabs", "operation": "focus"},
         )
 
         self.assertEqual(response.status_code, 400)

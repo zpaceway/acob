@@ -32,15 +32,16 @@ class JavaScriptInstruction(ApiModel):
 
 class TabsInstruction(ApiModel):
     action: Literal["tabs"]
-    operation: Literal["list", "close", "new"]
+    operation: Literal["list", "close", "focus", "new"]
     tid: Tid | None = None
 
     @model_validator(mode="after")
     def validate_operation(self) -> Self:
-        if self.operation == "close" and self.tid is None:
-            raise ValueError("tid is required to close a tab")
-        if self.operation != "close" and self.tid is not None:
-            raise ValueError("tid is only valid when closing a tab")
+        targeted_operations = {"close", "focus"}
+        if self.operation in targeted_operations and self.tid is None:
+            raise ValueError(f"tid is required to {self.operation} a tab")
+        if self.operation not in targeted_operations and self.tid is not None:
+            raise ValueError("tid is only valid when closing or focusing a tab")
         return self
 
 

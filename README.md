@@ -44,11 +44,12 @@ Supported instructions:
 ```json
 {"action":"tabs","operation":"list"}
 {"action":"tabs","operation":"new"}
+{"action":"tabs","operation":"focus","tid":123}
 {"action":"tabs","operation":"close","tid":123}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
-Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, and active state. The `new` operation opens an `about:blank` tab and returns its details. Closing a tab requires its `tid`.
+Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, active state, and focused state. `active` means selected within its window; `focused` is only true when that tab is active and its window is focused. The `new` operation opens an `about:blank` tab and returns its details. The `focus` operation activates a tab and focuses its containing window. Focusing or closing a tab requires its `tid`.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab. Its result must be JSON-serializable. The extension uses Chromium's debugger permission so execution is not blocked by the page's content security policy.
 
