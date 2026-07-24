@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="ACOB is an open-source bridge that lets agents control real Chromium tabs through a small, predictable HTTP API."
+      content="ACOB lets AI agents research, navigate, and take action in the browser you already use while you stay in control."
     />
     <meta name="theme-color" content="#11120f" />
     <meta property="og:title" content="ACOB — Give agents a real browser" />
     <meta
       property="og:description"
-      content="A local HTTP bridge between your agents and Chromium. Inspect, navigate, script, and control real browser tabs."
+      content="Let AI work across your real browser tabs, use signed-in sessions, complete repetitive web tasks, and bring back useful results."
     />
     <meta property="og:type" content="website" />
     <title>ACOB — Agent Controlled Browser</title>
@@ -49,7 +49,7 @@
         <nav id="site-nav" class="site-nav" aria-label="Main navigation">
           <a href="#capabilities">Capabilities</a>
           <a href="#how-it-works">How it works</a>
-          <a href="#quickstart">Quickstart</a>
+          <a href="#use-cases">Use cases</a>
           <a
             class="nav-github"
             href="https://github.com/zpaceway/acob"
@@ -68,16 +68,16 @@
     <main id="main">
       <section id="top" class="hero shell">
         <div class="hero-copy">
-          <div class="eyebrow"><span></span> Open-source browser bridge</div>
+          <div class="eyebrow"><span></span> Your browser, now agent-ready</div>
           <h1>Give your agents<br />a <em>real browser.</em></h1>
           <p class="hero-lede">
-            ACOB connects agents to Chromium through a tiny HTTP API. List tabs, navigate pages,
-            run JavaScript, and bring back structured results without replacing the browser you
-            already use.
+            ACOB lets AI work inside the browser you already use. Research across tabs, navigate
+            websites, fill forms, and bring back answers without starting over in a separate
+            browser.
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#quickstart">
-              Get started
+            <a class="button button-primary" href="#use-cases">
+              See what it can do
               <svg viewBox="0 0 18 18" aria-hidden="true">
                 <path d="m5 9 8 0m-3-3 3 3-3 3" />
               </svg>
@@ -93,16 +93,16 @@
           </div>
           <dl class="hero-facts" aria-label="Project facts">
             <div>
-              <dt>02</dt>
-              <dd>instruction types</dd>
+              <dt>Live</dt>
+              <dd>browser context</dd>
             </div>
             <div>
-              <dt>1s</dt>
-              <dd>poll interval</dd>
+              <dt>Any</dt>
+              <dd>website workflow</dd>
             </div>
             <div>
-              <dt>100%</dt>
-              <dd>self-hosted</dd>
+              <dt>Yours</dt>
+              <dd>sessions and data</dd>
             </div>
           </dl>
         </div>
@@ -146,32 +146,32 @@
 
           <div class="instruction-card">
             <div class="instruction-head">
-              <span><i></i> Instruction / 042</span>
-              <b>completed</b>
+              <span><i></i> Live task / research</span>
+              <b>ready</b>
             </div>
-            <pre><span>{</span>
-  <i>"action"</i>: <b>"javascript"</b>,
-  <i>"tid"</i>: <strong>167402</strong>,
-  <i>"script"</i>: <b>"document.title"</b>
-<span>}</span></pre>
+            <pre><i>GOAL</i>  <span>Compare the best options</span>
+
+<b>✓</b> Reviewed <strong>8 open tabs</strong>
+<b>✓</b> Compared pricing and features
+<b>✓</b> Captured the key tradeoffs</pre>
             <div class="instruction-result">
-              <span>RESULT</span>
-              <code>"API Reference — Example"</code>
+              <span>OUTCOME</span>
+              <code>Shortlist and recommendation ready</code>
             </div>
           </div>
 
-          <div class="signal-pill signal-request"><i></i> POST /instructions</div>
-          <div class="signal-pill signal-live"><i></i> Chromium connected</div>
+          <div class="signal-pill signal-request"><i></i> Research in progress</div>
+          <div class="signal-pill signal-live"><i></i> Your browser is ready</div>
         </div>
       </section>
 
       <section class="trust-strip" aria-label="ACOB qualities">
         <div class="shell trust-track">
-          <span>Local by design</span><i></i>
-          <span>Plain HTTP</span><i></i>
-          <span>Real Chromium</span><i></i>
-          <span>JSON results</span><i></i>
-          <span>MIT-friendly workflow</span>
+          <span>Works where you are signed in</span><i></i>
+          <span>Controls real tabs</span><i></i>
+          <span>Fills forms</span><i></i>
+          <span>Extracts answers</span><i></i>
+          <span>You stay in control</span>
         </div>
       </section>
 
@@ -179,11 +179,11 @@
         <div class="section-heading reveal">
           <div>
             <span class="section-index">01 / CAPABILITIES</span>
-            <h2>Small surface.<br />Serious control.</h2>
+            <h2>More than answers.<br />Real browser work.</h2>
           </div>
           <p>
-            A focused command set is easier for agents to understand, safer to reason about, and
-            flexible enough to handle the open web.
+            Most AI stops at telling you what to do. ACOB gives agents the browser awareness and
+            control to actually move the work forward.
           </p>
         </div>
 
@@ -193,23 +193,23 @@
             <div class="feature-icon tabs-icon" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <h3>Know every open tab</h3>
+            <h3>Understand the pages already in front of you</h3>
             <p>
-              Read tab IDs, windows, titles, domains, URLs, and focus state in one structured
-              response. No screen guessing required.
+              Give your agent awareness of open pages, active windows, and where you are working
+              so it can pick up with the right context.
             </p>
             <div class="feature-code">
-              <span>tabs.list()</span>
-              <b>8 tabs found</b>
+              <span>Current workspace</span>
+              <b>8 pages in context</b>
             </div>
           </article>
 
           <article class="feature-card reveal" data-delay="1">
             <div class="feature-number">02</div>
             <div class="feature-icon script-icon" aria-hidden="true">&lt;/&gt;</div>
-            <h3>Run page-level JavaScript</h3>
-            <p>Inspect DOM state, fill forms, click controls, or extract data with a script.</p>
-            <div class="syntax-line"><i>return</i> document.title</div>
+            <h3>Take action, not just notes</h3>
+            <p>Navigate pages, click controls, fill forms, and collect the information you need.</p>
+            <div class="syntax-line"><i>navigate</i> · click · fill · extract</div>
           </article>
 
           <article class="feature-card feature-accent reveal">
@@ -217,12 +217,12 @@
             <div class="feature-icon route-icon" aria-hidden="true">
               <i></i><i></i><i></i>
             </div>
-            <h3>Target the right browser</h3>
+            <h3>Coordinate more than one browser</h3>
             <p>
-              Each extension gets a unique browser ID, so one server can coordinate multiple
-              independent Chromium sessions.
+              Keep work, personal, testing, or customer sessions separate and send each task to
+              the right browser.
             </p>
-            <div class="browser-id"><span>BID</span> 0123···cdef</div>
+            <div class="browser-id"><span>SESSIONS</span> Work · Test · Personal</div>
           </article>
 
           <article class="feature-card feature-wide feature-dark reveal" data-delay="1">
@@ -230,13 +230,13 @@
             <div class="feature-icon shield-icon" aria-hidden="true">
               <svg viewBox="0 0 28 32"><path d="M14 2 25 6v8c0 7-4.4 12.5-11 16C7.4 26.5 3 21 3 14V6z" /><path d="m9 16 3 3 7-8" /></svg>
             </div>
-            <h3>Keep the loop local</h3>
+            <h3>Use your sessions without giving them away</h3>
             <p>
-              The server, queue, and extension run on infrastructure you control. No hosted
-              browser account, proprietary SDK, or cloud relay in the middle.
+              ACOB works with your browser where you are already signed in. No separate hosted
+              browser account and no need to hand your credentials to another service.
             </p>
             <div class="local-route">
-              <span>Agent</span><i></i><span>127.0.0.1</span><i></i><span>Chromium</span>
+              <span>Your agent</span><i></i><span>ACOB</span><i></i><span>Your browser</span>
             </div>
           </article>
         </div>
@@ -247,11 +247,11 @@
           <div class="section-heading inverse reveal">
             <div>
               <span class="section-index">02 / HOW IT WORKS</span>
-              <h2>One clean loop.</h2>
+              <h2>From goal to done.</h2>
             </div>
             <p>
-              ACOB stays intentionally boring: standard requests in, JSON results out, and SQLite
-              keeping the handoff reliable.
+              Skip the screenshots, copied links, and endless tab switching. Give the agent a
+              goal and let it work directly with the live web in front of you.
             </p>
           </div>
 
@@ -259,11 +259,11 @@
             <article class="process-step reveal">
               <div class="step-top"><span>01</span><i></i></div>
               <div class="step-terminal">
-                <span>POST</span>
-                <code>/api/browsers/:bid/instructions/</code>
+                <span>YOU ASK</span>
+                <code>Compare these plans and summarize the tradeoffs.</code>
               </div>
-              <h3>The agent sends an instruction</h3>
-              <p>Submit a tab operation or JavaScript payload over ordinary HTTP.</p>
+              <h3>Describe the outcome</h3>
+              <p>Start with the result you want, whether that is research, data, or a completed web task.</p>
             </article>
 
             <article class="process-step reveal" data-delay="1">
@@ -272,35 +272,35 @@
                 <span class="pulse-core"></span>
                 <i></i><i></i><i></i>
               </div>
-              <h3>The extension claims the work</h3>
-              <p>Chromium polls its own queue, takes the oldest instruction, and executes it.</p>
+              <h3>ACOB works across the live web</h3>
+              <p>Your agent can focus tabs, navigate, read pages, and interact with the sites you already use.</p>
             </article>
 
             <article class="process-step reveal" data-delay="2">
               <div class="step-top"><span>03</span><i></i></div>
               <div class="result-visual">
-                <span>200</span>
-                <code>{ "status": "completed" }</code>
+                <span>DONE</span>
+                <code>Comparison and recommendation ready</code>
               </div>
-              <h3>The result comes back as JSON</h3>
-              <p>Poll the instruction ID and consume a predictable, serializable response.</p>
+              <h3>Get a useful result</h3>
+              <p>Bring back the answer, evidence, or finished action so the next step is clear.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section id="quickstart" class="section shell quickstart-section">
+      <section id="use-cases" class="section shell quickstart-section">
         <div class="quickstart-copy reveal">
-          <span class="section-index">03 / QUICKSTART</span>
-          <h2>Browser control in minutes, not migrations.</h2>
+          <span class="section-index">03 / USE CASES</span>
+          <h2>Turn browser busywork into finished work.</h2>
           <p>
-            Run the tiny Django server, load the unpacked extension, and send your first
-            instruction. ACOB has no frontend runtime and no service account to configure.
+            ACOB gives your agents a practical way to work with the web, from one-off research to
+            repeatable workflows that cross pages and accounts.
           </p>
           <ol class="setup-list">
-            <li><span>1</span><p><b>Start the server</b>Install dependencies and run ACOB locally.</p></li>
-            <li><span>2</span><p><b>Load the extension</b>Point Chromium at the included <code>extension/</code> folder.</p></li>
-            <li><span>3</span><p><b>Send an instruction</b>Use the browser ID from the extension popup.</p></li>
+            <li><span>1</span><p><b>Research across sites</b>Compare sources, products, prices, or competitors without juggling tabs.</p></li>
+            <li><span>2</span><p><b>Operate repetitive workflows</b>Navigate dashboards, update fields, and gather recurring information.</p></li>
+            <li><span>3</span><p><b>Build browser-aware agents</b>Give your own tools access to the live context and sessions users already have.</p></li>
           </ol>
           <a
             class="text-link"
@@ -308,38 +308,45 @@
             target="_blank"
             rel="noreferrer"
           >
-            Read the full setup guide
+            Explore ACOB on GitHub
             <svg viewBox="0 0 18 18" aria-hidden="true"><path d="m5 9 8 0m-3-3 3 3-3 3" /></svg>
           </a>
         </div>
 
-        <div class="code-window reveal" data-delay="1">
-          <div class="code-tabs" role="tablist" aria-label="Quickstart commands">
-            <button class="code-tab active" type="button" role="tab" aria-selected="true" data-code-tab="server">Server</button>
-            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-tab="request">Request</button>
-            <button class="copy-button" type="button" data-copy-target="server-code" aria-label="Copy code">
-              <svg viewBox="0 0 18 18" aria-hidden="true"><rect x="6" y="6" width="9" height="9" rx="2" /><path d="M12 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h1" /></svg>
-              <span>Copy</span>
-            </button>
+        <div class="code-window scenario-window reveal" data-delay="1">
+          <div class="code-tabs" role="tablist" aria-label="Example workflows">
+            <button class="code-tab active" type="button" role="tab" aria-selected="true" data-code-tab="research">Research</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-tab="operations">Operations</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-tab="testing">Testing</button>
           </div>
-          <div class="code-panel active" id="server-panel" role="tabpanel">
-            <pre id="server-code"><code><i># Install the Python dependencies</i>
-<b>uv</b> sync
-
-<i># Prepare the local instruction queue</i>
-<b>uv</b> run manage.py migrate
-
-<i># Start ACOB on its default port</i>
-<b>uv</b> run manage.py runserver 127.0.0.1:58347</code></pre>
+          <div class="code-panel scenario-panel active" id="research-panel" role="tabpanel">
+            <div class="scenario-goal"><span>GOAL</span><h3>Find the strongest options and explain why they stand out.</h3></div>
+            <ul class="scenario-progress">
+              <li><i></i><p><b>Review open sources</b>8 relevant pages found</p><strong>done</strong></li>
+              <li><i></i><p><b>Compare the evidence</b>Pricing, features, and caveats</p><strong>done</strong></li>
+              <li><i></i><p><b>Build the shortlist</b>Ranked with clear tradeoffs</p><strong>ready</strong></li>
+            </ul>
+            <div class="scenario-outcome"><span>OUTCOME</span><p>A concise recommendation backed by the pages you trust.</p></div>
           </div>
-          <div class="code-panel" id="request-panel" role="tabpanel" hidden>
-            <pre id="request-code"><code><i># List every tab in the target browser</i>
-<b>curl</b> -X POST \
-  http://127.0.0.1:58347/api/browsers/$BID/instructions/ \
-  -H <span>'Content-Type: application/json'</span> \
-  -d <span>'{"action":"tabs","operation":"list"}'</span></code></pre>
+          <div class="code-panel scenario-panel" id="operations-panel" role="tabpanel" hidden>
+            <div class="scenario-goal"><span>GOAL</span><h3>Collect this week's updates from the tools my team already uses.</h3></div>
+            <ul class="scenario-progress">
+              <li><i></i><p><b>Visit each workspace</b>Existing signed-in sessions</p><strong>done</strong></li>
+              <li><i></i><p><b>Gather new activity</b>Status, owners, and due dates</p><strong>done</strong></li>
+              <li><i></i><p><b>Organize the update</b>Grouped by priority</p><strong>ready</strong></li>
+            </ul>
+            <div class="scenario-outcome"><span>OUTCOME</span><p>A current operations brief without the dashboard tour.</p></div>
           </div>
-          <div class="code-status"><i></i> Listening on <span>127.0.0.1:58347</span></div>
+          <div class="code-panel scenario-panel" id="testing-panel" role="tabpanel" hidden>
+            <div class="scenario-goal"><span>GOAL</span><h3>Check the critical signup flow in a real browser session.</h3></div>
+            <ul class="scenario-progress">
+              <li><i></i><p><b>Open the live experience</b>Real page and browser state</p><strong>done</strong></li>
+              <li><i></i><p><b>Complete the flow</b>Inputs, controls, and navigation</p><strong>done</strong></li>
+              <li><i></i><p><b>Capture what happened</b>Result and useful evidence</p><strong>ready</strong></li>
+            </ul>
+            <div class="scenario-outcome"><span>OUTCOME</span><p>A repeatable browser check grounded in the actual product.</p></div>
+          </div>
+          <div class="code-status"><i></i> Works with <span>the browser you already use</span></div>
         </div>
       </section>
 
@@ -353,8 +360,8 @@
             </svg>
           </div>
           <div>
-            <span class="section-index">OPEN SOURCE / SELF HOSTED</span>
-            <h2>Put a real browser<br />behind your next agent.</h2>
+            <span class="section-index">OPEN SOURCE / BUILT FOR REAL WORK</span>
+            <h2>Give your next agent<br />the web, not a sandbox.</h2>
           </div>
           <a
             class="button button-dark"
@@ -362,7 +369,7 @@
             target="_blank"
             rel="noreferrer"
           >
-            Get ACOB on GitHub
+            Start building with ACOB
             <svg viewBox="0 0 18 18" aria-hidden="true"><path d="m5 9 8 0m-3-3 3 3-3 3" /></svg>
           </a>
         </div>
@@ -380,10 +387,10 @@
           </svg>
           <span>ACOB</span>
         </a>
-        <p>Agent Controlled Browser. Built for a more capable web.</p>
+        <p>Agent Controlled Browser. Let AI work where you already do.</p>
         <div class="footer-meta">
           <a href="https://github.com/zpaceway/acob" target="_blank" rel="noreferrer">GitHub</a>
-          <a href="https://github.com/zpaceway/acob#api" target="_blank" rel="noreferrer">API docs</a>
+          <a href="https://github.com/zpaceway/acob#setup" target="_blank" rel="noreferrer">Setup guide</a>
           <span>© <span id="year">2026</span> ACOB</span>
         </div>
       </div>

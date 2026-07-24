@@ -17,7 +17,6 @@ navigation?.querySelectorAll("a").forEach((link) => {
 });
 
 const tabs = document.querySelectorAll("[data-code-tab]");
-const copyButton = document.querySelector(".copy-button");
 
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -34,27 +33,7 @@ tabs.forEach((tab) => {
       panel.classList.toggle("active", isActive);
       panel.hidden = !isActive;
     });
-
-    copyButton?.setAttribute("data-copy-target", `${selected}-code`);
   });
-});
-
-copyButton?.addEventListener("click", async () => {
-  const targetId = copyButton.dataset.copyTarget;
-  const code = targetId ? document.getElementById(targetId)?.innerText : "";
-  const label = copyButton.querySelector("span");
-
-  if (!code) return;
-
-  try {
-    await navigator.clipboard.writeText(code);
-    if (label) label.textContent = "Copied";
-    window.setTimeout(() => {
-      if (label) label.textContent = "Copy";
-    }, 1600);
-  } catch {
-    if (label) label.textContent = "Select code";
-  }
 });
 
 const year = document.getElementById("year");
