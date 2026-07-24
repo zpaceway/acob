@@ -29,20 +29,19 @@ Create an instruction with `POST /api/instructions/`:
 ```bash
 curl -X POST http://127.0.0.1:58347/api/instructions/ \
   -H 'Content-Type: application/json' \
-  -d '{"action":"tabs"}'
+  -d '{"action":"tabs","operation":"list"}'
 ```
 
 Supported instructions:
 
 ```json
-{"action":"tabs"}
 {"action":"tabs","operation":"list"}
 {"action":"tabs","operation":"new"}
 {"action":"tabs","operation":"close","tid":123}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
-Omitting `operation` from `tabs` lists all tabs. The `new` operation opens an `about:blank` tab and returns its details. Closing a tab requires its `tid`. The list result includes each tab's `tid`, window ID, domain, URL, title, and active state.
+Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, and active state. The `new` operation opens an `about:blank` tab and returns its details. Closing a tab requires its `tid`.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab. Its result must be JSON-serializable. The extension uses Chromium's debugger permission so execution is not blocked by the page's content security policy.
 

@@ -131,7 +131,10 @@ async function runInstruction(instruction) {
   const { action, payload } = instruction;
 
   if (action === "tabs") {
-    const operation = payload.operation ?? "list";
+    if (!payload.operation) {
+      throw new Error("tabs operation is required");
+    }
+    const operation = payload.operation;
 
     if (operation === "list") {
       const tabs = await chrome.tabs.query({});

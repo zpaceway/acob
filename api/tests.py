@@ -119,6 +119,14 @@ class InstructionApiTests(TestCase):
         self.assertEqual(close_tab.status_code, 201)
         self.assertEqual(close_tab.json()["payload"]["tid"], 12)
 
+    def test_tab_operation_is_required(self):
+        response = self.post_json("/api/instructions/", {"action": "tabs"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(response.json()["details"][0]["field"], "tabs.operation")
+        self.assertEqual(response.json()["details"][0]["type"], "missing")
+
     def test_close_tab_requires_tid(self):
         response = self.post_json(
             "/api/instructions/",

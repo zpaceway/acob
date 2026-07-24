@@ -115,13 +115,7 @@ Do not enqueue dependent work before obtaining the previous result. For example,
 
 ### List Tabs
 
-Omitting `operation` defaults to `list`:
-
-```json
-{ "action": "tabs" }
-```
-
-The explicit form is:
+Every `tabs` instruction requires an `operation`. To list tabs, use:
 
 ```json
 { "action": "tabs", "operation": "list" }
@@ -479,6 +473,7 @@ The server returns HTTP 400 with:
 
 Fix the payload instead of retrying unchanged. Common validation errors include:
 
+- Missing `operation` for `tabs`.
 - Missing or non-positive `tid` for `javascript`.
 - Empty `script`.
 - Missing `tid` for `tabs.close`.

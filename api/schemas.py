@@ -32,7 +32,7 @@ class JavaScriptInstruction(ApiModel):
 
 class TabsInstruction(ApiModel):
     action: Literal["tabs"]
-    operation: Literal["list", "close", "new"] = "list"
+    operation: Literal["list", "close", "new"]
     tid: Tid | None = None
 
     @model_validator(mode="after")
