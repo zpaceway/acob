@@ -17,12 +17,11 @@ ACOB has three parts:
 
 Instructions are asynchronous. A successful `POST` means the server accepted the instruction, not that Chromium has completed it. Always poll the returned instruction ID before using its result.
 
-The API has only two actions:
+The API has three actions:
 
 - `tabs`: list, create, focus, or close tabs.
+- `click`: send real mouse input at an element selected in a specific tab.
 - `javascript`: evaluate JavaScript in a specific tab.
-
-The former `goto`, `click`, and `html` actions are removed and must not be used.
 
 ## Preconditions
 
@@ -189,6 +188,33 @@ Both `focus` and `close` require a `tid`. The `list` and `new` operations reject
 
 Close tabs only when the user explicitly requests it or when a temporary tab created for the task is no longer needed and closing it cannot discard user state.
 
+## Click Action
+
+Every click instruction requires a positive tab ID and a non-empty CSS selector:
+
+```json
+{
+  "action": "click",
+  "tid": 431973774,
+  "selector": "button[type=submit]"
+}
+```
+
+The extension activates and focuses the target tab, resolves the selector through Chromium's DOM debugging domain, scrolls the element into view, and dispatches mouse movement, press, and release input at the center of its rendered border box. This is coordinate-based browser input, not `element.click()`. Normal hit-testing applies, so an overlay or another element visually above the selected element receives the click.
+
+A successful result reports the actual viewport coordinates:
+
+```json
+{
+  "clicked": true,
+  "selector": "button[type=submit]",
+  "x": 412.5,
+  "y": 287
+}
+```
+
+Inspect the page before choosing a selector. Prefer stable IDs, names, roles, labels, and form attributes over generated classes. A successful dispatch confirms that mouse input was sent, not that the intended application state changed; verify the resulting page state before continuing.
+
 ## JavaScript Action
 
 Every JavaScript instruction requires a positive tab ID and a non-empty script:
@@ -207,6 +233,8 @@ The extension evaluates the script through the Chromium Debugger API with:
 - User gesture enabled.
 - Results returned by value.
 - Page content security policy bypassed for evaluation.
+
+**Never submit JavaScript that can loop or wait forever.** ACOB awaits returned promises before processing the next instruction for that browser, so one promise that never settles blocks the entire queue. Every polling loop, retry, observer, event wait, and other asynchronous script must have a finite timeout or attempt limit and must resolve or reject when that limit is reached. Do not use recursive `setTimeout`, `setInterval`, or an unresolved promise without such a bound; prefer a one-shot inspection followed by another instruction.
 
 Return JSON-serializable values such as strings, numbers, booleans, null, arrays, or plain objects. Do not return DOM nodes, functions, cyclic objects, or other browser-only values. Wrap multi-statement scripts in an IIFE so the expression has one explicit return value:
 
@@ -237,7 +265,7 @@ curl -sS -X POST "$INSTRUCTIONS_URL/" \
 
 ## Navigation
 
-There is no `goto` action. Navigate a new or existing tab by assigning its location:
+Navigate a new or existing tab by assigning its location:
 
 ```json
 {
@@ -257,50 +285,30 @@ JavaScript navigation does not wait for the destination document to finish loadi
 Readiness script:
 
 ```javascript
-new Promise((resolve) => {
-  if (document.readyState === "complete") {
+new Promise((resolve, reject) => {
+  const finish = () => {
+    clearTimeout(timeout);
     resolve({ ready: true, url: location.href, title: document.title });
+  };
+  const timeout = setTimeout(() => {
+    removeEventListener("load", finish);
+    reject(new Error("Timed out waiting for page load"));
+  }, 10000);
+
+  if (document.readyState === "complete") {
+    finish();
     return;
   }
 
-  addEventListener(
-    "load",
-    () => resolve({ ready: true, url: location.href, title: document.title }),
-    { once: true },
-  );
+  addEventListener("load", finish, { once: true });
 });
 ```
 
 For applications that never become meaningfully ready at the window `load` event, wait for a specific element instead.
 
-## Replacements For Removed Actions
+## Reading Page Content
 
-### Click An Element
-
-There is no `click` action. Use JavaScript and return useful evidence:
-
-```javascript
-(() => {
-  const selector = "button[type=submit]";
-  const element = document.querySelector(selector);
-  if (!element) {
-    throw new Error(`No element matches ${selector}`);
-  }
-
-  element.click();
-  return {
-    selector,
-    tag: element.tagName.toLowerCase(),
-    text: element.textContent?.trim().slice(0, 200) ?? "",
-  };
-})();
-```
-
-Prefer semantic selectors such as stable IDs, names, roles, labels, and form attributes. Avoid fragile generated class names when a stable selector exists.
-
-### Read HTML
-
-There is no `html` action. The direct equivalent is:
+To read the complete page markup:
 
 ```javascript
 document.documentElement.outerHTML;
@@ -490,10 +498,12 @@ Fix the payload instead of retrying unchanged. Common validation errors include:
 
 - Missing `operation` for `tabs`.
 - Missing or non-positive `tid` for `javascript`.
+- Missing or non-positive `tid` for `click`.
+- Empty `selector` for `click`.
 - Empty `script`.
 - Missing `tid` for `tabs.close` or `tabs.focus`.
 - Supplying `tid` to `tabs.list` or `tabs.new`.
-- Using removed actions such as `goto`, `click`, or `html`.
+- Using an unsupported action name.
 - Adding unknown fields.
 
 ### Failed Browser Instruction
@@ -517,6 +527,8 @@ If an instruction remains pending, confirm that the extension is enabled and the
 
 - List tabs before targeting an existing browser tab.
 - Wait for each dependent instruction to finish.
+- Never submit JavaScript that can loop or wait forever; bound every promise, retry, observer, and polling loop with a timeout or attempt limit.
+- Use `click` for pointer interactions that must follow normal browser hit-testing.
 - Use `tabs.new` followed by `javascript` for new navigation.
 - Use JavaScript location assignment for existing-tab navigation.
 - Account for navigation not waiting for page load.

@@ -9,6 +9,7 @@ class Instruction(models.Model):
     id: int
 
     class Action(models.TextChoices):
+        CLICK = "click"
         JAVASCRIPT = "javascript"
         TABS = "tabs"
 

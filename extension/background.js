@@ -116,7 +116,7 @@ function waitForTab(tid) {
   });
 }
 
-async function executeJavaScript(tid, script) {
+async function withDebugger(tid, callback) {
   const target = { tabId: tid };
   let attached = false;
 
@@ -124,6 +124,16 @@ async function executeJavaScript(tid, script) {
     await chrome.debugger.attach(target, "1.3");
     attached = true;
 
+    return await callback(target);
+  } finally {
+    if (attached) {
+      await chrome.debugger.detach(target);
+    }
+  }
+}
+
+async function executeJavaScript(tid, script) {
+  return withDebugger(tid, async (target) => {
     const evaluation = await chrome.debugger.sendCommand(
       target,
       "Runtime.evaluate",
@@ -153,11 +163,74 @@ async function executeJavaScript(tid, script) {
       type: result.type,
       description: result.description ?? null,
     };
-  } finally {
-    if (attached) {
-      await chrome.debugger.detach(target);
+  });
+}
+
+async function executeClick(tid, selector) {
+  return withDebugger(tid, async (target) => {
+    const { root } = await chrome.debugger.sendCommand(
+      target,
+      "DOM.getDocument",
+      { depth: 0 },
+    );
+    const { nodeId } = await chrome.debugger.sendCommand(
+      target,
+      "DOM.querySelector",
+      { nodeId: root.nodeId, selector },
+    );
+
+    if (!nodeId) {
+      throw new Error(`No element matches selector: ${selector}`);
     }
-  }
+
+    await chrome.debugger.sendCommand(target, "DOM.scrollIntoViewIfNeeded", {
+      nodeId,
+    });
+    const { model } = await chrome.debugger.sendCommand(
+      target,
+      "DOM.getBoxModel",
+      { nodeId },
+    );
+    const border = model.border;
+    const x = (border[0] + border[2] + border[4] + border[6]) / 4;
+    const y = (border[1] + border[3] + border[5] + border[7]) / 4;
+
+    if (
+      model.width < 1 ||
+      model.height < 1 ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    ) {
+      throw new Error(`Element has no clickable box: ${selector}`);
+    }
+
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x,
+      y,
+      pointerType: "mouse",
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      pointerType: "mouse",
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      pointerType: "mouse",
+    });
+
+    return { clicked: true, selector, x, y };
+  });
 }
 
 async function runInstruction(instruction) {
@@ -208,6 +281,13 @@ async function runInstruction(instruction) {
   if (action === "javascript") {
     await chrome.tabs.get(payload.tid);
     return executeJavaScript(payload.tid, payload.script);
+  }
+
+  if (action === "click") {
+    const tab = await chrome.tabs.get(payload.tid);
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.tabs.update(tab.id, { active: true });
+    return executeClick(payload.tid, payload.selector);
   }
 
   throw new Error(`Unknown action: ${action}`);

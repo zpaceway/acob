@@ -26,6 +26,10 @@ run:
 	make migrate
 	uv run uvicorn acob.asgi:application --host $(HOST) --port $(PORT)
 
+docker:
+	@echo "Building Docker image..."
+	docker compose up -d --build
+
 install-skill-claude:
 	install -d "$(CLAUDE_SKILL_DIR)"
 	install -m 0644 SKILL.md "$(CLAUDE_SKILL_DIR)/SKILL.md"

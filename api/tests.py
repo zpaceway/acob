@@ -121,21 +121,18 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "javascript.script")
 
-    def test_rejects_removed_actions(self):
-        for instruction in (
-            {"action": "click", "selector": "button"},
-            {"action": "goto", "url": "https://example.com"},
-            {"action": "html"},
-        ):
-            with self.subTest(action=instruction["action"]):
-                response = self.post_json(self.instruction_path(), instruction)
+    def test_rejects_unknown_action(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "unknown"},
+        )
 
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json()["error"], "Invalid request")
-                self.assertEqual(
-                    response.json()["details"][0]["type"],
-                    "union_tag_invalid",
-                )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(
+            response.json()["details"][0]["type"],
+            "union_tag_invalid",
+        )
 
     def test_reclaims_stale_instruction(self):
         instruction = Instruction.objects.create(
@@ -252,3 +249,32 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "javascript.tid")
+
+    def test_accepts_click_instruction(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "click", "tid": 12, "selector": "button[type=submit]"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["action"], "click")
+        self.assertEqual(response.json()["payload"]["tid"], 12)
+        self.assertEqual(response.json()["payload"]["selector"], "button[type=submit]")
+
+    def test_click_requires_target_tab(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "click", "selector": "button"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["details"][0]["field"], "click.tid")
+
+    def test_click_requires_non_empty_selector(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "click", "tid": 12, "selector": "  "},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["details"][0]["field"], "click.selector")

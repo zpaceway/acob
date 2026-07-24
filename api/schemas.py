@@ -30,6 +30,12 @@ class JavaScriptInstruction(ApiModel):
     script: NonEmptyString
 
 
+class ClickInstruction(ApiModel):
+    action: Literal["click"]
+    tid: Tid
+    selector: NonEmptyString
+
+
 class TabsInstruction(ApiModel):
     action: Literal["tabs"]
     operation: Literal["list", "close", "focus", "new"]
@@ -46,7 +52,7 @@ class TabsInstruction(ApiModel):
 
 
 InstructionRequest = Annotated[
-    JavaScriptInstruction | TabsInstruction,
+    ClickInstruction | JavaScriptInstruction | TabsInstruction,
     Field(discriminator="action"),
 ]
 instruction_adapter: TypeAdapter[InstructionRequest] = TypeAdapter(InstructionRequest)
