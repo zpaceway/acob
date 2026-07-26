@@ -48,6 +48,29 @@ With either server running, load the extension in Chromium 116 or newer:
 
 The extension defaults to `http://127.0.0.1:58347`; its popup can change the server URL. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
+## Python client
+
+An independently installable Python client is available in `client/`:
+
+```bash
+pip install ./client
+```
+
+It exports `ACOBClient`, which submits instructions, waits for their one-use terminal responses, and returns their browser results:
+
+```python
+from acob import ACOBClient
+
+client = ACOBClient("0123456789ab4def8123456789abcdef")
+tabs = client.tabs(operation="list")
+tab = client.tabs(operation="navigate", url="https://example.com")
+title = client.javascript(tab["tid"], "document.title")
+capture = client.screenshot(tab["tid"], full_page=True)
+png = client.download_screenshot(capture["download_url"])
+```
+
+Pass `endpoint="http://host:port"` to target a non-default server. See [`client/README.md`](client/README.md) for every action, low-level queue access, timeout behavior, and error types.
+
 ## API
 
 Set `BID` to the browser ID shown in the extension popup. Create an instruction with `POST /api/browsers/<bid>/instructions/`:
