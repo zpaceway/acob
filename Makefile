@@ -1,12 +1,13 @@
 HOST ?= 127.0.0.1
 PORT ?= 58347
 XDG_CONFIG_HOME ?= $(HOME)/.config
+CLIENT_DIST_DIR ?= client/dist
 
 SKILL_NAME := acob
 CLAUDE_SKILL_DIR ?= $(HOME)/.claude/skills/$(SKILL_NAME)
 OPENCODE_SKILL_DIR ?= $(XDG_CONFIG_HOME)/opencode/skills/$(SKILL_NAME)
 
-.PHONY: migrations migrate dev run install-skill-claude install-skill-opencode
+.PHONY: migrations migrate dev run publish-client install-skill-claude install-skill-opencode
 
 migrations:
 	@echo "Running migrations..."
@@ -29,6 +30,12 @@ run:
 docker:
 	@echo "Building Docker image..."
 	docker compose up -d --build
+
+publish-client:
+	@echo "Building and publishing acob-client..."
+	uv build client --out-dir "$(CLIENT_DIST_DIR)" --clear
+	uvx twine check "$(CLIENT_DIST_DIR)"/*
+	uvx twine upload "$(CLIENT_DIST_DIR)"/*
 
 install-skill-claude:
 	install -d "$(CLAUDE_SKILL_DIR)"
