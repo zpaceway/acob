@@ -2,6 +2,7 @@ import json
 import unittest
 from email.message import Message
 from io import BytesIO
+from typing import TYPE_CHECKING
 from unittest.mock import call, patch
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -13,15 +14,35 @@ from acob import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
+    ClickResult,
+    ClosedTab,
+    KeyboardKeyResult,
+    KeyboardTextResult,
+    ListedTab,
+    Tab,
 )
+
+if TYPE_CHECKING:
+
+    def _check_return_types(client: ACOBClient) -> None:
+        _listed: list[ListedTab] = client.tabs(operation="list")
+        _navigated: Tab = client.tabs(
+            operation="navigate",
+            url="https://example.com",
+        )
+        _focused: Tab = client.tabs(operation="focus", tid=1)
+        _closed: ClosedTab = client.tabs(operation="close", tid=1)
+        _clicked: ClickResult = client.click(1, "button")
+        _inserted: KeyboardTextResult = client.keyboard(1, text="ACOB")
+        _pressed: KeyboardKeyResult = client.keyboard(1, key="Enter")
+        _screenshot: bytes = client.screenshot(1)
+        _javascript: int = client.javascript(1, "1")
 
 
 class FakeResponse:
     def __init__(self, body):
         self.body = (
-            body
-            if isinstance(body, bytes)
-            else json.dumps(body).encode("utf-8")
+            body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
         )
 
     def __enter__(self):
@@ -87,7 +108,7 @@ class ACOBClientTests(unittest.TestCase):
         ):
             result = self.make_client().tabs(operation="list")
 
-        self.assertEqual(result, [tab])
+        self.assertEqual(result, [ListedTab.model_validate(tab)])
         self.assertEqual(mocked_urlopen.call_count, 3)
         self.assertEqual(mocked_sleep.call_count, 1)
 
@@ -112,21 +133,58 @@ class ACOBClientTests(unittest.TestCase):
 
     def test_action_methods_send_the_supported_api_payloads(self):
         client = self.make_client()
+        tab = {
+            "tid": 10,
+            "window_id": 3,
+            "active": True,
+            "title": "Example",
+            "url": "https://example.com/",
+            "domain": "example.com",
+        }
 
-        with patch.object(client, "execute", return_value={}) as execute:
-            client.tabs(operation="list")
-            client.tabs(operation="navigate", url="https://example.com")
-            client.tabs(
+        with patch.object(
+            client,
+            "execute",
+            side_effect=[
+                [],
+                tab,
+                tab,
+                tab,
+                {"closed": True, "tab": tab},
+                {
+                    "clicked": True,
+                    "selector": "button[type=submit]",
+                    "x": 10.5,
+                    "y": 20.5,
+                },
+                {"inserted_characters": 4},
+                {"key": "Enter", "modifiers": ["ctrl", "shift"]},
+                "Example",
+            ],
+        ) as execute:
+            listed = client.tabs(operation="list")
+            navigated = client.tabs(operation="navigate", url="https://example.com")
+            navigated_existing = client.tabs(
                 operation="navigate",
                 tid=10,
                 url="https://example.org",
             )
-            client.tabs(operation="focus", tid=10)
-            client.tabs(operation="close", tid=10)
-            client.click(10, "button[type=submit]")
-            client.keyboard(10, text="ACOB")
-            client.keyboard(10, key="Enter", modifiers=["ctrl", "shift"])
-            client.javascript(10, "document.title")
+            focused = client.tabs(operation="focus", tid=10)
+            closed = client.tabs(operation="close", tid=10)
+            clicked = client.click(10, "button[type=submit]")
+            inserted = client.keyboard(10, text="ACOB")
+            pressed = client.keyboard(10, key="Enter", modifiers=["ctrl", "shift"])
+            title = client.javascript(10, "document.title")
+
+        self.assertEqual(listed, [])
+        self.assertIsInstance(navigated, Tab)
+        self.assertIsInstance(navigated_existing, Tab)
+        self.assertIsInstance(focused, Tab)
+        self.assertIsInstance(closed, ClosedTab)
+        self.assertIsInstance(clicked, ClickResult)
+        self.assertIsInstance(inserted, KeyboardTextResult)
+        self.assertIsInstance(pressed, KeyboardKeyResult)
+        self.assertEqual(title, "Example")
 
         self.assertEqual(
             execute.call_args_list,
@@ -218,7 +276,7 @@ class ACOBClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.response, error_body)
         self.assertIn("javascript.script", str(raised.exception))
 
-    def test_screenshot_returns_metadata_for_an_explicit_one_use_download(self):
+    def test_screenshot_returns_bytes_and_consumes_its_download(self):
         image = b"\x89PNG\r\n\x1a\nACOB"
         download_url = f"/api/browsers/{self.BID}/screenshots/9/"
         responses = [
@@ -245,10 +303,9 @@ class ACOBClientTests(unittest.TestCase):
         ) as mocked_urlopen:
             client = self.make_client()
             result = client.screenshot(12, full_page=True)
-            image_result = client.download_screenshot(result["download_url"])
 
-        self.assertEqual(result["download_url"], download_url)
-        self.assertEqual(image_result, image)
+        self.assertEqual(result, image)
+        self.assertFalse(hasattr(client, "download_screenshot"))
         submitted_request = mocked_urlopen.call_args_list[0].args[0]
         self.assertEqual(
             json.loads(submitted_request.data),
@@ -259,8 +316,43 @@ class ACOBClientTests(unittest.TestCase):
         self.assertEqual(download_request.get_method(), "GET")
 
     def test_screenshot_rejects_a_download_on_another_origin(self):
-        with self.assertRaises(ACOBProtocolError):
-            self.make_client().download_screenshot("https://example.com/image.png")
+        client = self.make_client()
+        with (
+            patch.object(
+                client,
+                "execute",
+                return_value={
+                    "download_url": "https://example.com/image.png",
+                    "content_type": "image/png",
+                    "full_page": False,
+                    "single_use": True,
+                    "tid": 12,
+                },
+            ),
+            self.assertRaises(ACOBProtocolError),
+        ):
+            client.screenshot(12)
+
+    def test_action_methods_reject_malformed_browser_results(self):
+        client = self.make_client()
+
+        with (
+            patch.object(client, "execute", return_value=[{"tid": "12"}]),
+            self.assertRaisesRegex(
+                ACOBProtocolError,
+                "tabs returned an invalid result",
+            ),
+        ):
+            client.tabs(operation="list")
+
+    def test_javascript_returns_the_value_unchanged(self):
+        client = self.make_client()
+        value = object()
+
+        with patch.object(client, "execute", return_value=value):
+            result = client.javascript(12, "window.value")
+
+        self.assertIs(result, value)
 
     def test_timeout_retains_instruction_id_for_later_recovery(self):
         with (

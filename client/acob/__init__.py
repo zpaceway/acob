@@ -7,7 +7,14 @@ from .client import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
-    ScreenshotResult,
+    ClickResult,
+    ClosedTab,
+    KeyboardKeyResult,
+    KeyboardModifier,
+    KeyboardTextResult,
+    ListedTab,
+    Tab,
+    TabOperation,
 )
 
 __version__ = "0.1.0"
@@ -21,6 +28,13 @@ __all__ = [
     "ACOBInstructionError",
     "ACOBProtocolError",
     "ACOBTimeoutError",
-    "ScreenshotResult",
+    "ClickResult",
+    "ClosedTab",
+    "KeyboardKeyResult",
+    "KeyboardModifier",
+    "KeyboardTextResult",
+    "ListedTab",
+    "Tab",
+    "TabOperation",
     "__version__",
 ]

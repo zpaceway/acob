@@ -64,9 +64,8 @@ from acob import ACOBClient
 client = ACOBClient("0123456789ab4def8123456789abcdef")
 tabs = client.tabs(operation="list")
 tab = client.tabs(operation="navigate", url="https://example.com")
-title = client.javascript(tab["tid"], "document.title")
-capture = client.screenshot(tab["tid"], full_page=True)
-png = client.download_screenshot(capture["download_url"])
+title = client.javascript(tab.tid, "document.title")
+png = client.screenshot(tab.tid, full_page=True)
 ```
 
 Pass `endpoint="http://host:port"` to target a non-default server. See [`client/README.md`](client/README.md) for every action, low-level queue access, timeout behavior, and error types.

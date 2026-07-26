@@ -2,26 +2,76 @@ import json
 import math
 import time
 from collections.abc import Sequence
-from typing import TypeAlias, TypedDict, cast
+from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from uuid import UUID
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
+
 DEFAULT_ENDPOINT = "http://127.0.0.1:58347"
 
-JsonValue: TypeAlias = (
-    bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"] | None
-)
 JsonObject: TypeAlias = dict[str, JsonValue]
+TabOperation: TypeAlias = Literal["list", "close", "focus", "navigate"]
+KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
 
 
-class ScreenshotResult(TypedDict):
-    download_url: str
-    content_type: str
-    full_page: bool
-    single_use: bool
+class _ResultModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class Tab(_ResultModel):
     tid: int
+    window_id: int
+    active: bool
+    title: str | None
+    url: str | None
+    domain: str | None
+
+
+class ListedTab(Tab):
+    focused: bool
+
+
+class ClosedTab(_ResultModel):
+    closed: Literal[True]
+    tab: Tab
+
+
+class ClickResult(_ResultModel):
+    clicked: Literal[True]
+    selector: str
+    x: float
+    y: float
+
+
+class KeyboardTextResult(_ResultModel):
+    inserted_characters: int
+
+
+class KeyboardKeyResult(_ResultModel):
+    key: str
+    modifiers: list[KeyboardModifier]
+
+
+class _ScreenshotMetadata(_ResultModel):
+    download_url: str = Field(min_length=1)
+    content_type: Literal["image/png"]
+    full_page: bool
+    single_use: Literal[True]
+    tid: int
+
+
+_LISTED_TABS_ADAPTER = TypeAdapter(list[ListedTab])
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 class ACOBError(Exception):
@@ -95,9 +145,7 @@ class ACOBClient:
             poll_interval,
             "poll_interval",
         )
-        self._instructions_url = (
-            f"{self.endpoint}/api/browsers/{self.bid}/instructions"
-        )
+        self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
 
     def submit(self, action: str, /, **payload: JsonValue) -> JsonObject:
         """Submit an instruction without waiting for Chromium to execute it."""
@@ -162,7 +210,7 @@ class ACOBClient:
         *,
         timeout: float | None = None,
         **payload: JsonValue,
-    ) -> JsonValue:
+    ) -> Any:
         """Submit an action, wait for it, and return its browser result."""
         instruction = self.submit(action, **payload)
         instruction_id = instruction.get("id")
@@ -178,21 +226,69 @@ class ACOBClient:
             raise ACOBInstructionError(instruction_id, terminal)
         return terminal.get("result")
 
+    @overload
     def tabs(
         self,
-        operation: str,
+        operation: Literal["list"],
+        *,
+        tid: None = None,
+        url: None = None,
+        timeout: float | None = None,
+    ) -> list[ListedTab]: ...
+
+    @overload
+    def tabs(
+        self,
+        operation: Literal["navigate"],
+        *,
+        tid: int | None = None,
+        url: str,
+        timeout: float | None = None,
+    ) -> Tab: ...
+
+    @overload
+    def tabs(
+        self,
+        operation: Literal["focus"],
+        *,
+        tid: int,
+        url: None = None,
+        timeout: float | None = None,
+    ) -> Tab: ...
+
+    @overload
+    def tabs(
+        self,
+        operation: Literal["close"],
+        *,
+        tid: int,
+        url: None = None,
+        timeout: float | None = None,
+    ) -> ClosedTab: ...
+
+    def tabs(
+        self,
+        operation: TabOperation,
         *,
         tid: int | None = None,
         url: str | None = None,
         timeout: float | None = None,
-    ) -> JsonValue:
+    ) -> list[ListedTab] | Tab | ClosedTab:
         """Run a list, navigate, focus, or close tab operation."""
         payload: JsonObject = {"operation": operation}
         if tid is not None:
             payload["tid"] = tid
         if url is not None:
             payload["url"] = url
-        return self.execute("tabs", timeout=timeout, **payload)
+        result = self.execute("tabs", timeout=timeout, **payload)
+        if operation == "list":
+            try:
+                return _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
+            except ValidationError as error:
+                raise ACOBProtocolError("tabs returned an invalid result") from error
+        if operation in {"navigate", "focus"}:
+            return self._expect_model(result, Tab, "tabs")
+        return self._expect_model(result, ClosedTab, "tabs")
 
     def click(
         self,
@@ -200,17 +296,40 @@ class ACOBClient:
         selector: str,
         *,
         timeout: float | None = None,
-    ) -> JsonObject:
+    ) -> ClickResult:
         """Click the center of the element matching a CSS selector."""
-        return self._expect_object(
+        return self._expect_model(
             self.execute(
                 "click",
                 tid=tid,
                 selector=selector,
                 timeout=timeout,
             ),
+            ClickResult,
             "click",
         )
+
+    @overload
+    def keyboard(
+        self,
+        tid: int,
+        *,
+        text: str,
+        key: None = None,
+        modifiers: None = None,
+        timeout: float | None = None,
+    ) -> KeyboardTextResult: ...
+
+    @overload
+    def keyboard(
+        self,
+        tid: int,
+        *,
+        text: None = None,
+        key: str,
+        modifiers: Sequence[KeyboardModifier] | None = None,
+        timeout: float | None = None,
+    ) -> KeyboardKeyResult: ...
 
     def keyboard(
         self,
@@ -218,9 +337,9 @@ class ACOBClient:
         *,
         text: str | None = None,
         key: str | None = None,
-        modifiers: Sequence[str] | None = None,
+        modifiers: Sequence[KeyboardModifier] | None = None,
         timeout: float | None = None,
-    ) -> JsonObject:
+    ) -> KeyboardTextResult | KeyboardKeyResult:
         """Insert text or dispatch one key to the focused page control."""
         payload: JsonObject = {"tid": tid}
         if text is not None:
@@ -229,10 +348,10 @@ class ACOBClient:
             payload["key"] = key
         if modifiers is not None:
             payload["modifiers"] = list(modifiers)
-        return self._expect_object(
-            self.execute("keyboard", timeout=timeout, **payload),
-            "keyboard",
-        )
+        result = self.execute("keyboard", timeout=timeout, **payload)
+        if text is not None:
+            return self._expect_model(result, KeyboardTextResult, "keyboard")
+        return self._expect_model(result, KeyboardKeyResult, "keyboard")
 
     def screenshot(
         self,
@@ -240,25 +359,19 @@ class ACOBClient:
         *,
         full_page: bool = False,
         timeout: float | None = None,
-    ) -> ScreenshotResult:
-        """Capture a tab and return its one-use download metadata."""
-        result = self._expect_object(
+    ) -> bytes:
+        """Capture a tab and return its PNG bytes."""
+        result = self._expect_model(
             self.execute(
                 "screenshot",
                 tid=tid,
                 full_page=full_page,
                 timeout=timeout,
             ),
+            _ScreenshotMetadata,
             "screenshot",
         )
-        return cast(ScreenshotResult, result)
-
-    def download_screenshot(self, download_url: str) -> bytes:
-        """Consume a screenshot URL returned by a low-level execute call."""
-        if not isinstance(download_url, str) or not download_url:
-            raise ValueError("download_url must be a non-empty string")
-
-        resolved_url = urljoin(f"{self.endpoint}/", download_url)
+        resolved_url = urljoin(f"{self.endpoint}/", result.download_url)
         if self._origin(urlsplit(resolved_url)) != self._origin(
             urlsplit(self.endpoint)
         ):
@@ -278,8 +391,8 @@ class ACOBClient:
         script: str,
         *,
         timeout: float | None = None,
-    ) -> JsonValue:
-        """Evaluate JavaScript in a tab and return its JSON-compatible value."""
+    ) -> Any:
+        """Evaluate JavaScript in a tab and return its value."""
         return self.execute(
             "javascript",
             tid=tid,
@@ -299,9 +412,7 @@ class ACOBClient:
         try:
             parsed: object = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ACOBProtocolError(
-                f"{method} {url} returned invalid JSON"
-            ) from error
+            raise ACOBProtocolError(f"{method} {url} returned invalid JSON") from error
         if not isinstance(parsed, dict):
             raise ACOBProtocolError(
                 f"{method} {url} returned a non-object JSON response"
@@ -346,10 +457,15 @@ class ACOBClient:
             ) from error
 
     @staticmethod
-    def _expect_object(result: JsonValue, action: str) -> JsonObject:
-        if not isinstance(result, dict):
-            raise ACOBProtocolError(f"{action} returned an invalid result")
-        return result
+    def _expect_model(
+        result: Any,
+        model: type[_ModelT],
+        action: str,
+    ) -> _ModelT:
+        try:
+            return model.model_validate(result)
+        except ValidationError as error:
+            raise ACOBProtocolError(f"{action} returned an invalid result") from error
 
     @staticmethod
     def _try_parse_object(body: bytes) -> JsonObject | None:
@@ -379,9 +495,7 @@ class ACOBClient:
             if isinstance(field, str) and isinstance(detail_message, str):
                 rendered_details.append(f"{field}: {detail_message}")
         return (
-            f"{message}: {'; '.join(rendered_details)}"
-            if rendered_details
-            else message
+            f"{message}: {'; '.join(rendered_details)}" if rendered_details else message
         )
 
     @staticmethod
@@ -389,9 +503,7 @@ class ACOBClient:
         try:
             parsed = UUID(bid)
         except (ValueError, TypeError, AttributeError) as error:
-            raise ValueError(
-                "bid must be a lowercase dashless UUIDv4"
-            ) from error
+            raise ValueError("bid must be a lowercase dashless UUIDv4") from error
         if parsed.hex != bid or parsed.version != 4:
             raise ValueError("bid must be a lowercase dashless UUIDv4")
         return bid

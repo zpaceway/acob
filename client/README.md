@@ -1,7 +1,7 @@
 # ACOB Python Client
 
 The ACOB Python client controls one Chromium installation through an ACOB
-server. It uses only the Python standard library.
+server. It uses Pydantic to validate structured browser results.
 
 Install it from the repository:
 
@@ -21,15 +21,14 @@ client = ACOBClient("0123456789ab4def8123456789abcdef")
 
 tabs = client.tabs(operation="list")
 tab = client.tabs(operation="navigate", url="https://example.com")
-tid = tab["tid"]
+tid = tab.tid
 
 client.click(tid, "a")
 client.keyboard(tid, text="ACOB")
 client.keyboard(tid, key="Enter")
 title = client.javascript(tid, "document.title")
 
-capture = client.screenshot(tid, full_page=True)
-png = client.download_screenshot(capture["download_url"])
+png = client.screenshot(tid, full_page=True)
 Path("screenshot.png").write_bytes(png)
 ```
 
@@ -47,6 +46,13 @@ Action methods map directly to the API actions and payload fields. They submit
 an instruction, poll until Chromium completes it, and return the action's
 `result`.
 
+Structured results are validated Pydantic models. `tabs(operation="list")`
+returns `list[ListedTab]`; navigate and focus return `Tab`; close returns
+`ClosedTab`. Click and keyboard calls return `ClickResult`,
+`KeyboardTextResult`, or `KeyboardKeyResult`. Model fields use attribute access,
+such as `tab.tid` and `clicked.x`. `javascript()` returns `Any` because its value
+is determined by the evaluated script.
+
 The `tabs()` method mirrors the four tab operations:
 
 ```python
@@ -60,9 +66,8 @@ tab = client.tabs(operation="focus", tid=123)
 closed = client.tabs(operation="close", tid=123)
 ```
 
-`screenshot()` returns the API's screenshot metadata unchanged. Its
-`download_url` is single-use, so pass it directly to `download_screenshot()`
-when ready to consume the PNG.
+`screenshot()` returns PNG bytes. It immediately consumes the API's internal
+single-use download URL, so a failed transfer requires a new screenshot call.
 
 For lower-level queue control, use `submit()`, `wait()`, and `execute()`:
 

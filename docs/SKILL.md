@@ -22,7 +22,7 @@ The API has five actions:
 - `client.tabs(operation=..., tid=..., url=...)`: list, navigate, focus, or close tabs.
 - `client.click(tid=..., selector=...)`: send real mouse input at a selected element.
 - `client.keyboard(tid=..., text=..., key=..., modifiers=...)`: insert text or dispatch a key.
-- `client.screenshot(tid=..., full_page=...)`: capture a tab and return one-time download metadata.
+- `client.screenshot(tid=..., full_page=...)`: capture a tab and return PNG bytes.
 - `client.javascript(tid=..., script=...)`: evaluate JavaScript in a specific tab.
 
 ## Preconditions
@@ -62,10 +62,10 @@ Call the method matching the API action. Its arguments use the same names as the
 ```python
 tabs = client.tabs(operation="list")
 tab = client.tabs(operation="navigate", url="https://example.com")
-client.click(tid=tab["tid"], selector="a")
+client.click(tid=tab.tid, selector="a")
 ```
 
-Each action method submits one instruction, waits for `completed` or `failed`, consumes the one-use terminal response, and returns its `result`. A failed browser instruction raises `ACOBInstructionError`. An instruction that does not finish before the default 60-second timeout raises `ACOBTimeoutError`.
+Each action method submits one instruction, waits for `completed` or `failed`, and consumes the one-use terminal response. Tab, click, and keyboard methods return validated Pydantic models whose fields use attribute access; `javascript()` returns the script's value, and `screenshot()` returns PNG bytes. A failed browser instruction raises `ACOBInstructionError`. An instruction that does not finish before the default 60-second timeout raises `ACOBTimeoutError`.
 
 Do not start dependent work before the previous method returns. For example, `client.javascript()` cannot target a newly created tab until `client.tabs(operation="navigate", ...)` has returned its `tid`.
 
@@ -109,7 +109,7 @@ Always list tabs before modifying an existing tab. Select the target using stabl
 Practical selection in Python:
 
 ```python
-matches = [tab for tab in tabs if tab["domain"] == "www.youtube.com"]
+matches = [tab for tab in tabs if tab.domain == "www.youtube.com"]
 ```
 
 When several tabs match, use the title or exact URL to disambiguate. Ask the user if the intended tab remains unclear.
@@ -138,7 +138,7 @@ The returned tab details contain the `tid` needed by dependent actions:
 
 ```python
 tab = client.tabs(operation="navigate", url="https://example.com")
-tid = tab["tid"]
+tid = tab.tid
 ```
 
 ### Focus A Tab
@@ -223,38 +223,25 @@ Dispatch success confirms that Chromium received the input, not that a disabled,
 Capture the visible viewport of a tab:
 
 ```python
-capture = client.screenshot(tid=431973774)
+image = client.screenshot(tid=431973774)
 ```
 
 Set `full_page` to `true` to capture beyond the viewport:
 
 ```python
-capture = client.screenshot(tid=431973774, full_page=True)
+image = client.screenshot(tid=431973774, full_page=True)
 ```
 
-The extension captures a PNG and posts it base64-encoded to the server. Encoded data is limited to 30 MiB; a larger capture produces a failed instruction. The base64 data is kept in a dedicated transient database row and is never included in the agent's terminal instruction response. The result instead contains metadata and a relative download URL:
-
-```json
-{
-  "download_url": "/api/browsers/0123456789ab4def8123456789abcdef/screenshots/7/",
-  "content_type": "image/png",
-  "full_page": true,
-  "single_use": true,
-  "tid": 431973774
-}
-```
-
-The download is destructive. `client.screenshot()` returns this metadata unchanged and does not consume the image. Pass the URL directly to `client.download_screenshot()` exactly once, then save or process the returned bytes:
+The extension captures a PNG and posts it base64-encoded to the server. Encoded data is limited to 30 MiB; a larger capture produces a failed instruction. The client receives the server's transient download metadata, immediately consumes its one-use URL, and returns only the decoded image bytes. Save or process those bytes directly:
 
 ```python
 from pathlib import Path
 
-capture = client.screenshot(tid=431973774, full_page=True)
-image = client.download_screenshot(capture["download_url"])
+image = client.screenshot(tid=431973774, full_page=True)
 Path("screenshot.png").write_bytes(image)
 ```
 
-The instruction itself was already deleted when `client.screenshot()` returned its result. If either the terminal response or screenshot transfer is interrupted, that consumed resource cannot be recovered; submit a new screenshot instruction instead.
+The instruction and download are both single-use. If either transfer is interrupted, call `client.screenshot()` again to submit a new capture.
 
 ## JavaScript Action
 
@@ -571,7 +558,7 @@ except ACOBInstructionError as error:
 - List tabs before targeting an existing browser tab.
 - Let each action method return before starting dependent work.
 - Preserve the dictionary returned by low-level `wait()` because a terminal read deletes the instruction.
-- Pass a screenshot URL to `download_screenshot()` exactly once and never probe it first.
+- Save or process the bytes returned by `client.screenshot()`; call it again if the one-use transfer fails.
 - Never submit JavaScript that can loop or wait forever; bound every promise, retry, observer, and polling loop with a timeout or attempt limit.
 - Use `client.click()` for pointer interactions that must follow normal browser hit-testing.
 - Use `client.tabs(operation="navigate", ...)` for both new and existing tabs.
