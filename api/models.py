@@ -11,6 +11,8 @@ class Instruction(models.Model):
     class Action(models.TextChoices):
         CLICK = "click"
         JAVASCRIPT = "javascript"
+        KEYBOARD = "keyboard"
+        SCREENSHOT = "screenshot"
         TABS = "tabs"
 
     class Status(models.TextChoices):
@@ -34,3 +36,14 @@ class Instruction(models.Model):
 
     class Meta:
         ordering: ClassVar[list[str]] = ["created_at"]
+
+
+class Screenshot(models.Model):
+    id: int
+
+    bid = models.CharField(max_length=32, db_index=True, validators=[validate_bid])
+    tid = models.PositiveBigIntegerField()
+    data = models.TextField()
+    content_type = models.CharField(max_length=32, default="image/png")
+    full_page = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)

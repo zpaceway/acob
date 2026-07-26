@@ -17,7 +17,26 @@ NonEmptyString = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
+MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
+
+KEYBOARD_KEYS = {
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "Backspace",
+    "Delete",
+    "End",
+    "Enter",
+    "Escape",
+    "Home",
+    "PageDown",
+    "PageUp",
+    "Space",
+    "Tab",
+}
 
 
 class ApiModel(BaseModel):
@@ -36,9 +55,41 @@ class ClickInstruction(ApiModel):
     selector: NonEmptyString
 
 
+class KeyboardInstruction(ApiModel):
+    action: Literal["keyboard"]
+    tid: Tid
+    text: NonEmptyText | None = None
+    key: NonEmptyString | None = None
+    modifiers: list[Literal["alt", "ctrl", "meta", "shift"]] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_input(self) -> Self:
+        if (self.text is None) == (self.key is None):
+            raise ValueError("exactly one of text or key is required")
+        if self.text is not None and self.modifiers:
+            raise ValueError("modifiers are only valid with key input")
+        if len(self.modifiers) != len(set(self.modifiers)):
+            raise ValueError("modifiers cannot contain duplicates")
+        if (
+            self.key is not None
+            and self.key not in KEYBOARD_KEYS
+            and len(self.key) != 1
+        ):
+            raise ValueError("key must be a supported named key or one character")
+        return self
+
+
+class ScreenshotInstruction(ApiModel):
+    action: Literal["screenshot"]
+    tid: Tid
+    full_page: bool = False
+
+
 class TabsInstruction(ApiModel):
     action: Literal["tabs"]
-    operation: Literal["list", "close", "focus", "new"]
+    operation: Literal["list", "close", "focus", "navigate"]
     tid: Tid | None = None
     url: NonEmptyString | None = None
 
@@ -47,18 +98,40 @@ class TabsInstruction(ApiModel):
         targeted_operations = {"close", "focus"}
         if self.operation in targeted_operations and self.tid is None:
             raise ValueError(f"tid is required to {self.operation} a tab")
-        if self.operation not in targeted_operations and self.tid is not None:
-            raise ValueError("tid is only valid when closing or focusing a tab")
-        if self.operation != "new" and self.url is not None:
-            raise ValueError("url is only valid when creating a tab")
+        if (
+            self.operation not in targeted_operations | {"navigate"}
+            and self.tid is not None
+        ):
+            raise ValueError(
+                "tid is only valid when closing, focusing, or navigating a tab"
+            )
+        if self.operation == "navigate" and self.url is None:
+            raise ValueError("url is required to navigate")
+        if self.operation != "navigate" and self.url is not None:
+            raise ValueError("url is only valid when navigating")
         return self
 
 
 InstructionRequest = Annotated[
-    ClickInstruction | JavaScriptInstruction | TabsInstruction,
+    ClickInstruction
+    | JavaScriptInstruction
+    | KeyboardInstruction
+    | ScreenshotInstruction
+    | TabsInstruction,
     Field(discriminator="action"),
 ]
 instruction_adapter: TypeAdapter[InstructionRequest] = TypeAdapter(InstructionRequest)
+
+
+class ScreenshotResult(ApiModel):
+    data: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=MAX_SCREENSHOT_BASE64_LENGTH,
+        ),
+    ]
 
 
 class InstructionResultRequest(ApiModel):

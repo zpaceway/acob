@@ -1,24 +1,25 @@
-from datetime import timedelta
+import base64
+import binascii
 
-from django.db.models import Q
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
-from .models import Instruction
+from .models import Instruction, Screenshot
 from .schemas import (
     ApiModel,
     ErrorResponse,
     InstructionResponse,
     InstructionResultRequest,
+    ScreenshotResult,
     ValidationErrorResponse,
     ValidationIssue,
     instruction_adapter,
 )
-
-CLAIM_TIMEOUT = timedelta(seconds=60)
 
 
 def model_response(model: ApiModel, status: int = 200) -> JsonResponse:
@@ -45,10 +46,12 @@ def instruction_response(
     instruction: Instruction,
     status: int = 200,
 ) -> JsonResponse:
-    return model_response(
+    response = model_response(
         InstructionResponse.from_instruction(instruction),
         status=status,
     )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @csrf_exempt
@@ -82,35 +85,44 @@ def instruction_detail(
     if instruction is None:
         return error_response("Instruction not found", status=404)
 
-    return instruction_response(instruction)
+    response = instruction_response(instruction)
+    if instruction.status not in {
+        Instruction.Status.COMPLETED,
+        Instruction.Status.FAILED,
+    }:
+        return response
+
+    deleted, _ = Instruction.objects.filter(
+        id=instruction.id,
+        bid=bid,
+        status=instruction.status,
+    ).delete()
+    if not deleted:
+        return error_response("Instruction not found", status=404)
+    return response
 
 
 @require_http_methods(["GET"])
 def next_instruction(_request: HttpRequest, bid: str) -> HttpResponse:
     while True:
-        stale_before = timezone.now() - CLAIM_TIMEOUT
         candidate = (
             Instruction.objects.filter(
-                Q(bid=bid),
-                (
-                    Q(status=Instruction.Status.PENDING)
-                    | Q(
-                        status=Instruction.Status.PROCESSING,
-                        updated_at__lt=stale_before,
-                    )
-                ),
+                bid=bid,
+                status=Instruction.Status.PENDING,
             )
-            .values("id", "status", "updated_at")
+            .values("id")
             .first()
         )
         if candidate is None:
-            return HttpResponse(status=204)
+            response = HttpResponse(status=204)
+            response["Cache-Control"] = "no-store"
+            return response
 
-        claim = Q(id=candidate["id"], bid=bid, status=candidate["status"])
-        if candidate["status"] == Instruction.Status.PROCESSING:
-            claim &= Q(updated_at=candidate["updated_at"])
-
-        claimed = Instruction.objects.filter(claim).update(
+        claimed = Instruction.objects.filter(
+            id=candidate["id"],
+            bid=bid,
+            status=Instruction.Status.PENDING,
+        ).update(
             status=Instruction.Status.PROCESSING,
             updated_at=timezone.now(),
         )
@@ -145,12 +157,72 @@ def complete_instruction(
     if instruction.status != Instruction.Status.PROCESSING:
         return error_response("Instruction is not processing", status=409)
 
-    instruction.result = result_request.result
-    instruction.error = result_request.error or ""
-    instruction.status = (
-        Instruction.Status.FAILED
-        if result_request.error
-        else Instruction.Status.COMPLETED
-    )
-    instruction.save(update_fields=["result", "error", "status", "updated_at"])
+    result = result_request.result
+    captured_screenshot = None
+    if (
+        instruction.action == Instruction.Action.SCREENSHOT
+        and result_request.error is None
+    ):
+        try:
+            captured_screenshot = ScreenshotResult.model_validate(result)
+            base64.b64decode(captured_screenshot.data, validate=True)
+        except ValidationError as error:
+            return validation_error_response(error)
+        except binascii.Error, ValueError:
+            return error_response("Invalid screenshot data")
+
+    with transaction.atomic():
+        if captured_screenshot is not None:
+            screenshot = Screenshot.objects.create(
+                bid=bid,
+                tid=instruction.payload["tid"],
+                data=captured_screenshot.data,
+                full_page=instruction.payload.get("full_page", False),
+            )
+            result = {
+                "download_url": reverse(
+                    "download-screenshot",
+                    kwargs={"bid": bid, "screenshot_id": screenshot.id},
+                ),
+                "content_type": screenshot.content_type,
+                "full_page": screenshot.full_page,
+                "single_use": True,
+                "tid": screenshot.tid,
+            }
+
+        instruction.result = result
+        instruction.error = result_request.error or ""
+        instruction.status = (
+            Instruction.Status.FAILED
+            if result_request.error
+            else Instruction.Status.COMPLETED
+        )
+        instruction.save(update_fields=["result", "error", "status", "updated_at"])
     return instruction_response(instruction)
+
+
+@require_http_methods(["GET"])
+def download_screenshot(
+    _request: HttpRequest,
+    bid: str,
+    screenshot_id: int,
+) -> HttpResponse:
+    screenshot = Screenshot.objects.filter(id=screenshot_id, bid=bid).first()
+    if screenshot is None:
+        return error_response("Screenshot not found", status=404)
+
+    try:
+        image = base64.b64decode(screenshot.data, validate=True)
+    except binascii.Error, ValueError:
+        screenshot.delete()
+        return error_response("Screenshot data is invalid", status=500)
+
+    screenshot.delete()
+
+    response = HttpResponse(image, content_type=screenshot.content_type)
+    response["Content-Disposition"] = (
+        f'attachment; filename="acob-screenshot-{screenshot_id}.png"'
+    )
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response

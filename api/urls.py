@@ -42,4 +42,9 @@ urlpatterns = [
         views.complete_instruction,
         name="complete-instruction",
     ),
+    path(
+        "browsers/<bid:bid>/screenshots/<int:screenshot_id>/",
+        views.download_screenshot,
+        name="download-screenshot",
+    ),
 ]

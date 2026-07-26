@@ -1,6 +1,6 @@
 ---
 name: acob
-description: Use ONLY for controlling Chromium through this project's ACOB HTTP API, including listing, creating, navigating, inspecting, scripting, and closing browser tabs.
+description: Use ONLY for controlling Chromium through this project's ACOB HTTP API, including tabs, clicks, keyboard input, screenshots, and JavaScript.
 ---
 
 # ACOB Browser Control
@@ -13,14 +13,16 @@ ACOB has three parts:
 
 1. The agent submits an instruction to `$SERVER_URL/api/browsers/$BID/instructions/`.
 2. The Chromium extension polls its browser-specific `/next/` route once per second and executes the oldest available instruction for its browser ID.
-3. The extension posts the result under the same browser ID. The agent retrieves it from the browser-specific instruction route.
+3. The extension posts the result under the same browser ID. The agent consumes it from the browser-specific instruction route.
 
 Instructions are asynchronous. A successful `POST` means the server accepted the instruction, not that Chromium has completed it. Always poll the returned instruction ID before using its result.
 
-The API has three actions:
+The API has five actions:
 
-- `tabs`: list, create, focus, or close tabs.
+- `tabs`: list, navigate, focus, or close tabs.
 - `click`: send real mouse input at an element selected in a specific tab.
+- `keyboard`: insert text or dispatch a key with optional modifiers.
+- `screenshot`: capture a tab's viewport or full page and return a one-time download URL.
 - `javascript`: evaluate JavaScript in a specific tab.
 
 ## Preconditions
@@ -54,11 +56,13 @@ Follow this sequence for every browser operation:
 
 1. Submit one instruction with `POST $INSTRUCTIONS_URL/`.
 2. Capture its numeric `id`.
-3. Poll `GET $INSTRUCTIONS_URL/<id>/` until `status` is `completed` or `failed`.
-4. Read `result` only after completion.
+3. Poll `GET $INSTRUCTIONS_URL/<id>/` until the response has `status` `completed` or `failed`.
+4. Save and use that terminal response directly; the terminal GET consumes the instruction.
 5. Stop and diagnose the `error` when the instruction fails.
 
 Possible statuses are `pending`, `processing`, `completed`, and `failed`.
+
+Instruction detail reads are non-destructive while the status is `pending` or `processing`. The first detail GET that returns `completed` or `failed` atomically deletes the instruction. Any later GET for that ID returns `404 Instruction not found`. Never discard a terminal polling response or make another request to retrieve its result. If the terminal response is lost during transport, it cannot be recovered.
 
 ### Submit An Instruction
 
@@ -88,7 +92,7 @@ Example accepted response:
 curl -sS "$INSTRUCTIONS_URL/21/"
 ```
 
-For repeated operations, this Bash helper waits and prints the terminal response:
+For repeated operations, this Bash helper waits and prints the terminal response it already captured:
 
 ```bash
 wait_for_instruction() {
@@ -112,7 +116,7 @@ wait_for_instruction() {
 }
 ```
 
-Do not enqueue dependent work before obtaining the previous result. For example, a JavaScript instruction cannot target a newly created tab until `tabs.new` has completed and returned its `tid`.
+Do not enqueue dependent work before obtaining the previous result. For example, a JavaScript instruction cannot target a newly created tab until `tabs.navigate` has completed and returned its `tid`.
 
 ## Tab Operations
 
@@ -150,20 +154,33 @@ jq '.result[] | select(.domain == "www.youtube.com") | {tid, title, url}' respon
 
 When several tabs match, use the title or exact URL to disambiguate. Ask the user if the intended tab remains unclear.
 
-### Create A Tab
+### Navigate A Tab
+
+Create a new tab at a URL by omitting `tid`:
 
 ```json
-{ "action": "tabs", "operation": "new", "url": "https://example.com" }
+{ "action": "tabs", "operation": "navigate", "url": "https://example.com" }
 ```
 
-`url` is optional. When provided, the extension creates the tab at that URL, waits for it to load, and returns its tab details. When omitted, it creates an `about:blank` tab so that `javascript` can immediately target the returned `tid`.
+Navigate an existing tab by supplying the `tid` selected from `tabs.list`:
+
+```json
+{
+  "action": "tabs",
+  "operation": "navigate",
+  "tid": 431973774,
+  "url": "https://example.com"
+}
+```
+
+`url` is required and must be non-empty. The extension creates or updates the tab, waits up to 30 seconds for Chromium's page-load completion signal, and returns the loaded tab details. Omitting `tid` creates a new tab; providing it preserves and navigates that tab.
 
 Example shell workflow:
 
 ```bash
 created=$(curl -sS -X POST "$INSTRUCTIONS_URL/" \
   -H 'Content-Type: application/json' \
-  -d '{"action":"tabs","operation":"new","url":"https://example.com"}')
+  -d '{"action":"tabs","operation":"navigate","url":"https://example.com"}')
 
 instruction_id=$(jq -r '.id' <<<"$created")
 completed=$(wait_for_instruction "$instruction_id")
@@ -184,7 +201,7 @@ The extension activates the selected tab, focuses its containing window, and ret
 { "action": "tabs", "operation": "close", "tid": 431973774 }
 ```
 
-Both `focus` and `close` require a `tid`. The `list` and `new` operations reject a `tid` as invalid input.
+Both `focus` and `close` require a `tid`. `navigate` accepts an optional `tid`; `list` rejects one as invalid input.
 
 Close tabs only when the user explicitly requests it or when a temporary tab created for the task is no longer needed and closing it cannot discard user state.
 
@@ -214,6 +231,89 @@ A successful result reports the actual viewport coordinates:
 ```
 
 Inspect the page before choosing a selector. Prefer stable IDs, names, roles, labels, and form attributes over generated classes. A successful dispatch confirms that mouse input was sent, not that the intended application state changed; verify the resulting page state before continuing.
+
+## Keyboard Action
+
+Keyboard instructions require a positive tab ID and exactly one of `text` or `key`. The extension focuses the target tab and its window, then directs input to the page element that currently has keyboard focus. Focus the intended input first, normally with `click`.
+
+Insert text:
+
+```json
+{
+  "action": "keyboard",
+  "tid": 431973774,
+  "text": "ACOB browser control"
+}
+```
+
+Text uses Chromium's `Input.insertText`, which supports Unicode and emits the page's normal editing/input behavior but does not synthesize `keydown` or `keyup`. The result reports `inserted_characters` without echoing potentially sensitive text.
+
+Dispatch a named or single-character key:
+
+```json
+{
+  "action": "keyboard",
+  "tid": 431973774,
+  "key": "Enter",
+  "modifiers": []
+}
+```
+
+Supported named keys are `ArrowDown`, `ArrowLeft`, `ArrowRight`, `ArrowUp`, `Backspace`, `Delete`, `End`, `Enter`, `Escape`, `Home`, `PageDown`, `PageUp`, `Space`, and `Tab`. A single character such as `a` is also valid. `modifiers` is optional and accepts each of `alt`, `ctrl`, `meta`, and `shift` at most once. Modifiers are only valid with `key`:
+
+```json
+{
+  "action": "keyboard",
+  "tid": 431973774,
+  "key": "a",
+  "modifiers": ["ctrl"]
+}
+```
+
+Dispatch success confirms that Chromium received the input, not that a disabled, read-only, or script-controlled element accepted it. Inspect the resulting state before continuing. Use named `Enter` and `Tab` keys rather than newline and tab characters in `text` when their browser behavior is required.
+
+## Screenshot Action
+
+Capture the visible viewport of a tab:
+
+```json
+{
+  "action": "screenshot",
+  "tid": 431973774
+}
+```
+
+Set `full_page` to `true` to capture beyond the viewport:
+
+```json
+{
+  "action": "screenshot",
+  "tid": 431973774,
+  "full_page": true
+}
+```
+
+The extension captures a PNG and posts it base64-encoded to the server. Encoded data is limited to 30 MiB; a larger capture produces a failed instruction. The base64 data is kept in a dedicated transient database row and is never included in the agent's terminal instruction response. The result instead contains metadata and a relative download URL:
+
+```json
+{
+  "download_url": "/api/browsers/0123456789ab4def8123456789abcdef/screenshots/7/",
+  "content_type": "image/png",
+  "full_page": true,
+  "single_use": true,
+  "tid": 431973774
+}
+```
+
+The download is destructive. The first GET returns the decoded PNG and atomically deletes its row; every later request returns `404 Screenshot not found`. Do not inspect, probe, or retry the URL. Write or process its first response directly:
+
+```bash
+terminal=$(wait_for_instruction "$instruction_id") || exit
+download_url=$(jq -er '.result.download_url' <<<"$terminal") || exit
+curl -fsS "$SERVER_URL$download_url" --output screenshot.png
+```
+
+The instruction itself was already deleted when `wait_for_instruction` captured its terminal response. If either terminal response or screenshot transfer is interrupted, that consumed resource cannot be recovered; submit a new screenshot instruction instead.
 
 ## JavaScript Action
 
@@ -263,24 +363,9 @@ curl -sS -X POST "$INSTRUCTIONS_URL/" \
   -d "$payload"
 ```
 
-## Navigation
+## Navigation Readiness
 
-Navigate an existing tab by assigning its location:
-
-```json
-{
-  "action": "javascript",
-  "tid": 431973774,
-  "script": "location.href = 'https://example.com'"
-}
-```
-
-For a new tab, pass `url` to `tabs.new` so creation and navigation complete in one instruction. Use JavaScript location assignment when navigating an existing tab.
-
-JavaScript navigation does not wait for the destination document to finish loading. After the navigation instruction completes:
-
-1. Run `tabs.list` until the target tab reports the expected URL.
-2. Evaluate a readiness script in that tab before interacting with page content.
+Use `tabs.navigate` for both new and existing tabs. It waits for Chromium's page-load completion signal, but that signal does not guarantee that an application has finished rendering asynchronous content. ACOB deliberately has no separate `wait` action. When additional readiness is necessary, wait on the agent side or evaluate a bounded, application-specific check in the page.
 
 Readiness script:
 
@@ -499,11 +584,14 @@ Fix the payload instead of retrying unchanged. Common validation errors include:
 - Missing `operation` for `tabs`.
 - Missing or non-positive `tid` for `javascript`.
 - Missing or non-positive `tid` for `click`.
+- Missing or non-positive `tid` for `keyboard` or `screenshot`.
 - Empty `selector` for `click`.
 - Empty `script`.
 - Missing `tid` for `tabs.close` or `tabs.focus`.
-- Supplying `tid` to `tabs.list` or `tabs.new`.
-- Supplying `url` to any tab operation other than `tabs.new`.
+- Supplying `tid` to `tabs.list`.
+- Omitting `url` from `tabs.navigate` or supplying it to another tab operation.
+- Supplying neither or both of `text` and `key` for `keyboard`.
+- Supplying modifiers with keyboard text, duplicate modifiers, or an unsupported named key.
 - Using an unsupported action name.
 - Adding unknown fields.
 
@@ -515,6 +603,7 @@ A browser-side failure has `status: "failed"` and a non-null `error`. Common cau
 - A selector matched no element.
 - The JavaScript threw an exception.
 - The page navigated while a script was executing.
+- Chromium could not capture an oversized or restricted page.
 - Chromium denied access to a privileged page.
 - The extension is stale and needs to be reloaded.
 
@@ -522,17 +611,19 @@ Report the concrete error and inspect current tabs before deciding whether a ret
 
 ### No Completion
 
-If an instruction remains pending, confirm that the extension is enabled and the server URL is reachable from it. Processing instructions abandoned by an extension are eligible to be reclaimed after 60 seconds, but do not depend on that timeout for normal control flow.
+If an instruction remains pending, confirm that the extension is enabled and the server URL is reachable from it. If an instruction remains processing after an interruption, diagnose the extension and submit a new instruction when retrying is safe.
 
 ## Operational Rules
 
 - List tabs before targeting an existing browser tab.
 - Wait for each dependent instruction to finish.
+- Preserve the terminal polling response because reading it deletes the instruction.
+- Download a screenshot URL exactly once and never probe it before saving the response.
 - Never submit JavaScript that can loop or wait forever; bound every promise, retry, observer, and polling loop with a timeout or attempt limit.
 - Use `click` for pointer interactions that must follow normal browser hit-testing.
-- Pass `url` to `tabs.new` for new-tab navigation.
-- Use JavaScript location assignment for existing-tab navigation.
-- Account for navigation not waiting for page load.
+- Use `tabs.navigate` for both new and existing tabs.
+- Account for asynchronous application rendering after page-load completion.
+- Focus the intended control before sending keyboard input.
 - Prefer structured, minimal extraction over full HTML.
 - Return evidence from mutations, such as the selected element or resulting value.
 - Preserve unrelated tabs and user state.

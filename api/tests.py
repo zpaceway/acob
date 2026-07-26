@@ -1,11 +1,10 @@
+import base64
 import json
-from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
-from django.utils import timezone
 
-from .models import Instruction
+from .models import Instruction, Screenshot
 
 
 class InstructionApiTests(TestCase):
@@ -21,10 +20,16 @@ class InstructionApiTests(TestCase):
             content_type="application/json",
         )
 
+    def post_result(self, instruction_id, data):
+        return self.post_json(
+            self.instruction_path(f"{instruction_id}/result/"),
+            data,
+        )
+
     def test_instruction_flow(self):
         created = self.post_json(
             self.instruction_path(),
-            {"action": "tabs", "operation": "new"},
+            {"action": "tabs", "operation": "list"},
         )
 
         self.assertEqual(created.status_code, 201)
@@ -36,26 +41,42 @@ class InstructionApiTests(TestCase):
         self.assertEqual(next_instruction.json()["id"], instruction_id)
         self.assertEqual(next_instruction.json()["status"], "processing")
 
-        completed = self.post_json(
-            self.instruction_path(f"{instruction_id}/result/"),
-            {"result": {"url": "about:blank"}},
+        completed = self.post_result(
+            instruction_id,
+            {"result": []},
         )
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.json()["status"], "completed")
 
-        repeated = self.post_json(
-            self.instruction_path(f"{instruction_id}/result/"),
-            {"result": {"url": "about:blank"}},
+        repeated = self.post_result(
+            instruction_id,
+            {"result": ["should not win"]},
         )
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(repeated.json()["status"], "completed")
+        self.assertEqual(repeated.json()["result"], [])
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
-        self.assertEqual(detail.json()["result"], {"url": "about:blank"})
+        self.assertEqual(detail.json()["result"], [])
+        self.assertEqual(detail.headers["Cache-Control"], "no-store")
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
         self.assertEqual(
-            self.client.get(self.instruction_path("next/")).status_code,
-            204,
+            self.client.get(self.instruction_path(f"{instruction_id}/")).status_code,
+            404,
         )
+        empty_queue = self.client.get(self.instruction_path("next/"))
+        self.assertEqual(empty_queue.status_code, 204)
+        self.assertEqual(empty_queue.headers["Cache-Control"], "no-store")
+
+    def test_pending_and_processing_reads_are_not_consumed(self):
+        instruction = Instruction.objects.create(bid=self.BID, action="tabs")
+
+        pending = self.client.get(self.instruction_path(f"{instruction.id}/"))
+        processing = self.client.get(self.instruction_path("next/"))
+
+        self.assertEqual(pending.json()["status"], "pending")
+        self.assertEqual(processing.json()["status"], "processing")
+        self.assertTrue(Instruction.objects.filter(id=instruction.id).exists())
 
     def test_browser_queues_are_isolated(self):
         other_bid = "fedcba9876544210a9876543210fedcb"
@@ -102,14 +123,18 @@ class InstructionApiTests(TestCase):
         instruction = Instruction.objects.create(bid=self.BID, action="tabs")
         self.client.get(self.instruction_path("next/"))
 
-        response = self.post_json(
-            self.instruction_path(f"{instruction.id}/result/"),
+        response = self.post_result(
+            instruction.id,
             {"error": "Browser is unavailable"},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "failed")
         self.assertEqual(response.json()["error"], "Browser is unavailable")
+
+        detail = self.client.get(self.instruction_path(f"{instruction.id}/"))
+        self.assertEqual(detail.json()["error"], "Browser is unavailable")
+        self.assertFalse(Instruction.objects.filter(id=instruction.id).exists())
 
     def test_rejects_invalid_instruction(self):
         response = self.post_json(
@@ -134,27 +159,20 @@ class InstructionApiTests(TestCase):
             "union_tag_invalid",
         )
 
-    def test_reclaims_stale_instruction(self):
-        instruction = Instruction.objects.create(
+    def test_does_not_return_processing_instruction(self):
+        Instruction.objects.create(
             bid=self.BID,
             action="tabs",
             status=Instruction.Status.PROCESSING,
         )
-        Instruction.objects.filter(id=instruction.id).update(
-            updated_at=timezone.now() - timedelta(minutes=2)
-        )
 
         response = self.client.get(self.instruction_path("next/"))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["id"], instruction.id)
+        self.assertEqual(response.status_code, 204)
 
     def test_accepts_grouped_tab_operations(self):
         list_tabs = self.post_json(
             self.instruction_path(), {"action": "tabs", "operation": "list"}
-        )
-        new_tab = self.post_json(
-            self.instruction_path(), {"action": "tabs", "operation": "new"}
         )
         close_tab = self.post_json(
             self.instruction_path(),
@@ -164,16 +182,35 @@ class InstructionApiTests(TestCase):
             self.instruction_path(),
             {"action": "tabs", "operation": "focus", "tid": 12},
         )
+        navigate_new_tab = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "tabs",
+                "operation": "navigate",
+                "url": "https://example.com/new",
+            },
+        )
+        navigate_existing_tab = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "tabs",
+                "operation": "navigate",
+                "tid": 12,
+                "url": "https://example.com/existing",
+            },
+        )
 
         self.assertEqual(list_tabs.status_code, 201)
         self.assertEqual(list_tabs.json()["payload"]["operation"], "list")
-        self.assertEqual(new_tab.status_code, 201)
-        self.assertEqual(new_tab.json()["payload"]["operation"], "new")
         self.assertEqual(close_tab.status_code, 201)
         self.assertEqual(close_tab.json()["payload"]["tid"], 12)
         self.assertEqual(focus_tab.status_code, 201)
         self.assertEqual(focus_tab.json()["payload"]["operation"], "focus")
         self.assertEqual(focus_tab.json()["payload"]["tid"], 12)
+        self.assertEqual(navigate_new_tab.status_code, 201)
+        self.assertNotIn("tid", navigate_new_tab.json()["payload"])
+        self.assertEqual(navigate_existing_tab.status_code, 201)
+        self.assertEqual(navigate_existing_tab.json()["payload"]["tid"], 12)
 
     def test_tab_operation_is_required(self):
         response = self.post_json(self.instruction_path(), {"action": "tabs"})
@@ -203,31 +240,15 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "tabs")
 
-    def test_new_tab_rejects_tid(self):
+    def test_rejects_removed_new_tab_operation(self):
         response = self.post_json(
             self.instruction_path(),
-            {"action": "tabs", "operation": "new", "tid": 12},
+            {"action": "tabs", "operation": "new"},
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid request")
-        self.assertEqual(response.json()["details"][0]["field"], "tabs")
-
-    def test_new_tab_accepts_url(self):
-        response = self.post_json(
-            self.instruction_path(),
-            {
-                "action": "tabs",
-                "operation": "new",
-                "url": "https://example.com/path",
-            },
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(
-            response.json()["payload"],
-            {"operation": "new", "url": "https://example.com/path"},
-        )
+        self.assertEqual(response.json()["details"][0]["field"], "tabs.operation")
 
     def test_other_tab_operations_reject_url(self):
         response = self.post_json(
@@ -243,10 +264,19 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "tabs")
 
-    def test_new_tab_rejects_empty_url(self):
+    def test_navigate_requires_url(self):
         response = self.post_json(
             self.instruction_path(),
-            {"action": "tabs", "operation": "new", "url": "  "},
+            {"action": "tabs", "operation": "navigate"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["details"][0]["field"], "tabs")
+
+    def test_navigate_rejects_empty_url(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "tabs", "operation": "navigate", "url": "  "},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -256,8 +286,8 @@ class InstructionApiTests(TestCase):
         instruction = Instruction.objects.create(bid=self.BID, action="tabs")
         self.client.get(self.instruction_path("next/"))
 
-        response = self.post_json(
-            self.instruction_path(f"{instruction.id}/result/"),
+        response = self.post_result(
+            instruction.id,
             {"result": [], "error": "Browser is unavailable"},
         )
 
@@ -317,3 +347,156 @@ class InstructionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "click.selector")
+
+    def test_accepts_keyboard_text_and_key_instructions(self):
+        text = self.post_json(
+            self.instruction_path(),
+            {"action": "keyboard", "tid": 12, "text": " ACOB "},
+        )
+        key = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "keyboard",
+                "tid": 12,
+                "key": "a",
+                "modifiers": ["ctrl", "shift"],
+            },
+        )
+
+        self.assertEqual(text.status_code, 201)
+        self.assertEqual(text.json()["payload"]["text"], " ACOB ")
+        self.assertEqual(key.status_code, 201)
+        self.assertEqual(key.json()["payload"]["key"], "a")
+        self.assertEqual(key.json()["payload"]["modifiers"], ["ctrl", "shift"])
+
+    def test_keyboard_requires_exactly_one_input(self):
+        missing = self.post_json(
+            self.instruction_path(),
+            {"action": "keyboard", "tid": 12},
+        )
+        both = self.post_json(
+            self.instruction_path(),
+            {"action": "keyboard", "tid": 12, "text": "a", "key": "a"},
+        )
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(both.status_code, 400)
+
+    def test_keyboard_rejects_invalid_modifiers_and_keys(self):
+        text_modifiers = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "keyboard",
+                "tid": 12,
+                "text": "a",
+                "modifiers": ["ctrl"],
+            },
+        )
+        duplicate_modifiers = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "keyboard",
+                "tid": 12,
+                "key": "Enter",
+                "modifiers": ["shift", "shift"],
+            },
+        )
+        unsupported_key = self.post_json(
+            self.instruction_path(),
+            {"action": "keyboard", "tid": 12, "key": "Return"},
+        )
+
+        self.assertEqual(text_modifiers.status_code, 400)
+        self.assertEqual(duplicate_modifiers.status_code, 400)
+        self.assertEqual(unsupported_key.status_code, 400)
+
+    def test_accepts_screenshot_instruction(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot", "tid": 12, "full_page": True},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payload"], {"tid": 12, "full_page": True})
+
+    def test_screenshot_requires_target_tab(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["details"][0]["field"], "screenshot.tid")
+
+    def test_screenshot_result_and_download_are_single_use(self):
+        image = b"\x89PNG\r\n\x1a\nACOB"
+        encoded = base64.b64encode(image).decode()
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot", "tid": 12, "full_page": True},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"data": encoded}},
+        )
+
+        self.assertEqual(completed.status_code, 200)
+        result = completed.json()["result"]
+        self.assertTrue(result["single_use"])
+        self.assertTrue(result["full_page"])
+        screenshot = Screenshot.objects.get()
+        self.assertEqual(screenshot.data, encoded)
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["result"], result)
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Screenshot.objects.filter(id=screenshot.id).exists())
+
+        download = self.client.get(result["download_url"])
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.content, image)
+        self.assertEqual(download.headers["Content-Type"], "image/png")
+        self.assertEqual(download.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            download.headers["Content-Disposition"],
+            f'attachment; filename="acob-screenshot-{screenshot.id}.png"',
+        )
+        self.assertFalse(Screenshot.objects.filter(id=screenshot.id).exists())
+        self.assertEqual(
+            self.client.get(result["download_url"]).status_code,
+            404,
+        )
+
+    def test_screenshot_download_is_scoped_to_browser(self):
+        screenshot = Screenshot.objects.create(
+            bid=self.BID,
+            tid=12,
+            data=base64.b64encode(b"image").decode(),
+        )
+        other_bid = "fedcba9876544210a9876543210fedcb"
+        other_url = f"/api/browsers/{other_bid}/screenshots/{screenshot.id}/"
+        download_url = f"/api/browsers/{self.BID}/screenshots/{screenshot.id}/"
+
+        self.assertEqual(self.client.get(other_url).status_code, 404)
+        self.assertTrue(Screenshot.objects.filter(id=screenshot.id).exists())
+        self.assertEqual(self.client.get(download_url).status_code, 200)
+
+    def test_rejects_invalid_screenshot_result(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        response = self.post_result(
+            instruction_id,
+            {"result": {"data": "not base64!"}},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid screenshot data")
+        self.assertFalse(Screenshot.objects.exists())

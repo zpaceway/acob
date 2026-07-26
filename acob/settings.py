@@ -116,3 +116,6 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Full-page screenshots are posted as base64 JSON by the extension.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 32 * 1024 * 1024

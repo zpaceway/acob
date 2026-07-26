@@ -1,4 +1,76 @@
 const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
+const MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024;
+
+const KEY_DEFINITIONS = {
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  ArrowRight: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  Backspace: { key: "Backspace", code: "Backspace", keyCode: 8 },
+  Delete: { key: "Delete", code: "Delete", keyCode: 46 },
+  End: { key: "End", code: "End", keyCode: 35 },
+  Enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  Escape: { key: "Escape", code: "Escape", keyCode: 27 },
+  Home: { key: "Home", code: "Home", keyCode: 36 },
+  PageDown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  PageUp: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  Space: { key: " ", code: "Space", keyCode: 32, text: " " },
+  Tab: { key: "Tab", code: "Tab", keyCode: 9 },
+};
+
+const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
+
+const SHIFTED_CHARACTERS = {
+  "`": "~",
+  1: "!",
+  2: "@",
+  3: "#",
+  4: "$",
+  5: "%",
+  6: "^",
+  7: "&",
+  8: "*",
+  9: "(",
+  0: ")",
+  "-": "_",
+  "=": "+",
+  "[": "{",
+  "]": "}",
+  "\\": "|",
+  ";": ":",
+  "'": '"',
+  ",": "<",
+  ".": ">",
+  "/": "?",
+};
+
+const CHARACTER_DEFINITIONS = {
+  "`": { code: "Backquote", keyCode: 192 },
+  1: { code: "Digit1", keyCode: 49 },
+  2: { code: "Digit2", keyCode: 50 },
+  3: { code: "Digit3", keyCode: 51 },
+  4: { code: "Digit4", keyCode: 52 },
+  5: { code: "Digit5", keyCode: 53 },
+  6: { code: "Digit6", keyCode: 54 },
+  7: { code: "Digit7", keyCode: 55 },
+  8: { code: "Digit8", keyCode: 56 },
+  9: { code: "Digit9", keyCode: 57 },
+  0: { code: "Digit0", keyCode: 48 },
+  "-": { code: "Minus", keyCode: 189 },
+  "=": { code: "Equal", keyCode: 187 },
+  "[": { code: "BracketLeft", keyCode: 219 },
+  "]": { code: "BracketRight", keyCode: 221 },
+  "\\": { code: "Backslash", keyCode: 220 },
+  ";": { code: "Semicolon", keyCode: 186 },
+  "'": { code: "Quote", keyCode: 222 },
+  ",": { code: "Comma", keyCode: 188 },
+  ".": { code: "Period", keyCode: 190 },
+  "/": { code: "Slash", keyCode: 191 },
+};
+
+const UNSHIFTED_CHARACTERS = Object.fromEntries(
+  Object.entries(SHIFTED_CHARACTERS).map(([key, value]) => [value, key]),
+);
 
 let activeExecutions = 0;
 const MAX_CONCURRENT_EXECUTIONS = 10;
@@ -133,6 +205,12 @@ async function withDebugger(tid, callback) {
   }
 }
 
+async function focusTab(tid) {
+  const tab = await chrome.tabs.get(tid);
+  await chrome.windows.update(tab.windowId, { focused: true });
+  return chrome.tabs.update(tab.id, { active: true });
+}
+
 async function executeJavaScript(tid, script) {
   return withDebugger(tid, async (target) => {
     const evaluation = await chrome.debugger.sendCommand(
@@ -234,6 +312,103 @@ async function executeClick(tid, selector) {
   });
 }
 
+async function executeScreenshot(tid, fullPage) {
+  return withDebugger(tid, async (target) => {
+    const { data } = await chrome.debugger.sendCommand(
+      target,
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: fullPage,
+      },
+    );
+    if (data.length > MAX_SCREENSHOT_BASE64_LENGTH) {
+      throw new Error("Screenshot exceeds the 30 MiB encoded size limit");
+    }
+    return { data };
+  });
+}
+
+function describeKey(key, shiftPressed) {
+  if (Object.hasOwn(KEY_DEFINITIONS, key)) {
+    return KEY_DEFINITIONS[key];
+  }
+
+  const upperKey = key.toUpperCase();
+  if (/^[A-Z]$/.test(upperKey)) {
+    const unmodifiedText = key.toLowerCase();
+    const text = shiftPressed ? upperKey : key;
+    return {
+      key: text,
+      code: `Key${upperKey}`,
+      keyCode: upperKey.charCodeAt(0),
+      text,
+      unmodifiedText,
+    };
+  }
+
+  const unmodifiedText = UNSHIFTED_CHARACTERS[key] ?? key;
+  const characterDefinition = CHARACTER_DEFINITIONS[unmodifiedText];
+  if (characterDefinition) {
+    const text = shiftPressed
+      ? (SHIFTED_CHARACTERS[unmodifiedText] ?? key)
+      : key;
+    return {
+      key: text,
+      ...characterDefinition,
+      text,
+      unmodifiedText,
+    };
+  }
+  return { key, text: key, unmodifiedText: key };
+}
+
+async function executeKeyboard(tid, payload) {
+  await focusTab(tid);
+  return withDebugger(tid, async (target) => {
+    if (payload.text !== undefined) {
+      await chrome.debugger.sendCommand(target, "Input.insertText", {
+        text: payload.text,
+      });
+      return { inserted_characters: Array.from(payload.text).length };
+    }
+
+    const modifiers = payload.modifiers.reduce(
+      (mask, modifier) => mask | MODIFIER_BITS[modifier],
+      0,
+    );
+    const definition = describeKey(payload.key, (modifiers & 8) !== 0);
+    const hasCommandModifier = (modifiers & 7) !== 0;
+    const keyEvent = {
+      key: definition.key,
+      modifiers,
+    };
+    if (definition.code) {
+      keyEvent.code = definition.code;
+    }
+    if (definition.keyCode) {
+      keyEvent.windowsVirtualKeyCode = definition.keyCode;
+    }
+    const keyDownEvent = { ...keyEvent };
+    if (definition.text && !hasCommandModifier) {
+      keyDownEvent.text = definition.text;
+      keyDownEvent.unmodifiedText =
+        definition.unmodifiedText ?? definition.text;
+    }
+
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      ...keyDownEvent,
+      type: definition.text && !hasCommandModifier ? "keyDown" : "rawKeyDown",
+    });
+    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+      ...keyEvent,
+      type: "keyUp",
+    });
+    return { key: payload.key, modifiers: payload.modifiers };
+  });
+}
+
 async function runInstruction(instruction) {
   const { action, payload } = instruction;
 
@@ -270,11 +445,11 @@ async function runInstruction(instruction) {
       return tabDetails(focusedTab);
     }
 
-    if (operation === "new") {
-      const createdTab = await chrome.tabs.create({
-        url: payload.url ?? "about:blank",
-      });
-      const loadedTab = await waitForTab(createdTab.id);
+    if (operation === "navigate") {
+      const navigatedTab = payload.tid
+        ? await chrome.tabs.update(payload.tid, { url: payload.url })
+        : await chrome.tabs.create({ url: payload.url });
+      const loadedTab = await waitForTab(navigatedTab.id);
       return tabDetails(loadedTab);
     }
 
@@ -287,10 +462,17 @@ async function runInstruction(instruction) {
   }
 
   if (action === "click") {
-    const tab = await chrome.tabs.get(payload.tid);
-    await chrome.windows.update(tab.windowId, { focused: true });
-    await chrome.tabs.update(tab.id, { active: true });
+    await focusTab(payload.tid);
     return executeClick(payload.tid, payload.selector);
+  }
+
+  if (action === "keyboard") {
+    return executeKeyboard(payload.tid, payload);
+  }
+
+  if (action === "screenshot") {
+    await chrome.tabs.get(payload.tid);
+    return executeScreenshot(payload.tid, payload.full_page);
   }
 
   throw new Error(`Unknown action: ${action}`);
