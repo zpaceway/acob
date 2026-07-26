@@ -32,8 +32,8 @@ docker:
 
 install-skill-claude:
 	install -d "$(CLAUDE_SKILL_DIR)"
-	install -m 0644 SKILL.md "$(CLAUDE_SKILL_DIR)/SKILL.md"
+	install -m 0644 docs/SKILL.md "$(CLAUDE_SKILL_DIR)/SKILL.md"
 
 install-skill-opencode:
 	install -d "$(OPENCODE_SKILL_DIR)"
-	install -m 0644 SKILL.md "$(OPENCODE_SKILL_DIR)/SKILL.md"
+	install -m 0644 docs/SKILL.md "$(OPENCODE_SKILL_DIR)/SKILL.md"
