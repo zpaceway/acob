@@ -4,11 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "acob-client"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python client for Agent Controlled Browser"
+authors = [{ name = "zpaceway" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["pydantic>=2.0"]
+
+[project.urls]
+Repository = "https://github.com/zpaceway/acob"
+Issues = "https://github.com/zpaceway/acob/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["acob"]
