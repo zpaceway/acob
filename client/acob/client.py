@@ -1,13 +1,13 @@
+import asyncio
 import json
 import math
-import time
 from collections.abc import Sequence
+from types import TracebackType
 from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
-from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urljoin, urlsplit
-from urllib.request import Request, urlopen
 from uuid import UUID
 
+import httpx
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -124,9 +124,9 @@ class ACOBTimeoutError(ACOBError):
 
 
 class ACOBClient:
-    """Synchronous client for controlling one ACOB browser."""
+    """Asynchronous client for controlling one ACOB browser."""
 
-    _REQUEST_TIMEOUT = 10.0
+    _REQUEST_TIMEOUT = 60.0
 
     def __init__(
         self,
@@ -146,19 +146,42 @@ class ACOBClient:
             "poll_interval",
         )
         self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
+        self._http_client: httpx.AsyncClient | None = None
+        self._close_task: asyncio.Task[None] | None = None
+        self._closed = False
 
-    def submit(self, action: str, /, **payload: JsonValue) -> JsonObject:
+    async def __aenter__(self) -> "ACOBClient":
+        if self._closed:
+            raise ACOBError("ACOBClient is closed")
+        return self
+
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close the underlying asynchronous HTTP client."""
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close_http_client())
+        await asyncio.shield(self._close_task)
+
+    async def submit(self, action: str, /, **payload: JsonValue) -> JsonObject:
         """Submit an instruction without waiting for Chromium to execute it."""
         body = dict(payload)
         body["action"] = action
-        return self._request_json(
+        return await self._request_json(
             "POST",
             f"{self._instructions_url}/",
             body,
             timeout=min(self._REQUEST_TIMEOUT, self.timeout),
         )
 
-    def wait(
+    async def wait(
         self,
         instruction_id: int,
         *,
@@ -177,20 +200,30 @@ class ACOBClient:
             if timeout is None
             else self._positive_float(timeout, "timeout")
         )
-        deadline = time.monotonic() + wait_timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait_timeout
         instruction_url = f"{self._instructions_url}/{instruction_id}/"
 
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 raise ACOBTimeoutError(instruction_id, wait_timeout)
 
-            response = self._request_json(
+            response = await self._request_json(
                 "GET",
                 instruction_url,
                 timeout=min(self._REQUEST_TIMEOUT, remaining),
             )
             status = response.get("status")
+            response_id = response.get("id")
+            if (
+                isinstance(response_id, bool)
+                or response_id != instruction_id
+                or not isinstance(status, str)
+            ):
+                raise ACOBProtocolError(
+                    f"Instruction {instruction_id} returned an invalid response"
+                )
             if status in {"completed", "failed"}:
                 return response
             if status not in {"pending", "processing"}:
@@ -198,12 +231,12 @@ class ACOBClient:
                     f"Instruction {instruction_id} returned invalid status: {status!r}"
                 )
 
-            remaining = deadline - time.monotonic()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 raise ACOBTimeoutError(instruction_id, wait_timeout)
-            time.sleep(min(self.poll_interval, remaining))
+            await asyncio.sleep(min(self.poll_interval, remaining))
 
-    def execute(
+    async def execute(
         self,
         action: str,
         /,
@@ -212,7 +245,7 @@ class ACOBClient:
         **payload: JsonValue,
     ) -> Any:
         """Submit an action, wait for it, and return its browser result."""
-        instruction = self.submit(action, **payload)
+        instruction = await self.submit(action, **payload)
         instruction_id = instruction.get("id")
         if (
             isinstance(instruction_id, bool)
@@ -221,13 +254,13 @@ class ACOBClient:
         ):
             raise ACOBProtocolError("Created instruction did not contain a valid id")
 
-        terminal = self.wait(instruction_id, timeout=timeout)
+        terminal = await self.wait(instruction_id, timeout=timeout)
         if terminal.get("status") == "failed":
             raise ACOBInstructionError(instruction_id, terminal)
         return terminal.get("result")
 
     @overload
-    def tabs(
+    async def tabs(
         self,
         operation: Literal["list"],
         *,
@@ -237,7 +270,7 @@ class ACOBClient:
     ) -> list[ListedTab]: ...
 
     @overload
-    def tabs(
+    async def tabs(
         self,
         operation: Literal["navigate"],
         *,
@@ -247,7 +280,7 @@ class ACOBClient:
     ) -> Tab: ...
 
     @overload
-    def tabs(
+    async def tabs(
         self,
         operation: Literal["focus"],
         *,
@@ -257,7 +290,7 @@ class ACOBClient:
     ) -> Tab: ...
 
     @overload
-    def tabs(
+    async def tabs(
         self,
         operation: Literal["close"],
         *,
@@ -266,7 +299,7 @@ class ACOBClient:
         timeout: float | None = None,
     ) -> ClosedTab: ...
 
-    def tabs(
+    async def tabs(
         self,
         operation: TabOperation,
         *,
@@ -280,7 +313,7 @@ class ACOBClient:
             payload["tid"] = tid
         if url is not None:
             payload["url"] = url
-        result = self.execute("tabs", timeout=timeout, **payload)
+        result = await self.execute("tabs", timeout=timeout, **payload)
         if operation == "list":
             try:
                 return _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
@@ -290,7 +323,7 @@ class ACOBClient:
             return self._expect_model(result, Tab, "tabs")
         return self._expect_model(result, ClosedTab, "tabs")
 
-    def click(
+    async def click(
         self,
         tid: int,
         selector: str,
@@ -299,7 +332,7 @@ class ACOBClient:
     ) -> ClickResult:
         """Click the center of the element matching a CSS selector."""
         return self._expect_model(
-            self.execute(
+            await self.execute(
                 "click",
                 tid=tid,
                 selector=selector,
@@ -310,7 +343,7 @@ class ACOBClient:
         )
 
     @overload
-    def keyboard(
+    async def keyboard(
         self,
         tid: int,
         *,
@@ -321,7 +354,7 @@ class ACOBClient:
     ) -> KeyboardTextResult: ...
 
     @overload
-    def keyboard(
+    async def keyboard(
         self,
         tid: int,
         *,
@@ -331,7 +364,7 @@ class ACOBClient:
         timeout: float | None = None,
     ) -> KeyboardKeyResult: ...
 
-    def keyboard(
+    async def keyboard(
         self,
         tid: int,
         *,
@@ -348,12 +381,12 @@ class ACOBClient:
             payload["key"] = key
         if modifiers is not None:
             payload["modifiers"] = list(modifiers)
-        result = self.execute("keyboard", timeout=timeout, **payload)
+        result = await self.execute("keyboard", timeout=timeout, **payload)
         if text is not None:
             return self._expect_model(result, KeyboardTextResult, "keyboard")
         return self._expect_model(result, KeyboardKeyResult, "keyboard")
 
-    def screenshot(
+    async def screenshot(
         self,
         tid: int,
         *,
@@ -362,7 +395,7 @@ class ACOBClient:
     ) -> bytes:
         """Capture a tab and return its PNG bytes."""
         result = self._expect_model(
-            self.execute(
+            await self.execute(
                 "screenshot",
                 tid=tid,
                 full_page=full_page,
@@ -372,20 +405,26 @@ class ACOBClient:
             "screenshot",
         )
         resolved_url = urljoin(f"{self.endpoint}/", result.download_url)
-        if self._origin(urlsplit(resolved_url)) != self._origin(
-            urlsplit(self.endpoint)
-        ):
+        try:
+            has_different_origin = self._origin(urlsplit(resolved_url)) != self._origin(
+                urlsplit(self.endpoint)
+            )
+        except ValueError as error:
+            raise ACOBProtocolError(
+                "Screenshot returned an invalid download URL"
+            ) from error
+        if has_different_origin:
             raise ACOBProtocolError(
                 "Screenshot download URL points to a different server"
             )
-        return self._request_bytes(
+        return await self._request_bytes(
             "GET",
             resolved_url,
             timeout=min(self._REQUEST_TIMEOUT, self.timeout),
             accept="image/png",
         )
 
-    def javascript(
+    async def javascript(
         self,
         tid: int,
         script: str,
@@ -393,14 +432,14 @@ class ACOBClient:
         timeout: float | None = None,
     ) -> Any:
         """Evaluate JavaScript in a tab and return its value."""
-        return self.execute(
+        return await self.execute(
             "javascript",
             tid=tid,
             script=script,
             timeout=timeout,
         )
 
-    def _request_json(
+    async def _request_json(
         self,
         method: str,
         url: str,
@@ -408,7 +447,7 @@ class ACOBClient:
         *,
         timeout: float,
     ) -> JsonObject:
-        raw = self._request_bytes(method, url, body, timeout=timeout)
+        raw = await self._request_bytes(method, url, body, timeout=timeout)
         try:
             parsed: object = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -419,7 +458,7 @@ class ACOBClient:
             )
         return cast(JsonObject, parsed)
 
-    def _request_bytes(
+    async def _request_bytes(
         self,
         method: str,
         url: str,
@@ -437,24 +476,36 @@ class ACOBClient:
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
-        request = Request(url, data=data, headers=headers, method=method)
-
         try:
-            with urlopen(request, timeout=timeout) as response:
-                return response.read()
-        except HTTPError as error:
-            try:
-                response_body = error.read()
-            finally:
-                error.close()
-            parsed = self._try_parse_object(response_body)
-            message = self._http_error_message(parsed)
-            raise ACOBHTTPError(error.code, message, parsed) from None
-        except (URLError, TimeoutError, OSError) as error:
-            reason = getattr(error, "reason", error)
+            response = await self._get_http_client().request(
+                method,
+                url,
+                content=data,
+                headers=headers,
+                timeout=timeout,
+            )
+        except httpx.RequestError as error:
+            reason = str(error) or type(error).__name__
             raise ACOBConnectionError(
                 f"Could not connect to ACOB at {self.endpoint}: {reason}"
             ) from error
+
+        if not 200 <= response.status_code < 300:
+            parsed = self._try_parse_object(response.content)
+            message = self._http_error_message(parsed)
+            raise ACOBHTTPError(response.status_code, message, parsed)
+        return response.content
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        if self._closed:
+            raise ACOBError("ACOBClient is closed")
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient()
+        return self._http_client
+
+    async def _close_http_client(self) -> None:
+        if self._http_client is not None:
+            await self._http_client.aclose()
 
     @staticmethod
     def _expect_model(

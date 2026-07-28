@@ -1,15 +1,16 @@
+import asyncio
 import json
 import unittest
-from email.message import Message
-from io import BytesIO
 from typing import TYPE_CHECKING
-from unittest.mock import call, patch
-from urllib.error import HTTPError
-from urllib.request import Request
+from unittest.mock import AsyncMock, call, patch
+
+import httpx
 
 from acob import (
     DEFAULT_ENDPOINT,
     ACOBClient,
+    ACOBConnectionError,
+    ACOBError,
     ACOBHTTPError,
     ACOBInstructionError,
     ACOBProtocolError,
@@ -24,50 +25,61 @@ from acob import (
 
 if TYPE_CHECKING:
 
-    def _check_return_types(client: ACOBClient) -> None:
-        _listed: list[ListedTab] = client.tabs(operation="list")
-        _navigated: Tab = client.tabs(
+    async def _check_return_types(client: ACOBClient) -> None:
+        _listed: list[ListedTab] = await client.tabs(operation="list")
+        _navigated: Tab = await client.tabs(
             operation="navigate",
             url="https://example.com",
         )
-        _focused: Tab = client.tabs(operation="focus", tid=1)
-        _closed: ClosedTab = client.tabs(operation="close", tid=1)
-        _clicked: ClickResult = client.click(1, "button")
-        _inserted: KeyboardTextResult = client.keyboard(1, text="ACOB")
-        _pressed: KeyboardKeyResult = client.keyboard(1, key="Enter")
-        _screenshot: bytes = client.screenshot(1)
-        _javascript: int = client.javascript(1, "1")
+        _focused: Tab = await client.tabs(operation="focus", tid=1)
+        _closed: ClosedTab = await client.tabs(operation="close", tid=1)
+        _clicked: ClickResult = await client.click(1, "button")
+        _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
+        _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
+        _screenshot: bytes = await client.screenshot(1)
+        _javascript: int = await client.javascript(1, "1")
 
 
-class FakeResponse:
-    def __init__(self, body):
-        self.body = (
-            body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
-        )
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, _exc_type, _exc_value, _traceback):
-        return False
-
-    def read(self):
-        return self.body
+class FailingTransport(httpx.AsyncBaseTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
 
 
-class ACOBClientTests(unittest.TestCase):
+class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
     BID = "0123456789ab4def8123456789abcdef"
 
     def make_client(self, endpoint="http://acob.test/"):
-        return ACOBClient(
+        client = ACOBClient(
             self.BID,
             endpoint=endpoint,
             timeout=5,
             poll_interval=0.01,
         )
+        self.addAsyncCleanup(client.aclose)
+        return client
 
-    def test_initializes_with_default_endpoint_and_validates_configuration(self):
+    @staticmethod
+    def add_responses(client, responses):
+        requests = []
+        response_iterator = iter(responses)
+
+        def handler(request):
+            requests.append(request)
+            status_code, body = next(response_iterator)
+            if isinstance(body, bytes):
+                return httpx.Response(status_code, content=body)
+            return httpx.Response(
+                status_code,
+                content=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+
+        client._http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return requests
+
+    async def test_initializes_with_default_endpoint_and_validates_configuration(self):
         client = ACOBClient(self.BID)
+        self.addAsyncCleanup(client.aclose)
 
         self.assertEqual(client.bid, self.BID)
         self.assertEqual(client.endpoint, DEFAULT_ENDPOINT)
@@ -86,7 +98,7 @@ class ACOBClientTests(unittest.TestCase):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 ACOBClient(self.BID, endpoint)
 
-    def test_tabs_submits_and_consumes_terminal_response(self):
+    async def test_tabs_submits_and_consumes_terminal_response(self):
         tab = {
             "tid": 12,
             "window_id": 3,
@@ -96,42 +108,57 @@ class ACOBClientTests(unittest.TestCase):
             "url": "https://example.com/",
             "domain": "example.com",
         }
-        responses = [
-            FakeResponse({"id": 7, "status": "pending"}),
-            FakeResponse({"id": 7, "status": "processing"}),
-            FakeResponse({"id": 7, "status": "completed", "result": [tab]}),
-        ]
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 7, "status": "pending"}),
+                (200, {"id": 7, "status": "processing"}),
+                (200, {"id": 7, "status": "completed", "result": [tab]}),
+            ],
+        )
 
-        with (
-            patch("acob.client.urlopen", side_effect=responses) as mocked_urlopen,
-            patch("acob.client.time.sleep") as mocked_sleep,
-        ):
-            result = self.make_client().tabs(operation="list")
+        with patch("acob.client.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await client.tabs(operation="list")
 
         self.assertEqual(result, [ListedTab.model_validate(tab)])
-        self.assertEqual(mocked_urlopen.call_count, 3)
-        self.assertEqual(mocked_sleep.call_count, 1)
+        self.assertEqual(len(requests), 3)
+        sleep.assert_awaited_once()
 
-        submitted_request = mocked_urlopen.call_args_list[0].args[0]
-        self.assertIsInstance(submitted_request, Request)
-        self.assertEqual(submitted_request.get_method(), "POST")
+        submitted_request = requests[0]
+        self.assertEqual(submitted_request.method, "POST")
         self.assertEqual(
-            submitted_request.full_url,
+            str(submitted_request.url),
             f"http://acob.test/api/browsers/{self.BID}/instructions/",
         )
         self.assertEqual(
-            json.loads(submitted_request.data),
+            json.loads(submitted_request.content),
             {"action": "tabs", "operation": "list"},
         )
 
-        terminal_request = mocked_urlopen.call_args_list[2].args[0]
-        self.assertEqual(terminal_request.get_method(), "GET")
+        terminal_request = requests[2]
+        self.assertEqual(terminal_request.method, "GET")
         self.assertEqual(
-            terminal_request.full_url,
+            str(terminal_request.url),
             f"http://acob.test/api/browsers/{self.BID}/instructions/7/",
         )
 
-    def test_action_methods_send_the_supported_api_payloads(self):
+    async def test_submit_caps_the_http_request_timeout_at_60_seconds(self):
+        client = ACOBClient(self.BID, endpoint="http://acob.test", timeout=90)
+        self.addAsyncCleanup(client.aclose)
+        request_json = AsyncMock(return_value={"id": 1, "status": "pending"})
+
+        with patch.object(client, "_request_json", request_json):
+            await client.submit("tabs", operation="list")
+
+        request_json.assert_awaited_once_with(
+            "POST",
+            f"http://acob.test/api/browsers/{self.BID}/instructions/",
+            {"operation": "list", "action": "tabs"},
+            timeout=60,
+        )
+
+    async def test_action_methods_send_the_supported_api_payloads(self):
         client = self.make_client()
         tab = {
             "tid": 10,
@@ -141,10 +168,7 @@ class ACOBClientTests(unittest.TestCase):
             "url": "https://example.com/",
             "domain": "example.com",
         }
-
-        with patch.object(
-            client,
-            "execute",
+        execute = AsyncMock(
             side_effect=[
                 [],
                 tab,
@@ -160,21 +184,30 @@ class ACOBClientTests(unittest.TestCase):
                 {"inserted_characters": 4},
                 {"key": "Enter", "modifiers": ["ctrl", "shift"]},
                 "Example",
-            ],
-        ) as execute:
-            listed = client.tabs(operation="list")
-            navigated = client.tabs(operation="navigate", url="https://example.com")
-            navigated_existing = client.tabs(
+            ]
+        )
+
+        with patch.object(client, "execute", execute):
+            listed = await client.tabs(operation="list")
+            navigated = await client.tabs(
+                operation="navigate",
+                url="https://example.com",
+            )
+            navigated_existing = await client.tabs(
                 operation="navigate",
                 tid=10,
                 url="https://example.org",
             )
-            focused = client.tabs(operation="focus", tid=10)
-            closed = client.tabs(operation="close", tid=10)
-            clicked = client.click(10, "button[type=submit]")
-            inserted = client.keyboard(10, text="ACOB")
-            pressed = client.keyboard(10, key="Enter", modifiers=["ctrl", "shift"])
-            title = client.javascript(10, "document.title")
+            focused = await client.tabs(operation="focus", tid=10)
+            closed = await client.tabs(operation="close", tid=10)
+            clicked = await client.click(10, "button[type=submit]")
+            inserted = await client.keyboard(10, text="ACOB")
+            pressed = await client.keyboard(
+                10,
+                key="Enter",
+                modifiers=["ctrl", "shift"],
+            )
+            title = await client.javascript(10, "document.title")
 
         self.assertEqual(listed, [])
         self.assertIsInstance(navigated, Tab)
@@ -228,28 +261,55 @@ class ACOBClientTests(unittest.TestCase):
             ],
         )
 
-    def test_failed_instruction_raises_with_the_consumed_response(self):
+    async def test_waits_for_independent_instructions_concurrently(self):
+        client = self.make_client()
+        started = set()
+        both_started = asyncio.Event()
+
+        async def request_json(_method, url, *, timeout):
+            self.assertGreater(timeout, 0)
+            instruction_id = int(url.rstrip("/").rsplit("/", 1)[-1])
+            started.add(instruction_id)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            return {
+                "id": instruction_id,
+                "status": "completed",
+                "result": instruction_id,
+            }
+
+        with patch.object(client, "_request_json", side_effect=request_json):
+            first, second = await asyncio.gather(client.wait(1), client.wait(2))
+
+        self.assertEqual(started, {1, 2})
+        self.assertEqual(first["result"], 1)
+        self.assertEqual(second["result"], 2)
+
+    async def test_failed_instruction_raises_with_the_consumed_response(self):
         terminal = {
             "id": 4,
             "status": "failed",
             "result": None,
             "error": "No element matches selector: button",
         }
-        with patch(
-            "acob.client.urlopen",
-            side_effect=[
-                FakeResponse({"id": 4, "status": "pending"}),
-                FakeResponse(terminal),
+        client = self.make_client()
+        self.add_responses(
+            client,
+            [
+                (201, {"id": 4, "status": "pending"}),
+                (200, terminal),
             ],
-        ):
-            with self.assertRaises(ACOBInstructionError) as raised:
-                self.make_client().click(12, "button")
+        )
+
+        with self.assertRaises(ACOBInstructionError) as raised:
+            await client.click(12, "button")
 
         self.assertEqual(raised.exception.instruction_id, 4)
         self.assertEqual(raised.exception.response, terminal)
         self.assertEqual(str(raised.exception), terminal["error"])
 
-    def test_http_validation_error_exposes_status_and_response(self):
+    async def test_http_validation_error_exposes_status_and_response(self):
         error_body = {
             "error": "Invalid request",
             "details": [
@@ -260,113 +320,168 @@ class ACOBClientTests(unittest.TestCase):
                 }
             ],
         }
-        http_error = HTTPError(
-            "http://acob.test/instructions/",
-            400,
-            "Bad Request",
-            Message(),
-            BytesIO(json.dumps(error_body).encode("utf-8")),
-        )
+        client = self.make_client()
+        self.add_responses(client, [(400, error_body)])
 
-        with patch("acob.client.urlopen", side_effect=http_error):
-            with self.assertRaises(ACOBHTTPError) as raised:
-                self.make_client().javascript(12, "")
+        with self.assertRaises(ACOBHTTPError) as raised:
+            await client.javascript(12, "")
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertEqual(raised.exception.response, error_body)
         self.assertIn("javascript.script", str(raised.exception))
 
-    def test_screenshot_returns_bytes_and_consumes_its_download(self):
+    async def test_connection_error_uses_client_exception(self):
+        client = self.make_client()
+        client._http_client = httpx.AsyncClient(transport=FailingTransport())
+
+        with self.assertRaisesRegex(ACOBConnectionError, "connection refused"):
+            await client.submit("tabs", operation="list")
+
+    async def test_screenshot_returns_bytes_and_consumes_its_download(self):
         image = b"\x89PNG\r\n\x1a\nACOB"
         download_url = f"/api/browsers/{self.BID}/screenshots/9/"
-        responses = [
-            FakeResponse({"id": 8, "status": "pending"}),
-            FakeResponse(
-                {
-                    "id": 8,
-                    "status": "completed",
-                    "result": {
-                        "download_url": download_url,
-                        "content_type": "image/png",
-                        "full_page": True,
-                        "single_use": True,
-                        "tid": 12,
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 8, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 8,
+                        "status": "completed",
+                        "result": {
+                            "download_url": download_url,
+                            "content_type": "image/png",
+                            "full_page": True,
+                            "single_use": True,
+                            "tid": 12,
+                        },
                     },
-                }
-            ),
-            FakeResponse(image),
-        ]
+                ),
+                (200, image),
+            ],
+        )
 
-        with patch(
-            "acob.client.urlopen",
-            side_effect=responses,
-        ) as mocked_urlopen:
-            client = self.make_client()
-            result = client.screenshot(12, full_page=True)
+        result = await client.screenshot(12, full_page=True)
 
         self.assertEqual(result, image)
         self.assertFalse(hasattr(client, "download_screenshot"))
-        submitted_request = mocked_urlopen.call_args_list[0].args[0]
+        submitted_request = requests[0]
         self.assertEqual(
-            json.loads(submitted_request.data),
+            json.loads(submitted_request.content),
             {"action": "screenshot", "tid": 12, "full_page": True},
         )
-        download_request = mocked_urlopen.call_args_list[2].args[0]
-        self.assertEqual(download_request.full_url, f"http://acob.test{download_url}")
-        self.assertEqual(download_request.get_method(), "GET")
+        download_request = requests[2]
+        self.assertEqual(
+            str(download_request.url),
+            f"http://acob.test{download_url}",
+        )
+        self.assertEqual(download_request.method, "GET")
+        self.assertEqual(download_request.headers["Accept"], "image/png")
 
-    def test_screenshot_rejects_a_download_on_another_origin(self):
+    async def test_screenshot_rejects_a_download_on_another_origin(self):
         client = self.make_client()
+        execute = AsyncMock(
+            return_value={
+                "download_url": "https://example.com/image.png",
+                "content_type": "image/png",
+                "full_page": False,
+                "single_use": True,
+                "tid": 12,
+            }
+        )
+
+        with (
+            patch.object(client, "execute", execute),
+            self.assertRaises(ACOBProtocolError),
+        ):
+            await client.screenshot(12)
+
+    async def test_action_methods_reject_malformed_browser_results(self):
+        client = self.make_client()
+
         with (
             patch.object(
                 client,
                 "execute",
-                return_value={
-                    "download_url": "https://example.com/image.png",
-                    "content_type": "image/png",
-                    "full_page": False,
-                    "single_use": True,
-                    "tid": 12,
-                },
+                AsyncMock(return_value=[{"tid": "12"}]),
             ),
-            self.assertRaises(ACOBProtocolError),
-        ):
-            client.screenshot(12)
-
-    def test_action_methods_reject_malformed_browser_results(self):
-        client = self.make_client()
-
-        with (
-            patch.object(client, "execute", return_value=[{"tid": "12"}]),
             self.assertRaisesRegex(
                 ACOBProtocolError,
                 "tabs returned an invalid result",
             ),
         ):
-            client.tabs(operation="list")
+            await client.tabs(operation="list")
 
-    def test_javascript_returns_the_value_unchanged(self):
+    async def test_javascript_returns_the_value_unchanged(self):
         client = self.make_client()
         value = object()
 
-        with patch.object(client, "execute", return_value=value):
-            result = client.javascript(12, "window.value")
+        with patch.object(client, "execute", AsyncMock(return_value=value)):
+            result = await client.javascript(12, "window.value")
 
         self.assertIs(result, value)
 
-    def test_timeout_retains_instruction_id_for_later_recovery(self):
+    async def test_timeout_retains_instruction_id_for_later_recovery(self):
+        client = self.make_client()
+        request_json = AsyncMock(return_value={"id": 21, "status": "pending"})
+
         with (
-            patch(
-                "acob.client.urlopen",
-                return_value=FakeResponse({"id": 21, "status": "pending"}),
-            ),
-            patch("acob.client.time.monotonic", side_effect=[0, 0, 1]),
+            patch("acob.client.asyncio.get_running_loop") as get_loop,
+            patch.object(client, "_request_json", request_json),
         ):
+            get_loop.return_value.time.side_effect = [0, 0, 1]
             with self.assertRaises(ACOBTimeoutError) as raised:
-                self.make_client().wait(21, timeout=1)
+                await client.wait(21, timeout=1)
 
         self.assertEqual(raised.exception.instruction_id, 21)
         self.assertEqual(raised.exception.timeout, 1)
+
+    async def test_wait_rejects_a_malformed_status_as_a_protocol_error(self):
+        client = self.make_client()
+
+        with patch.object(
+            client,
+            "_request_json",
+            AsyncMock(return_value={"id": 21, "status": []}),
+        ):
+            with self.assertRaisesRegex(ACOBProtocolError, "invalid response"):
+                await client.wait(21)
+
+    async def test_cancelled_close_can_be_awaited_again(self):
+        client = self.make_client()
+        http_client = AsyncMock(spec=httpx.AsyncClient)
+        client._http_client = http_client
+        close_started = asyncio.Event()
+        release_close = asyncio.Event()
+
+        async def slow_close():
+            close_started.set()
+            await release_close.wait()
+
+        http_client.aclose.side_effect = slow_close
+        first_close = asyncio.create_task(client.aclose())
+        await close_started.wait()
+        first_close.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first_close
+
+        second_close = asyncio.create_task(client.aclose())
+        await asyncio.sleep(0)
+        self.assertFalse(second_close.done())
+        release_close.set()
+        await second_close
+
+        http_client.aclose.assert_awaited_once()
+
+    async def test_closed_client_rejects_new_requests(self):
+        client = self.make_client()
+
+        await client.aclose()
+
+        with self.assertRaisesRegex(ACOBError, "ACOBClient is closed"):
+            await client.submit("tabs", operation="list")
 
 
 if __name__ == "__main__":

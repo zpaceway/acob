@@ -1,4 +1,6 @@
 const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
+const DEFAULT_INSTRUCTIONS_PER_POLL = 4;
+const MAX_CONCURRENT_EXECUTIONS = 20;
 const MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024;
 
 const KEY_DEFINITIONS = {
@@ -73,23 +75,42 @@ const UNSHIFTED_CHARACTERS = Object.fromEntries(
 );
 
 let activeExecutions = 0;
-const MAX_CONCURRENT_EXECUTIONS = 10;
 let offscreenPromise = null;
 let backendUnavailable = false;
 let configurationPromise = null;
+let pollInProgress = false;
 
 function generateBrowserId() {
   return crypto.randomUUID().replaceAll("-", "");
 }
 
+function normalizeInstructionsPerPoll(value) {
+  return Number.isInteger(value) &&
+    value >= 1 &&
+    value <= MAX_CONCURRENT_EXECUTIONS
+    ? value
+    : DEFAULT_INSTRUCTIONS_PER_POLL;
+}
+
 async function initializeConfiguration() {
-  const stored = await chrome.storage.local.get(["baseUrl", "bid"]);
+  const stored = await chrome.storage.local.get([
+    "baseUrl",
+    "bid",
+    "instructionsPerPoll",
+  ]);
   const configuration = {
     baseUrl: stored.baseUrl || DEFAULT_BASE_URL,
     bid: stored.bid || generateBrowserId(),
+    instructionsPerPoll: normalizeInstructionsPerPoll(
+      stored.instructionsPerPoll,
+    ),
   };
 
-  if (!stored.baseUrl || !stored.bid) {
+  if (
+    !stored.baseUrl ||
+    !stored.bid ||
+    stored.instructionsPerPoll !== configuration.instructionsPerPoll
+  ) {
     await chrome.storage.local.set(configuration);
   }
 
@@ -102,7 +123,15 @@ async function getConfiguration() {
   }
 
   await configurationPromise;
-  return chrome.storage.local.get(["baseUrl", "bid"]);
+  const configuration = await chrome.storage.local.get([
+    "baseUrl",
+    "bid",
+    "instructionsPerPoll",
+  ]);
+  configuration.instructionsPerPoll = normalizeInstructionsPerPoll(
+    configuration.instructionsPerPoll,
+  );
+  return configuration;
 }
 
 function instructionApiUrl(configuration) {
@@ -498,16 +527,52 @@ async function sendResult(instructionId, body, configuration) {
   }
 }
 
+async function executeInstruction(instruction, configuration) {
+  let body;
+  try {
+    const result = await runInstruction(instruction);
+    body = { result };
+  } catch (error) {
+    body = {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  await sendResult(instruction.id, body, configuration);
+}
+
+function reportError(error) {
+  if (error instanceof TypeError) {
+    if (!backendUnavailable) {
+      console.info("ACOB server unavailable; retrying");
+      backendUnavailable = true;
+    }
+    return;
+  }
+  console.error(error);
+}
+
 async function poll() {
+  if (pollInProgress) {
+    return;
+  }
+
   if (activeExecutions >= MAX_CONCURRENT_EXECUTIONS) {
     return;
   }
 
-  activeExecutions++;
+  pollInProgress = true;
   try {
     const configuration = await getConfiguration();
+    const availableExecutions = MAX_CONCURRENT_EXECUTIONS - activeExecutions;
+    const limit = Math.min(
+      configuration.instructionsPerPoll,
+      availableExecutions,
+    );
+    if (limit <= 0) {
+      return;
+    }
     const apiUrl = instructionApiUrl(configuration);
-    const response = await fetch(`${apiUrl}/next/`);
+    const response = await fetch(`${apiUrl}/next/?limit=${limit}`);
     if (backendUnavailable) {
       console.info("ACOB server connected");
       backendUnavailable = false;
@@ -519,28 +584,22 @@ async function poll() {
       throw new Error(`Could not fetch instruction: HTTP ${response.status}`);
     }
 
-    const instruction = await response.json();
-    let body;
-    try {
-      const result = await runInstruction(instruction);
-      body = { result };
-    } catch (error) {
-      body = {
-        error: error instanceof Error ? error.message : String(error),
-      };
+    const instructions = await response.json();
+    if (!Array.isArray(instructions) || instructions.length > limit) {
+      throw new Error("ACOB server returned an invalid instruction batch");
     }
-    await sendResult(instruction.id, body, configuration);
+    for (const instruction of instructions) {
+      activeExecutions++;
+      void executeInstruction(instruction, configuration)
+        .catch(reportError)
+        .finally(() => {
+          activeExecutions--;
+        });
+    }
   } catch (error) {
-    if (error instanceof TypeError) {
-      if (!backendUnavailable) {
-        console.info("ACOB server unavailable; retrying");
-        backendUnavailable = true;
-      }
-      return;
-    }
-    console.error(error);
+    reportError(error);
   } finally {
-    activeExecutions--;
+    pollInProgress = false;
   }
 }
 

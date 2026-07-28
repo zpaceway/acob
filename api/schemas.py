@@ -20,6 +20,7 @@ NonEmptyString = Annotated[
 NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
+MAX_INSTRUCTION_CLAIM_LIMIT = 20
 
 KEYBOARD_KEYS = {
     "ArrowDown",
@@ -143,6 +144,10 @@ class InstructionResultRequest(ApiModel):
         if self.error is not None and self.result is not None:
             raise ValueError("result and error cannot both be provided")
         return self
+
+
+class NextInstructionsQuery(ApiModel):
+    limit: int = Field(default=1, ge=1, le=MAX_INSTRUCTION_CLAIM_LIMIT)
 
 
 class InstructionResponse(ApiModel):

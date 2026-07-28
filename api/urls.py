@@ -29,8 +29,8 @@ urlpatterns = [
     ),
     path(
         "browsers/<bid:bid>/instructions/next/",
-        views.next_instruction,
-        name="next-instruction",
+        views.next_instructions,
+        name="next-instructions",
     ),
     path(
         "browsers/<bid:bid>/instructions/<int:instruction_id>/",

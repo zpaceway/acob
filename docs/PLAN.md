@@ -6,14 +6,14 @@ This document turns the project review into an implementation roadmap. ACOB is i
 
 ACOB currently provides:
 
-- Browser-specific asynchronous instruction queues backed by SQLite.
+- Browser-specific asynchronous instruction queues with bounded batch claiming backed by SQLite.
 - Chromium tab listing, URL navigation, focusing, and closing.
 - Real coordinate-based mouse clicks through the Chromium Debugger API.
 - Focused-control text entry, named keys, and modified keyboard shortcuts.
 - Viewport and full-page PNG capture through single-use download endpoints.
 - Arbitrary JavaScript evaluation with promise support and CSP-independent execution.
-- Stale processing-instruction reclamation after 60 seconds.
 - One-shot terminal result consumption.
+- An asynchronous Python client with concurrent instruction submission and polling.
 - Strict Pydantic request validation, Docker support, and agent integration through `SKILL.md`.
 
 ## Current Milestone

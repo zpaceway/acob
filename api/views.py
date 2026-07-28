@@ -15,6 +15,7 @@ from .schemas import (
     ErrorResponse,
     InstructionResponse,
     InstructionResultRequest,
+    NextInstructionsQuery,
     ScreenshotResult,
     ValidationErrorResponse,
     ValidationIssue,
@@ -49,6 +50,18 @@ def instruction_response(
     response = model_response(
         InstructionResponse.from_instruction(instruction),
         status=status,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def instruction_list_response(instructions: list[Instruction]) -> JsonResponse:
+    response = JsonResponse(
+        [
+            InstructionResponse.from_instruction(instruction).model_dump(mode="json")
+            for instruction in instructions
+        ],
+        safe=False,
     )
     response["Cache-Control"] = "no-store"
     return response
@@ -103,8 +116,14 @@ def instruction_detail(
 
 
 @require_http_methods(["GET"])
-def next_instruction(_request: HttpRequest, bid: str) -> HttpResponse:
-    while True:
+def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
+    try:
+        query = NextInstructionsQuery.model_validate_strings(request.GET.dict())
+    except ValidationError as error:
+        return validation_error_response(error)
+
+    instructions: list[Instruction] = []
+    while len(instructions) < query.limit:
         candidate = (
             Instruction.objects.filter(
                 bid=bid,
@@ -114,9 +133,7 @@ def next_instruction(_request: HttpRequest, bid: str) -> HttpResponse:
             .first()
         )
         if candidate is None:
-            response = HttpResponse(status=204)
-            response["Cache-Control"] = "no-store"
-            return response
+            break
 
         claimed = Instruction.objects.filter(
             id=candidate["id"],
@@ -127,10 +144,14 @@ def next_instruction(_request: HttpRequest, bid: str) -> HttpResponse:
             updated_at=timezone.now(),
         )
         if claimed:
-            instruction = Instruction.objects.get(id=candidate["id"])
-            break
+            instructions.append(Instruction.objects.get(id=candidate["id"]))
 
-    return instruction_response(instruction)
+    if instructions:
+        return instruction_list_response(instructions)
+
+    response = HttpResponse(status=204)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @csrf_exempt

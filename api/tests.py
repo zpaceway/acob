@@ -36,10 +36,12 @@ class InstructionApiTests(TestCase):
         self.assertEqual(created.json()["bid"], self.BID)
         instruction_id = created.json()["id"]
 
-        next_instruction = self.client.get(self.instruction_path("next/"))
-        self.assertEqual(next_instruction.status_code, 200)
-        self.assertEqual(next_instruction.json()["id"], instruction_id)
-        self.assertEqual(next_instruction.json()["status"], "processing")
+        next_batch = self.client.get(self.instruction_path("next/"))
+        self.assertEqual(next_batch.status_code, 200)
+        self.assertEqual(next_batch.headers["Cache-Control"], "no-store")
+        self.assertEqual(len(next_batch.json()), 1)
+        self.assertEqual(next_batch.json()[0]["id"], instruction_id)
+        self.assertEqual(next_batch.json()[0]["status"], "processing")
 
         completed = self.post_result(
             instruction_id,
@@ -72,10 +74,10 @@ class InstructionApiTests(TestCase):
         instruction = Instruction.objects.create(bid=self.BID, action="tabs")
 
         pending = self.client.get(self.instruction_path(f"{instruction.id}/"))
-        processing = self.client.get(self.instruction_path("next/"))
+        processing = self.client.get(self.instruction_path("next/")).json()[0]
 
         self.assertEqual(pending.json()["status"], "pending")
-        self.assertEqual(processing.json()["status"], "processing")
+        self.assertEqual(processing["status"], "processing")
         self.assertTrue(Instruction.objects.filter(id=instruction.id).exists())
 
     def test_browser_queues_are_isolated(self):
@@ -93,9 +95,44 @@ class InstructionApiTests(TestCase):
             404,
         )
         self.assertEqual(
-            self.client.get(self.instruction_path("next/")).json()["id"],
+            self.client.get(self.instruction_path("next/")).json()[0]["id"],
             instruction_id,
         )
+
+    def test_claims_up_to_the_requested_instruction_limit(self):
+        instructions = [
+            Instruction.objects.create(bid=self.BID, action="tabs") for _ in range(6)
+        ]
+
+        first_batch = self.client.get(self.instruction_path("next/?limit=4"))
+        second_batch = self.client.get(self.instruction_path("next/?limit=4"))
+
+        self.assertEqual(first_batch.status_code, 200)
+        self.assertEqual(
+            [instruction["id"] for instruction in first_batch.json()],
+            [instruction.id for instruction in instructions[:4]],
+        )
+        self.assertTrue(
+            all(
+                instruction["status"] == "processing"
+                for instruction in first_batch.json()
+            )
+        )
+        self.assertEqual(
+            [instruction["id"] for instruction in second_batch.json()],
+            [instruction.id for instruction in instructions[4:]],
+        )
+
+    def test_rejects_invalid_instruction_claim_limits(self):
+        for limit in ("0", "21", "invalid"):
+            with self.subTest(limit=limit):
+                response = self.client.get(
+                    self.instruction_path(f"next/?limit={limit}")
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"], "Invalid request")
+                self.assertEqual(response.json()["details"][0]["field"], "limit")
 
     def test_rejects_invalid_browser_ids(self):
         invalid_bids = (

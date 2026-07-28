@@ -2,7 +2,7 @@
 
 ACOB (Agent Controlled Browser) is a small Django server and Chromium extension for controlling browser tabs through an HTTP API.
 
-The server temporarily stores instructions in SQLite. The extension polls for an instruction every second, runs it, and sends the result back. Completed instructions and screenshots are consumed on first read rather than retained as history.
+The server temporarily stores instructions in SQLite. Every second, the extension claims a configurable batch of instructions in one request, runs them concurrently, and sends each result back. The batch size defaults to four, and the extension runs at most 20 instructions concurrently. Completed instructions and screenshots are consumed on first read rather than retained as history.
 
 ## Local setup
 
@@ -46,7 +46,7 @@ With either server running, load the extension in Chromium 116 or newer:
 3. Select **Load unpacked** and choose the `extension/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-The extension defaults to `http://127.0.0.1:58347`; its popup can change the server URL. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+The extension defaults to `http://127.0.0.1:58347` and four instructions per poll; its popup can change the server URL and instruction batch size from 1 through 20. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
 ## Python client
 
@@ -56,19 +56,31 @@ An independently installable Python client is available in `client/`:
 pip install ./client
 ```
 
-It exports `ACOBClient`, which submits instructions, waits for their one-use terminal responses, and returns their browser results:
+It exports the asynchronous `ACOBClient`, which submits instructions, waits for
+their one-use terminal responses without blocking the event loop, and returns
+their browser results:
 
 ```python
+import asyncio
+
 from acob import ACOBClient
 
-client = ACOBClient("0123456789ab4def8123456789abcdef")
-tabs = client.tabs(operation="list")
-tab = client.tabs(operation="navigate", url="https://example.com")
-title = client.javascript(tab.tid, "document.title")
-png = client.screenshot(tab.tid, full_page=True)
+
+async def main() -> None:
+    async with ACOBClient("0123456789ab4def8123456789abcdef") as client:
+        tabs = await client.tabs(operation="list")
+        tab = await client.tabs(operation="navigate", url="https://example.com")
+        title = await client.javascript(tab.tid, "document.title")
+        png = await client.screenshot(tab.tid, full_page=True)
+
+
+asyncio.run(main())
 ```
 
-Pass `endpoint="http://host:port"` to target a non-default server. See [`client/README.md`](client/README.md) for every action, low-level queue access, timeout behavior, and error types.
+Pass `endpoint="http://host:port"` to target a non-default server. Independent
+actions can be launched together with `asyncio.gather()`. See
+[`client/README.md`](client/README.md) for every action, parallel execution,
+low-level queue access, timeout behavior, and error types.
 
 ## API
 
@@ -138,6 +150,8 @@ For example, an input can be updated and notified with:
   "script": "(() => { const input = document.querySelector('#name'); input.value = 'ACOB'; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value; })()"
 }
 ```
+
+The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`.
 
 Use the ID returned when creating an instruction to retrieve its status and result:
 
