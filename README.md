@@ -2,7 +2,7 @@
 
 ACOB (Agent Controlled Browser) is a small Django server and Chromium extension for controlling browser tabs through an HTTP API.
 
-The server temporarily stores instructions in SQLite. Every second, the extension claims a configurable batch of instructions in one request, runs them concurrently, and sends each result back. The batch size defaults to four, and the extension runs at most 20 instructions concurrently. Completed instructions and screenshots are consumed on first read rather than retained as history.
+The server temporarily stores instructions in SQLite. At its configured polling interval, the extension claims a configurable batch of instructions, runs them concurrently, and sends each result back. Completed instructions and screenshots are consumed on first read rather than retained as history.
 
 ## Local setup
 
@@ -46,7 +46,7 @@ With either server running, load the extension in Chromium 116 or newer:
 3. Select **Load unpacked** and choose the `extension/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-The extension defaults to `http://127.0.0.1:58347` and four instructions per poll; its popup can change the server URL and instruction batch size from 1 through 20. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+`extension/settings.js` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
 ## Python client
 
@@ -108,7 +108,7 @@ Supported instructions:
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
-Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, active state, and focused state. `active` means selected within its window; `focused` is only true when that tab is active and its window is focused. `navigate` requires a non-empty `url`; it navigates the supplied `tid`, or creates an inactive background tab when `tid` is omitted, waits for the page load event, and returns the tab details. Only the explicit `focus` operation activates a tab and focuses its containing window. Focusing or closing a tab requires its `tid`.
+Every `tabs` instruction requires an `operation`. The `list` operation returns each tab's `tid`, window ID, domain, URL, title, active state, and focused state. `active` means selected within its window; `focused` is only true when that tab is active and its window is focused. `navigate` requires a non-empty `url`; it navigates the supplied `tid`, or creates an inactive background tab when `tid` is omitted, waits for the page load event, and returns the tab details. New-tab navigation fails when the browser already has the maximum number of tabs configured in the extension. Only the explicit `focus` operation activates a tab and focuses its containing window. Focusing or closing a tab requires its `tid`.
 
 `click` requires a positive `tid` and a non-empty CSS `selector`. The extension leaves browser focus unchanged, scrolls the selected element into view, and sends mouse movement, press, and release input at the center of its rendered border box. The browser performs normal coordinate hit-testing, so an overlay or another element visually above the selected element receives the click instead. The result includes the selector and click coordinates.
 

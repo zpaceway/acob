@@ -7,13 +7,14 @@ This document turns the project review into an implementation roadmap. ACOB is i
 ACOB currently provides:
 
 - Browser-specific asynchronous instruction queues with bounded batch claiming backed by SQLite.
-- Chromium tab listing, URL navigation, focusing, and closing.
+- Chromium tab listing, bounded new-tab creation, URL navigation, focusing, and closing.
 - Real coordinate-based mouse clicks through the Chromium Debugger API.
 - Focused-control text entry, named keys, and modified keyboard shortcuts.
 - Viewport and full-page PNG capture through single-use download endpoints.
 - Arbitrary JavaScript evaluation with promise support and CSP-independent execution.
 - One-shot terminal result consumption.
 - An asynchronous Python client with concurrent instruction submission and polling.
+- Centralized extension settings with generated popup controls.
 - Strict Pydantic request validation, Docker support, and agent integration through `SKILL.md`.
 
 ## Current Milestone
@@ -77,7 +78,7 @@ Status: deferred by decision.
 ### Extension Reliability
 
 - Add a browser heartbeat so agents can distinguish an idle browser from a disconnected extension.
-- Evaluate Server-Sent Events or WebSockets as a lower-latency replacement for one-second polling.
+- Evaluate Server-Sent Events or WebSockets as a lower-latency replacement for periodic polling.
 - Evaluate `chrome.storage.sync` for browser identity recovery while preserving intentional queue rotation.
 
 ### API Hardening

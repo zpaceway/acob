@@ -14,27 +14,7 @@
       </header>
 
       <form id="settings-form">
-        <label for="base-url">Server URL</label>
-        <input
-          id="base-url"
-          name="baseUrl"
-          type="url"
-          placeholder="http://127.0.0.1:58347"
-          required
-        />
-        <p class="hint">The extension polls this server for instructions.</p>
-
-        <label for="instructions-per-poll">Instructions per poll</label>
-        <input
-          id="instructions-per-poll"
-          name="instructionsPerPoll"
-          type="number"
-          min="1"
-          max="20"
-          step="1"
-          required
-        />
-        <p class="hint">Instructions claimed from the server each second.</p>
+        <div id="configuration-fields"></div>
 
         <label for="bid">Browser ID</label>
         <div class="bid-row">
@@ -50,6 +30,7 @@
         <p id="status" role="status" aria-live="polite"></p>
       </form>
     </main>
+    <script src="settings.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

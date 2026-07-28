@@ -63,8 +63,7 @@ and its reusable HTTP session remains open until the context exits or
 ## Parallel Execution
 
 Independent actions can be submitted and polled concurrently with
-`asyncio.gather()`. The extension can execute up to 20 claimed instructions at
-once, so long-running work on independent tabs can overlap:
+`asyncio.gather()`, so long-running work on independent tabs can overlap:
 
 ```python
 first_tab, second_tab = await asyncio.gather(
@@ -81,9 +80,8 @@ first_title, second_title = await asyncio.gather(
 Only parallelize operations that are independent. Await navigation before using
 its returned tab ID, preserve ordering for click-and-type workflows, and avoid
 concurrent debugger-backed actions on the same tab because they can conflict.
-The extension's popup configures how many new instructions each one-second poll
-claims, defaulting to four with a range of 1 through 20. It runs up to 20 active
-executions. Larger batches remain queued and may reach their client timeout.
+Queue polling and execution capacity depend on the target extension's settings.
+Larger batches may remain queued and reach their client timeout.
 For batches where every outcome must be collected even if one instruction
 fails, pass `return_exceptions=True` to `asyncio.gather()` and inspect each
 result.
@@ -120,7 +118,9 @@ closed = await client.tabs(operation="close", tid=123)
 
 Only `operation="focus"` activates a tab or focuses its window. Navigation,
 click, keyboard, JavaScript, and screenshot actions leave browser focus
-unchanged; navigation without a `tid` creates an inactive background tab.
+unchanged; navigation without a `tid` creates an inactive background tab. That
+new-tab operation raises `ACOBInstructionError` if the browser has reached its
+configured tab limit. Navigating an existing `tid` is unaffected by the limit.
 
 `screenshot()` returns PNG bytes. It immediately consumes the API's internal
 single-use download URL, so a failed transfer requires a new screenshot call.

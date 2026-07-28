@@ -1,18 +1,56 @@
-const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
-const DEFAULT_INSTRUCTIONS_PER_POLL = 4;
-
 const form = document.querySelector("#settings-form");
-const baseUrlInput = document.querySelector("#base-url");
-const instructionsPerPollInput = document.querySelector(
-  "#instructions-per-poll",
-);
+const configurationFields = document.querySelector("#configuration-fields");
 const bidInput = document.querySelector("#bid");
 const copyButton = document.querySelector("#copy-bid");
 const rotateButton = document.querySelector("#rotate-bid");
 const status = document.querySelector("#status");
+const settingInputs = new Map();
+let statusDurationMs =
+  ACOBSettings.definitions.popupStatusDurationMs.defaultValue;
 
-function generateBrowserId() {
-  return crypto.randomUUID().replaceAll("-", "");
+function inputId(name) {
+  return name.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
+}
+
+function buildConfigurationFields() {
+  for (const name of ACOBSettings.settingNames) {
+    const definition = ACOBSettings.definitions[name];
+    if (!definition.visible) {
+      continue;
+    }
+    const id = inputId(name);
+    const label = document.createElement("label");
+    label.htmlFor = id;
+    label.textContent = definition.label;
+
+    const input = document.createElement("input");
+    input.id = id;
+    input.name = name;
+    input.type = definition.inputType;
+    input.required = true;
+    input.readOnly = !definition.editable;
+    for (const attribute of ["min", "max", "step", "pattern", "placeholder"]) {
+      if (definition[attribute] !== undefined) {
+        input.setAttribute(attribute, definition[attribute]);
+      }
+    }
+    input.addEventListener("input", () => input.setCustomValidity(""));
+
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = definition.editable
+      ? definition.hint
+      : `${definition.hint} Read-only in the popup.`;
+
+    configurationFields.append(label, input, hint);
+    settingInputs.set(name, input);
+  }
+}
+
+function inputValue(name, input) {
+  return ACOBSettings.definitions[name].valueType === "integer"
+    ? input.valueAsNumber
+    : input.value;
 }
 
 function showStatus(message) {
@@ -21,7 +59,7 @@ function showStatus(message) {
     if (status.textContent === message) {
       status.textContent = "";
     }
-  }, 2500);
+  }, statusDurationMs);
 }
 
 async function loadConfiguration() {
@@ -32,25 +70,42 @@ async function loadConfiguration() {
     throw new Error(configuration.error);
   }
 
-  baseUrlInput.value = configuration.baseUrl || DEFAULT_BASE_URL;
-  instructionsPerPollInput.value =
-    configuration.instructionsPerPoll || DEFAULT_INSTRUCTIONS_PER_POLL;
+  for (const [name, input] of settingInputs) {
+    input.value = configuration[name];
+  }
+  statusDurationMs = configuration.popupStatusDurationMs;
   bidInput.value = configuration.bid;
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const baseUrl = baseUrlInput.value.trim().replace(/\/+$/, "");
-  const instructionsPerPoll = instructionsPerPollInput.valueAsNumber;
-
   if (!form.checkValidity()) {
     form.reportValidity();
     return;
   }
 
-  await chrome.storage.local.set({ baseUrl, instructionsPerPoll });
-  baseUrlInput.value = baseUrl;
+  const configuration = {};
+  for (const [name, input] of settingInputs) {
+    const value = inputValue(name, input);
+    if (!ACOBSettings.isValidSetting(name, value)) {
+      input.setCustomValidity("Enter a valid setting value.");
+      input.reportValidity();
+      return;
+    }
+    configuration[name] = ACOBSettings.normalizeSetting(name, value);
+  }
+
+  await chrome.storage.local.set(configuration);
+  for (const [name, input] of settingInputs) {
+    input.value = configuration[name];
+  }
   showStatus("Settings saved");
+  chrome.runtime
+    .sendMessage({
+      type: "settingsUpdated",
+      pollIntervalMs: configuration.pollIntervalMs,
+    })
+    .catch(console.error);
 });
 
 copyButton.addEventListener("click", async () => {
@@ -59,12 +114,13 @@ copyButton.addEventListener("click", async () => {
 });
 
 rotateButton.addEventListener("click", async () => {
-  const bid = generateBrowserId();
+  const bid = ACOBSettings.generateBrowserId();
   await chrome.storage.local.set({ bid });
   bidInput.value = bid;
   showStatus("Browser ID rotated");
 });
 
+buildConfigurationFields();
 loadConfiguration().catch((error) => {
   status.textContent = error instanceof Error ? error.message : String(error);
 });

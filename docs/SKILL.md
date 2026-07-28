@@ -152,7 +152,7 @@ tab = await client.tabs(
 )
 ```
 
-`url` is required and must be non-empty. The extension creates or updates the tab, waits up to 30 seconds for Chromium's page-load completion signal, and returns the loaded tab details. Omitting `tid` creates an inactive background tab; providing it preserves and navigates that tab without activating it.
+`url` is required and must be non-empty. The extension creates or updates the tab, waits for Chromium's page-load completion signal, and returns the loaded tab details. Omitting `tid` creates an inactive background tab unless the browser's tab limit has been reached; providing it preserves and navigates that tab without activating it.
 
 The returned tab details contain the `tid` needed by dependent actions:
 
@@ -252,7 +252,7 @@ Set `full_page` to `true` to capture beyond the viewport:
 image = await client.screenshot(tid=431973774, full_page=True)
 ```
 
-The extension captures a PNG and posts it base64-encoded to the server. Encoded data is limited to 30 MiB; a larger capture produces a failed instruction. The client receives the server's transient download metadata, immediately consumes its one-use URL, and returns only the decoded image bytes. Save or process those bytes directly:
+The extension captures a PNG and posts it base64-encoded to the server. An oversized capture produces a failed instruction. The client receives the server's transient download metadata, immediately consumes its one-use URL, and returns only the decoded image bytes. Save or process those bytes directly:
 
 ```python
 from pathlib import Path
@@ -550,6 +550,7 @@ Fix the method arguments instead of retrying unchanged. Common validation errors
 The action methods raise `ACOBInstructionError` when the browser returns `status: "failed"`. The exception's `response` preserves the consumed terminal response, and `str(error)` contains the browser error. Common causes include:
 
 - The tab was closed before execution.
+- The browser reached its tab limit while creating a new tab.
 - A selector matched no element.
 - The JavaScript threw an exception.
 - The page navigated while a script was executing.
@@ -602,4 +603,5 @@ When API behavior is uncertain, inspect these project files instead of guessing:
 - `api/schemas.py`: accepted request shapes and validation.
 - `api/views.py`: instruction lifecycle and HTTP behavior.
 - `extension/background.js`: browser execution semantics.
-- `extension/offscreen.js`: polling interval.
+- `extension/settings.js`: extension defaults and validation constraints.
+- `extension/offscreen.js`: polling scheduler.

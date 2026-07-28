@@ -1,7 +1,4 @@
-const DEFAULT_BASE_URL = "http://127.0.0.1:58347";
-const DEFAULT_INSTRUCTIONS_PER_POLL = 4;
-const MAX_CONCURRENT_EXECUTIONS = 20;
-const MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024;
+importScripts("settings.js");
 
 const KEY_DEFINITIONS = {
   ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
@@ -79,59 +76,32 @@ let offscreenPromise = null;
 let backendUnavailable = false;
 let configurationPromise = null;
 let pollInProgress = false;
+let tabCreationQueue = Promise.resolve();
 
-function generateBrowserId() {
-  return crypto.randomUUID().replaceAll("-", "");
-}
-
-function normalizeInstructionsPerPoll(value) {
-  return Number.isInteger(value) &&
-    value >= 1 &&
-    value <= MAX_CONCURRENT_EXECUTIONS
-    ? value
-    : DEFAULT_INSTRUCTIONS_PER_POLL;
-}
-
-async function initializeConfiguration() {
-  const stored = await chrome.storage.local.get([
-    "baseUrl",
-    "bid",
-    "instructionsPerPoll",
-  ]);
-  const configuration = {
-    baseUrl: stored.baseUrl || DEFAULT_BASE_URL,
-    bid: stored.bid || generateBrowserId(),
-    instructionsPerPoll: normalizeInstructionsPerPoll(
-      stored.instructionsPerPoll,
-    ),
-  };
-
+async function loadConfiguration() {
+  const stored = await chrome.storage.local.get(ACOBSettings.storageKeys);
+  const configuration = ACOBSettings.normalizeConfiguration(stored);
   if (
-    !stored.baseUrl ||
-    !stored.bid ||
-    stored.instructionsPerPoll !== configuration.instructionsPerPoll
+    ACOBSettings.storageKeys.some(
+      (name) => stored[name] !== configuration[name],
+    )
   ) {
     await chrome.storage.local.set(configuration);
   }
-
   return configuration;
 }
 
 async function getConfiguration() {
   if (!configurationPromise) {
-    configurationPromise = initializeConfiguration();
+    configurationPromise = loadConfiguration().catch((error) => {
+      configurationPromise = null;
+      throw error;
+    });
+    return configurationPromise;
   }
 
   await configurationPromise;
-  const configuration = await chrome.storage.local.get([
-    "baseUrl",
-    "bid",
-    "instructionsPerPoll",
-  ]);
-  configuration.instructionsPerPoll = normalizeInstructionsPerPoll(
-    configuration.instructionsPerPoll,
-  );
-  return configuration;
+  return loadConfiguration();
 }
 
 function instructionApiUrl(configuration) {
@@ -150,7 +120,7 @@ async function createOffscreenDocument() {
     await chrome.offscreen.createDocument({
       url: "offscreen.html",
       reasons: ["WORKERS"],
-      justification: "Poll the ACOB server once per second",
+      justification: "Poll the ACOB server for browser instructions",
     });
   }
 }
@@ -183,12 +153,26 @@ function tabDetails(tab) {
   };
 }
 
-function waitForTab(tid) {
+function createTabWithinLimit(url, maxTabs) {
+  const creation = tabCreationQueue.then(async () => {
+    const tabs = await chrome.tabs.query({});
+    if (tabs.length >= maxTabs) {
+      throw new Error(
+        `Cannot create new tab: browser tab limit of ${maxTabs} reached`,
+      );
+    }
+    return chrome.tabs.create({ url, active: false });
+  });
+  tabCreationQueue = creation.catch(() => undefined);
+  return creation;
+}
+
+function waitForTab(tid, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for the page to load"));
-    }, 30000);
+    }, timeoutMs);
 
     function cleanup() {
       clearTimeout(timeoutId);
@@ -218,12 +202,15 @@ function waitForTab(tid) {
   });
 }
 
-async function withDebugger(tid, callback) {
+async function withDebugger(tid, configuration, callback) {
   const target = { tabId: tid };
   let attached = false;
 
   try {
-    await chrome.debugger.attach(target, "1.3");
+    await chrome.debugger.attach(
+      target,
+      configuration.debuggerProtocolVersion,
+    );
     attached = true;
 
     return await callback(target);
@@ -234,8 +221,8 @@ async function withDebugger(tid, callback) {
   }
 }
 
-async function executeJavaScript(tid, script) {
-  return withDebugger(tid, async (target) => {
+async function executeJavaScript(tid, script, configuration) {
+  return withDebugger(tid, configuration, async (target) => {
     const evaluation = await chrome.debugger.sendCommand(
       target,
       "Runtime.evaluate",
@@ -268,8 +255,8 @@ async function executeJavaScript(tid, script) {
   });
 }
 
-async function executeClick(tid, selector) {
-  return withDebugger(tid, async (target) => {
+async function executeClick(tid, selector, configuration) {
+  return withDebugger(tid, configuration, async (target) => {
     const { root } = await chrome.debugger.sendCommand(
       target,
       "DOM.getDocument",
@@ -335,8 +322,8 @@ async function executeClick(tid, selector) {
   });
 }
 
-async function executeScreenshot(tid, fullPage) {
-  return withDebugger(tid, async (target) => {
+async function executeScreenshot(tid, fullPage, configuration) {
+  return withDebugger(tid, configuration, async (target) => {
     const { data } = await chrome.debugger.sendCommand(
       target,
       "Page.captureScreenshot",
@@ -346,8 +333,13 @@ async function executeScreenshot(tid, fullPage) {
         captureBeyondViewport: fullPage,
       },
     );
-    if (data.length > MAX_SCREENSHOT_BASE64_LENGTH) {
-      throw new Error("Screenshot exceeds the 30 MiB encoded size limit");
+    if (
+      data.length >
+      ACOBSettings.mebibytesToBytes(configuration.maxScreenshotSizeMiB)
+    ) {
+      throw new Error(
+        `Screenshot exceeds the ${configuration.maxScreenshotSizeMiB} MiB encoded size limit`,
+      );
     }
     return { data };
   });
@@ -387,8 +379,8 @@ function describeKey(key, shiftPressed) {
   return { key, text: key, unmodifiedText: key };
 }
 
-async function executeKeyboard(tid, payload) {
-  return withDebugger(tid, async (target) => {
+async function executeKeyboard(tid, payload, configuration) {
+  return withDebugger(tid, configuration, async (target) => {
     if (payload.text !== undefined) {
       await chrome.debugger.sendCommand(target, "Input.insertText", {
         text: payload.text,
@@ -400,8 +392,13 @@ async function executeKeyboard(tid, payload) {
       (mask, modifier) => mask | MODIFIER_BITS[modifier],
       0,
     );
-    const definition = describeKey(payload.key, (modifiers & 8) !== 0);
-    const hasCommandModifier = (modifiers & 7) !== 0;
+    const definition = describeKey(
+      payload.key,
+      (modifiers & MODIFIER_BITS.shift) !== 0,
+    );
+    const commandModifiers =
+      MODIFIER_BITS.alt | MODIFIER_BITS.ctrl | MODIFIER_BITS.meta;
+    const hasCommandModifier = (modifiers & commandModifiers) !== 0;
     const keyEvent = {
       key: definition.key,
       modifiers,
@@ -431,7 +428,7 @@ async function executeKeyboard(tid, payload) {
   });
 }
 
-async function runInstruction(instruction) {
+async function runInstruction(instruction, configuration) {
   const { action, payload } = instruction;
 
   if (action === "tabs") {
@@ -470,8 +467,11 @@ async function runInstruction(instruction) {
     if (operation === "navigate") {
       const navigatedTab = payload.tid
         ? await chrome.tabs.update(payload.tid, { url: payload.url })
-        : await chrome.tabs.create({ url: payload.url, active: false });
-      const loadedTab = await waitForTab(navigatedTab.id);
+        : await createTabWithinLimit(payload.url, configuration.maxTabs);
+      const loadedTab = await waitForTab(
+        navigatedTab.id,
+        configuration.tabLoadTimeoutMs,
+      );
       return tabDetails(loadedTab);
     }
 
@@ -480,22 +480,22 @@ async function runInstruction(instruction) {
 
   if (action === "javascript") {
     await chrome.tabs.get(payload.tid);
-    return executeJavaScript(payload.tid, payload.script);
+    return executeJavaScript(payload.tid, payload.script, configuration);
   }
 
   if (action === "click") {
     await chrome.tabs.get(payload.tid);
-    return executeClick(payload.tid, payload.selector);
+    return executeClick(payload.tid, payload.selector, configuration);
   }
 
   if (action === "keyboard") {
     await chrome.tabs.get(payload.tid);
-    return executeKeyboard(payload.tid, payload);
+    return executeKeyboard(payload.tid, payload, configuration);
   }
 
   if (action === "screenshot") {
     await chrome.tabs.get(payload.tid);
-    return executeScreenshot(payload.tid, payload.full_page);
+    return executeScreenshot(payload.tid, payload.full_page, configuration);
   }
 
   throw new Error(`Unknown action: ${action}`);
@@ -503,34 +503,41 @@ async function runInstruction(instruction) {
 
 async function sendResult(instructionId, body, configuration) {
   const apiUrl = instructionApiUrl(configuration);
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (
+    let attempt = 1;
+    attempt <= configuration.resultRetryAttempts;
+    attempt += 1
+  ) {
     try {
       const response = await fetch(`${apiUrl}/${instructionId}/result/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
       });
 
       if (response.ok) {
         return;
       }
-      if (attempt === 3) {
+      if (attempt === configuration.resultRetryAttempts) {
         throw new Error(`Could not submit result: HTTP ${response.status}`);
       }
     } catch (error) {
-      if (attempt === 3) {
+      if (attempt === configuration.resultRetryAttempts) {
         throw error;
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, configuration.resultRetryDelayMs),
+    );
   }
 }
 
 async function executeInstruction(instruction, configuration) {
   let body;
   try {
-    const result = await runInstruction(instruction);
+    const result = await runInstruction(instruction, configuration);
     body = { result };
   } catch (error) {
     body = {
@@ -556,14 +563,15 @@ async function poll() {
     return;
   }
 
-  if (activeExecutions >= MAX_CONCURRENT_EXECUTIONS) {
-    return;
-  }
-
+  const executions = [];
   pollInProgress = true;
   try {
     const configuration = await getConfiguration();
-    const availableExecutions = MAX_CONCURRENT_EXECUTIONS - activeExecutions;
+    if (activeExecutions >= configuration.maxConcurrentExecutions) {
+      return;
+    }
+    const availableExecutions =
+      configuration.maxConcurrentExecutions - activeExecutions;
     const limit = Math.min(
       configuration.instructionsPerPoll,
       availableExecutions,
@@ -572,7 +580,9 @@ async function poll() {
       return;
     }
     const apiUrl = instructionApiUrl(configuration);
-    const response = await fetch(`${apiUrl}/next/?limit=${limit}`);
+    const response = await fetch(`${apiUrl}/next/?limit=${limit}`, {
+      signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
+    });
     if (backendUnavailable) {
       console.info("ACOB server connected");
       backendUnavailable = false;
@@ -590,22 +600,33 @@ async function poll() {
     }
     for (const instruction of instructions) {
       activeExecutions++;
-      void executeInstruction(instruction, configuration)
-        .catch(reportError)
-        .finally(() => {
-          activeExecutions--;
-        });
+      executions.push(
+        executeInstruction(instruction, configuration)
+          .catch(reportError)
+          .finally(() => {
+            activeExecutions--;
+          }),
+      );
     }
   } catch (error) {
     reportError(error);
   } finally {
     pollInProgress = false;
   }
+  await Promise.allSettled(executions);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "poll") {
-    poll();
+    poll().then(
+      () => sendResponse({ ok: true }),
+      (error) => {
+        sendResponse({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
+    return true;
   }
   if (message.type === "getConfiguration") {
     getConfiguration().then(sendResponse, (error) => {
