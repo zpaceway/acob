@@ -20,6 +20,7 @@ test("normalizes a complete default configuration", () => {
     pollIntervalMs: 1000,
     tabLoadTimeoutMs: 30000,
     httpRequestTimeoutMs: 30000,
+    javascriptTimeoutMs: 60000,
     maxScreenshotSizeMiB: 30,
     resultRetryAttempts: 3,
     resultRetryDelayMs: 1000,
@@ -38,6 +39,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
     pollIntervalMs: 250,
     tabLoadTimeoutMs: 45000,
     httpRequestTimeoutMs: 10000,
+    javascriptTimeoutMs: 45000,
     maxScreenshotSizeMiB: 12,
     resultRetryAttempts: 2,
     resultRetryDelayMs: 500,
@@ -50,6 +52,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
   assert.equal(configuration.maxConcurrentExecutions, 40);
   assert.equal(configuration.tabLoadTimeoutMs, 45000);
   assert.equal(configuration.httpRequestTimeoutMs, 10000);
+  assert.equal(configuration.javascriptTimeoutMs, 45000);
   assert.equal(configuration.resultRetryAttempts, 2);
   assert.equal(configuration.debuggerProtocolVersion, "1.4");
 });
@@ -64,6 +67,7 @@ test("replaces invalid values with their centralized defaults", () => {
     pollIntervalMs: 0,
     tabLoadTimeoutMs: 90001,
     httpRequestTimeoutMs: 30001,
+    javascriptTimeoutMs: 90001,
     maxScreenshotSizeMiB: 31,
     resultRetryAttempts: 4,
     resultRetryDelayMs: 30001,
@@ -78,6 +82,7 @@ test("replaces invalid values with their centralized defaults", () => {
   assert.equal(configuration.pollIntervalMs, 1000);
   assert.equal(configuration.tabLoadTimeoutMs, 30000);
   assert.equal(configuration.httpRequestTimeoutMs, 30000);
+  assert.equal(configuration.javascriptTimeoutMs, 60000);
   assert.equal(configuration.maxScreenshotSizeMiB, 30);
   assert.equal(configuration.resultRetryAttempts, 3);
   assert.equal(configuration.resultRetryDelayMs, 1000);

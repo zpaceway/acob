@@ -278,7 +278,7 @@ The extension evaluates the script through the Chromium Debugger API with:
 - Results returned by value.
 - Page content security policy bypassed for evaluation.
 
-**Never submit JavaScript that can loop or wait forever.** ACOB awaits returned promises, so unresolved promises can eventually block the browser's instruction queue. Every polling loop, retry, observer, event wait, and other asynchronous script must have a finite timeout or attempt limit and must resolve or reject when that limit is reached. Do not use recursive `setTimeout`, `setInterval`, or an unresolved promise without such a bound; prefer a one-shot inspection followed by another instruction.
+**Never submit JavaScript that can loop or wait forever.** ACOB awaits returned promises and applies an extension-side execution timeout, but every polling loop, retry, observer, event wait, and other asynchronous script must still have its own finite timeout or attempt limit. Do not use recursive `setTimeout`, `setInterval`, or an unresolved promise without such a bound; prefer a one-shot inspection followed by another instruction.
 
 Return JSON-serializable values such as strings, numbers, booleans, null, arrays, or plain objects. Do not return DOM nodes, functions, cyclic objects, or other browser-only values. Wrap multi-statement scripts in an IIFE so the expression has one explicit return value:
 

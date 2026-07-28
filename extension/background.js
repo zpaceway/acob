@@ -202,6 +202,16 @@ function waitForTab(tid, timeoutMs) {
   });
 }
 
+function withTimeout(operation, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([operation, timeout]).finally(() =>
+    clearTimeout(timeoutId),
+  );
+}
+
 async function withDebugger(tid, configuration, callback) {
   const target = { tabId: tid };
   let attached = false;
@@ -223,15 +233,15 @@ async function withDebugger(tid, configuration, callback) {
 
 async function executeJavaScript(tid, script, configuration) {
   return withDebugger(tid, configuration, async (target) => {
-    const evaluation = await chrome.debugger.sendCommand(
-      target,
-      "Runtime.evaluate",
-      {
+    const evaluation = await withTimeout(
+      chrome.debugger.sendCommand(target, "Runtime.evaluate", {
         expression: script,
         awaitPromise: true,
         returnByValue: true,
         userGesture: true,
-      },
+      }),
+      configuration.javascriptTimeoutMs,
+      "Timed out waiting for JavaScript to finish",
     );
 
     if (evaluation.exceptionDetails) {

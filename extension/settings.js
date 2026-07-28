@@ -1,6 +1,7 @@
 (() => {
   const MEBIBYTE_IN_BYTES = 1024 * 1024;
   const MAX_HTTP_REQUEST_TIMEOUT_MS = 30_000;
+  const MAX_JAVASCRIPT_TIMEOUT_MS = 90_000;
   const MAX_RESULT_RETRY_ATTEMPTS = 3;
   const MAX_RESULT_RETRY_DELAY_MS = 30_000;
   const MAX_TAB_LOAD_TIMEOUT_MS = 90_000;
@@ -83,6 +84,18 @@
       hint: "Maximum wait for queue and result HTTP requests.",
       min: 1,
       max: MAX_HTTP_REQUEST_TIMEOUT_MS,
+      step: 1,
+      editable: true,
+      visible: true,
+    },
+    javascriptTimeoutMs: {
+      defaultValue: 60000,
+      valueType: "integer",
+      inputType: "number",
+      label: "JavaScript timeout (ms)",
+      hint: "Maximum wait for an evaluated script or promise.",
+      min: 1,
+      max: MAX_JAVASCRIPT_TIMEOUT_MS,
       step: 1,
       editable: true,
       visible: true,

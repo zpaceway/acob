@@ -46,7 +46,7 @@ With either server running, load the extension in Chromium 116 or newer:
 3. Select **Load unpacked** and choose the `extension/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-`extension/settings.js` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+`extension/settings.js` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load, JavaScript, and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
 
 ## Python client
 
