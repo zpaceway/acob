@@ -46,7 +46,7 @@ Add a `keyboard` action targeting the element that currently has keyboard focus 
 - Individual keys such as Enter, Tab, Escape, Backspace, Delete, and arrow keys.
 - Optional Alt, Ctrl, Meta, and Shift modifiers for shortcuts.
 
-The action should focus the target tab and window before dispatching input. Agents should click or otherwise focus the intended control before typing.
+The action should leave tab and window focus unchanged while dispatching input. Agents should click or otherwise focus the intended page control before typing.
 
 ### Tab Navigation
 
@@ -55,7 +55,7 @@ Status: implemented.
 Use `tabs.navigate` with a required non-empty `url` and an optional `tid`:
 
 - With `tid`, navigate that existing tab and return its details after load.
-- Without `tid`, create a new tab at the URL and return its details after load.
+- Without `tid`, create a new inactive tab at the URL and return its details after load.
 
 `tabs.new` is not supported. Agents use `tabs.navigate` for both new and existing tabs.
 

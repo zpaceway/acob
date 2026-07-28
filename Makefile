@@ -7,7 +7,13 @@ SKILL_NAME := acob
 CLAUDE_SKILL_DIR ?= $(HOME)/.claude/skills/$(SKILL_NAME)
 OPENCODE_SKILL_DIR ?= $(XDG_CONFIG_HOME)/opencode/skills/$(SKILL_NAME)
 
-.PHONY: migrations migrate dev run publish-client install-skill-claude install-skill-opencode
+.PHONY: format migrations migrate dev run publish-client install-skill-claude install-skill-opencode
+
+format:
+	@echo "Formatting Python code..."
+	uv run ruff check --fix
+	uv run black acob api manage.py
+	uv run black --config client/pyproject.toml client/acob client/tests
 
 migrations:
 	@echo "Running migrations..."

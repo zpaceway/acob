@@ -132,7 +132,7 @@ tab = client.tabs(
 )
 ```
 
-`url` is required and must be non-empty. The extension creates or updates the tab, waits up to 30 seconds for Chromium's page-load completion signal, and returns the loaded tab details. Omitting `tid` creates a new tab; providing it preserves and navigates that tab.
+`url` is required and must be non-empty. The extension creates or updates the tab, waits up to 30 seconds for Chromium's page-load completion signal, and returns the loaded tab details. Omitting `tid` creates an inactive background tab; providing it preserves and navigates that tab without activating it.
 
 The returned tab details contain the `tid` needed by dependent actions:
 
@@ -147,7 +147,7 @@ tid = tab.tid
 tab = client.tabs(operation="focus", tid=431973774)
 ```
 
-The extension activates the selected tab, focuses its containing window, and returns the updated tab details. Use a `tid` returned by `client.tabs(operation="list")`; do not infer it from tab position.
+The extension activates the selected tab, focuses its containing window, and returns the updated tab details. Use this operation only when the task explicitly requires changing visible browser focus. Use a `tid` returned by `client.tabs(operation="list")`; do not infer it from tab position.
 
 ### Close A Tab
 
@@ -170,7 +170,7 @@ clicked = client.click(
 )
 ```
 
-The extension activates and focuses the target tab, resolves the selector through Chromium's DOM debugging domain, scrolls the element into view, and dispatches mouse movement, press, and release input at the center of its rendered border box. This is coordinate-based browser input, not `element.click()`. Normal hit-testing applies, so an overlay or another element visually above the selected element receives the click.
+The extension leaves tab and window focus unchanged, resolves the selector through Chromium's DOM debugging domain, scrolls the element into view, and dispatches mouse movement, press, and release input at the center of its rendered border box. This is coordinate-based browser input, not `element.click()`. Normal hit-testing applies, so an overlay or another element visually above the selected element receives the click.
 
 A successful result reports the actual viewport coordinates:
 
@@ -187,7 +187,7 @@ Inspect the page before choosing a selector. Prefer stable IDs, names, roles, la
 
 ## Keyboard Action
 
-Keyboard instructions require a positive tab ID and exactly one of `text` or `key`. The extension focuses the target tab and its window, then directs input to the page element that currently has keyboard focus. Focus the intended input first, normally with `click`.
+Keyboard instructions require a positive tab ID and exactly one of `text` or `key`. The extension leaves tab and window focus unchanged and directs input to the page element that already has focus in the target tab. Focus the intended input first, normally with `click`.
 
 Insert text:
 

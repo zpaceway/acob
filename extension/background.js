@@ -205,12 +205,6 @@ async function withDebugger(tid, callback) {
   }
 }
 
-async function focusTab(tid) {
-  const tab = await chrome.tabs.get(tid);
-  await chrome.windows.update(tab.windowId, { focused: true });
-  return chrome.tabs.update(tab.id, { active: true });
-}
-
 async function executeJavaScript(tid, script) {
   return withDebugger(tid, async (target) => {
     const evaluation = await chrome.debugger.sendCommand(
@@ -365,7 +359,6 @@ function describeKey(key, shiftPressed) {
 }
 
 async function executeKeyboard(tid, payload) {
-  await focusTab(tid);
   return withDebugger(tid, async (target) => {
     if (payload.text !== undefined) {
       await chrome.debugger.sendCommand(target, "Input.insertText", {
@@ -448,7 +441,7 @@ async function runInstruction(instruction) {
     if (operation === "navigate") {
       const navigatedTab = payload.tid
         ? await chrome.tabs.update(payload.tid, { url: payload.url })
-        : await chrome.tabs.create({ url: payload.url });
+        : await chrome.tabs.create({ url: payload.url, active: false });
       const loadedTab = await waitForTab(navigatedTab.id);
       return tabDetails(loadedTab);
     }
@@ -462,11 +455,12 @@ async function runInstruction(instruction) {
   }
 
   if (action === "click") {
-    await focusTab(payload.tid);
+    await chrome.tabs.get(payload.tid);
     return executeClick(payload.tid, payload.selector);
   }
 
   if (action === "keyboard") {
+    await chrome.tabs.get(payload.tid);
     return executeKeyboard(payload.tid, payload);
   }
 

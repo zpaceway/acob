@@ -66,6 +66,10 @@ tab = client.tabs(operation="focus", tid=123)
 closed = client.tabs(operation="close", tid=123)
 ```
 
+Only `operation="focus"` activates a tab or focuses its window. Navigation,
+click, keyboard, JavaScript, and screenshot actions leave browser focus unchanged;
+navigation without a `tid` creates an inactive background tab.
+
 `screenshot()` returns PNG bytes. It immediately consumes the API's internal
 single-use download URL, so a failed transfer requires a new screenshot call.
 

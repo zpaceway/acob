@@ -12,11 +12,15 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "black>=26.5.1",
     "django-stubs>=6.0.7",
     "mypy>=2.3.0",
     "pyright>=1.1.411",
     "ruff>=0.16.0",
 ]
+
+[tool.black]
+target-version = ["py314"]
 
 [tool.mypy]
 plugins = ["mypy_django_plugin.main"]
