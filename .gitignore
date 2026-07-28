@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# Node modules
+node_modules/
+
 # Local database
 db.sqlite3

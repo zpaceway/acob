@@ -1,0 +1,421 @@
+export type JsonPrimitive = boolean | null | number | string;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+export interface SettingValues {
+  baseUrl: string;
+  instructionsPerPoll: number;
+  maxConcurrentExecutions: number;
+  maxTabs: number;
+  pollIntervalMs: number;
+  tabLoadTimeoutMs: number;
+  httpRequestTimeoutMs: number;
+  javascriptTimeoutMs: number;
+  maxScreenshotSizeMiB: number;
+  resultRetryAttempts: number;
+  resultRetryDelayMs: number;
+  popupStatusDurationMs: number;
+  debuggerProtocolVersion: string;
+}
+
+export interface Configuration extends SettingValues {
+  bid: string;
+}
+
+export type SettingName = keyof SettingValues;
+export type StorageKey = keyof Configuration;
+export type SettingValue = SettingValues[SettingName];
+export type SettingValueType = "integer" | "string" | "url";
+
+interface BaseSettingDefinition<
+  Value extends SettingValue,
+  ValueType extends SettingValueType,
+> {
+  readonly defaultValue: Value;
+  readonly valueType: ValueType;
+  readonly inputType: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly editable: boolean;
+  readonly visible: boolean;
+  readonly min?: number;
+  readonly max?: number;
+  readonly step?: number;
+  readonly pattern?: string;
+  readonly placeholder?: string;
+}
+
+export interface IntegerSettingDefinition
+  extends BaseSettingDefinition<number, "integer"> {
+  readonly inputType: "number";
+}
+
+export interface StringSettingDefinition
+  extends BaseSettingDefinition<string, "string"> {
+  readonly inputType: "text";
+}
+
+export interface UrlSettingDefinition
+  extends BaseSettingDefinition<string, "url"> {
+  readonly inputType: "url";
+}
+
+export type SettingDefinition<Name extends SettingName = SettingName> =
+  Name extends "baseUrl"
+    ? UrlSettingDefinition
+    : SettingValues[Name] extends number
+      ? IntegerSettingDefinition
+      : StringSettingDefinition;
+
+export type SettingDefinitions = {
+  readonly [Name in SettingName]: SettingDefinition<Name>;
+};
+
+export interface SettingsApi {
+  readonly definitions: SettingDefinitions;
+  readonly settingNames: readonly SettingName[];
+  readonly storageKeys: readonly StorageKey[];
+  generateBrowserId(): string;
+  isValidBrowserId(value: unknown): value is string;
+  isValidSetting<Name extends SettingName>(
+    name: Name,
+    value: unknown,
+  ): value is SettingValues[Name];
+  isValidSetting(name: string, value: unknown): boolean;
+  mebibytesToBytes(value: number): number;
+  normalizeConfiguration(
+    values?: Readonly<Partial<Record<StorageKey, unknown>>>,
+  ): Configuration;
+  normalizeSetting<Name extends SettingName>(
+    name: Name,
+    value: unknown,
+  ): SettingValues[Name];
+  normalizeSetting(name: string, value: unknown): SettingValue | undefined;
+}
+
+export type InstructionAction =
+  | "click"
+  | "javascript"
+  | "keyboard"
+  | "screenshot"
+  | "tabs";
+export type InstructionStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed";
+export type TabOperation = "list" | "close" | "focus" | "navigate";
+export type KeyboardModifier = "alt" | "ctrl" | "meta" | "shift";
+export const NAMED_KEYBOARD_KEYS = Object.freeze([
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "Backspace",
+  "Delete",
+  "End",
+  "Enter",
+  "Escape",
+  "Home",
+  "PageDown",
+  "PageUp",
+  "Space",
+  "Tab",
+] as const);
+
+export type NamedKeyboardKey = (typeof NAMED_KEYBOARD_KEYS)[number];
+declare const keyboardCharacterBrand: unique symbol;
+export type KeyboardCharacter = string & {
+  readonly [keyboardCharacterBrand]: true;
+};
+export type KeyboardKey = NamedKeyboardKey | KeyboardCharacter;
+
+export function isKeyboardKey(value: unknown): value is KeyboardKey {
+  return (
+    typeof value === "string" &&
+    (NAMED_KEYBOARD_KEYS.some((key) => key === value) ||
+      (Array.from(value).length === 1 && value.trim().length > 0))
+  );
+}
+
+export function keyboardCharacter(value: string): KeyboardCharacter {
+  if (Array.from(value).length !== 1 || value.trim().length === 0) {
+    throw new RangeError(
+      "Keyboard characters must contain exactly one non-whitespace character",
+    );
+  }
+  return value as KeyboardCharacter;
+}
+
+export interface ListTabsPayload {
+  operation: "list";
+}
+
+export interface CloseTabPayload {
+  operation: "close";
+  tid: number;
+}
+
+export interface FocusTabPayload {
+  operation: "focus";
+  tid: number;
+}
+
+export interface NavigateTabPayload {
+  operation: "navigate";
+  tid?: number;
+  url: string;
+}
+
+export type TabsPayload =
+  | ListTabsPayload
+  | CloseTabPayload
+  | FocusTabPayload
+  | NavigateTabPayload;
+
+export interface ClickPayload {
+  tid: number;
+  selector: string;
+}
+
+export interface JavaScriptPayload {
+  tid: number;
+  script: string;
+}
+
+export interface KeyboardTextPayload {
+  tid: number;
+  text: string;
+  modifiers?: [];
+}
+
+export interface KeyboardKeyPayload {
+  tid: number;
+  key: KeyboardKey;
+  modifiers?: KeyboardModifier[];
+}
+
+export type KeyboardPayload = KeyboardTextPayload | KeyboardKeyPayload;
+
+export interface ScreenshotPayload {
+  tid: number;
+  full_page?: boolean;
+}
+
+export interface InstructionPayloadMap {
+  click: ClickPayload;
+  javascript: JavaScriptPayload;
+  keyboard: KeyboardPayload;
+  screenshot: ScreenshotPayload;
+  tabs: TabsPayload;
+}
+
+export type SupportedInstruction<
+  Action extends InstructionAction = InstructionAction,
+> = {
+  [CurrentAction in Action]: {
+    id: number;
+    action: CurrentAction;
+    payload: InstructionPayloadMap[CurrentAction];
+  };
+}[Action];
+
+export interface ClaimedInstruction {
+  id: number;
+  action: string;
+  payload: unknown;
+}
+
+export interface Instruction {
+  id: number;
+  bid: string;
+  action: string;
+  payload: JsonObject;
+  status: InstructionStatus;
+  result: JsonValue;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TabsInstructionRequest =
+  | { action: "tabs"; operation: "list" }
+  | { action: "tabs"; operation: "close"; tid: number }
+  | { action: "tabs"; operation: "focus"; tid: number }
+  | {
+      action: "tabs";
+      operation: "navigate";
+      tid?: number;
+      url: string;
+    };
+
+export interface ClickInstructionRequest extends ClickPayload {
+  action: "click";
+}
+
+export interface JavaScriptInstructionRequest extends JavaScriptPayload {
+  action: "javascript";
+}
+
+export type KeyboardInstructionRequest =
+  | {
+      action: "keyboard";
+      tid: number;
+      text: string;
+      key?: never;
+      modifiers?: [];
+    }
+  | {
+      action: "keyboard";
+      tid: number;
+      text?: never;
+      key: KeyboardKey;
+      modifiers?: KeyboardModifier[];
+    };
+
+export interface ScreenshotInstructionRequest {
+  action: "screenshot";
+  tid: number;
+  full_page?: boolean;
+}
+
+export type InstructionRequest =
+  | ClickInstructionRequest
+  | JavaScriptInstructionRequest
+  | KeyboardInstructionRequest
+  | ScreenshotInstructionRequest
+  | TabsInstructionRequest;
+
+export interface TabDetails {
+  tid: number;
+  window_id: number;
+  active: boolean;
+  title: string | null;
+  url: string | null;
+  domain: string | null;
+}
+
+export interface ListedTab extends TabDetails {
+  focused: boolean;
+}
+
+export interface ClosedTab {
+  closed: true;
+  tab: TabDetails;
+}
+
+export interface ClickResult {
+  clicked: true;
+  selector: string;
+  x: number;
+  y: number;
+}
+
+export interface KeyboardTextResult {
+  inserted_characters: number;
+}
+
+export interface KeyboardKeyResult {
+  key: KeyboardKey;
+  modifiers: KeyboardModifier[];
+}
+
+export interface ScreenshotUploadResult {
+  data: string;
+}
+
+export interface ScreenshotResult {
+  download_url: string;
+  content_type: "image/png";
+  full_page: boolean;
+  single_use: true;
+  tid: number;
+}
+
+export interface UnserializableJavaScriptResult {
+  type: string;
+  description: string | null;
+}
+
+export type JavaScriptResult = JsonValue | UnserializableJavaScriptResult;
+
+export type InstructionResultFor<Request extends InstructionRequest> =
+  Request extends { action: "click" }
+    ? ClickResult
+    : Request extends { action: "javascript" }
+      ? JavaScriptResult
+      : Request extends { action: "keyboard"; text: string }
+        ? KeyboardTextResult
+        : Request extends { action: "keyboard"; key: KeyboardKey }
+          ? KeyboardKeyResult
+          : Request extends { action: "screenshot" }
+            ? ScreenshotResult
+            : Request extends { action: "tabs"; operation: "list" }
+              ? ListedTab[]
+              : Request extends { action: "tabs"; operation: "close" }
+                ? ClosedTab
+                : Request extends {
+                      action: "tabs";
+                      operation: "focus" | "navigate";
+                    }
+                  ? TabDetails
+                  : never;
+
+export type InstructionResult = InstructionResultFor<InstructionRequest>;
+
+export type ExtensionInstructionResult =
+  | JsonValue
+  | ListedTab[]
+  | TabDetails
+  | ClosedTab
+  | ClickResult
+  | KeyboardTextResult
+  | KeyboardKeyResult
+  | ScreenshotUploadResult
+  | UnserializableJavaScriptResult;
+
+export type InstructionResultRequest =
+  | { result: ExtensionInstructionResult; error?: never }
+  | { result?: null; error: string };
+
+export interface GetConfigurationMessage {
+  type: "getConfiguration";
+}
+
+export interface PollMessage {
+  type: "poll";
+}
+
+export interface SettingsUpdatedMessage {
+  type: "settingsUpdated";
+  pollIntervalMs: number;
+}
+
+export type RuntimeMessage =
+  | GetConfigurationMessage
+  | PollMessage
+  | SettingsUpdatedMessage;
+
+export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const message = value as Record<string, unknown>;
+  if (message.type === "getConfiguration" || message.type === "poll") {
+    return true;
+  }
+  return (
+    message.type === "settingsUpdated" &&
+    typeof message.pollIntervalMs === "number"
+  );
+}
+
+export interface ErrorResponse {
+  error: string;
+}
+
+export type GetConfigurationResponse = Configuration | ErrorResponse;
+export type PollResponse = { ok: true } | ErrorResponse;

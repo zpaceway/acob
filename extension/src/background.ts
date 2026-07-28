@@ -1,6 +1,33 @@
-importScripts("settings.js");
+import { ACOBSettings } from "./settings.js";
+import { isKeyboardKey, isRuntimeMessage } from "./types.js";
+import type { Protocol } from "devtools-protocol";
+import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js";
+import type {
+  ClaimedInstruction,
+  ClickResult,
+  Configuration,
+  ExtensionInstructionResult,
+  InstructionResultRequest,
+  JsonValue,
+  KeyboardKeyResult,
+  KeyboardModifier,
+  KeyboardPayload,
+  KeyboardTextResult,
+  ScreenshotUploadResult,
+  SupportedInstruction,
+  TabDetails,
+  UnserializableJavaScriptResult,
+} from "./types.js";
 
-const KEY_DEFINITIONS = {
+interface KeyDefinition {
+  key: string;
+  code?: string;
+  keyCode?: number;
+  text?: string;
+  unmodifiedText?: string;
+}
+
+const KEY_DEFINITIONS: Record<string, KeyDefinition> = {
   ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
   ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
   ArrowRight: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
@@ -17,9 +44,14 @@ const KEY_DEFINITIONS = {
   Tab: { key: "Tab", code: "Tab", keyCode: 9 },
 };
 
-const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
+const MODIFIER_BITS: Record<KeyboardModifier, number> = {
+  alt: 1,
+  ctrl: 2,
+  meta: 4,
+  shift: 8,
+};
 
-const SHIFTED_CHARACTERS = {
+const SHIFTED_CHARACTERS: Record<string, string> = {
   "`": "~",
   1: "!",
   2: "@",
@@ -43,7 +75,10 @@ const SHIFTED_CHARACTERS = {
   "/": "?",
 };
 
-const CHARACTER_DEFINITIONS = {
+const CHARACTER_DEFINITIONS: Record<
+  string,
+  Pick<KeyDefinition, "code" | "keyCode">
+> = {
   "`": { code: "Backquote", keyCode: 192 },
   1: { code: "Digit1", keyCode: 49 },
   2: { code: "Digit2", keyCode: 50 },
@@ -67,19 +102,21 @@ const CHARACTER_DEFINITIONS = {
   "/": { code: "Slash", keyCode: 191 },
 };
 
-const UNSHIFTED_CHARACTERS = Object.fromEntries(
+const UNSHIFTED_CHARACTERS: Record<string, string> = Object.fromEntries(
   Object.entries(SHIFTED_CHARACTERS).map(([key, value]) => [value, key]),
 );
 
 let activeExecutions = 0;
-let offscreenPromise = null;
+let offscreenPromise: Promise<void> | null = null;
 let backendUnavailable = false;
-let configurationPromise = null;
+let configurationPromise: Promise<Configuration> | null = null;
 let pollInProgress = false;
-let tabCreationQueue = Promise.resolve();
+let tabCreationQueue: Promise<void> = Promise.resolve();
 
-async function loadConfiguration() {
-  const stored = await chrome.storage.local.get(ACOBSettings.storageKeys);
+async function loadConfiguration(): Promise<Configuration> {
+  const stored = await chrome.storage.local.get<
+    Partial<Record<keyof Configuration, unknown>>
+  >([...ACOBSettings.storageKeys]);
   const configuration = ACOBSettings.normalizeConfiguration(stored);
   if (
     ACOBSettings.storageKeys.some(
@@ -91,7 +128,7 @@ async function loadConfiguration() {
   return configuration;
 }
 
-async function getConfiguration() {
+async function getConfiguration(): Promise<Configuration> {
   if (!configurationPromise) {
     configurationPromise = loadConfiguration().catch((error) => {
       configurationPromise = null;
@@ -104,12 +141,12 @@ async function getConfiguration() {
   return loadConfiguration();
 }
 
-function instructionApiUrl(configuration) {
+function instructionApiUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
   return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
 }
 
-async function createOffscreenDocument() {
+async function createOffscreenDocument(): Promise<void> {
   const documentUrl = chrome.runtime.getURL("offscreen.html");
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ["OFFSCREEN_DOCUMENT"],
@@ -125,7 +162,7 @@ async function createOffscreenDocument() {
   }
 }
 
-function ensureOffscreenDocument() {
+function ensureOffscreenDocument(): Promise<void> {
   if (!offscreenPromise) {
     offscreenPromise = createOffscreenDocument().finally(() => {
       offscreenPromise = null;
@@ -135,25 +172,34 @@ function ensureOffscreenDocument() {
   return offscreenPromise;
 }
 
-function tabDetails(tab) {
-  let domain = null;
-  try {
-    domain = new URL(tab.url).hostname || null;
-  } catch {
-    domain = null;
+function tabDetails(tab: chrome.tabs.Tab): TabDetails {
+  if (tab.id === undefined) {
+    throw new Error("Chromium returned a tab without an ID");
+  }
+  const url = tab.url ?? null;
+  let domain: string | null = null;
+  if (url) {
+    try {
+      domain = new URL(url).hostname || null;
+    } catch {
+      domain = null;
+    }
   }
 
   return {
     tid: tab.id,
     window_id: tab.windowId,
     active: tab.active,
-    title: tab.title,
-    url: tab.url,
+    title: tab.title ?? null,
+    url,
     domain,
   };
 }
 
-function createTabWithinLimit(url, maxTabs) {
+function createTabWithinLimit(
+  url: string,
+  maxTabs: number,
+): Promise<chrome.tabs.Tab> {
   const creation = tabCreationQueue.then(async () => {
     const tabs = await chrome.tabs.query({});
     if (tabs.length >= maxTabs) {
@@ -163,23 +209,30 @@ function createTabWithinLimit(url, maxTabs) {
     }
     return chrome.tabs.create({ url, active: false });
   });
-  tabCreationQueue = creation.catch(() => undefined);
+  tabCreationQueue = creation.then(
+    () => undefined,
+    () => undefined,
+  );
   return creation;
 }
 
-function waitForTab(tid, timeoutMs) {
-  return new Promise((resolve, reject) => {
+function waitForTab(tid: number, timeoutMs: number): Promise<chrome.tabs.Tab> {
+  return new Promise<chrome.tabs.Tab>((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for the page to load"));
     }, timeoutMs);
 
-    function cleanup() {
+    function cleanup(): void {
       clearTimeout(timeoutId);
       chrome.tabs.onUpdated.removeListener(handleUpdate);
     }
 
-    function handleUpdate(updatedTid, changeInfo, tab) {
+    function handleUpdate(
+      updatedTid: number,
+      changeInfo: chrome.tabs.OnUpdatedInfo,
+      tab: chrome.tabs.Tab,
+    ): void {
       if (updatedTid === tid && changeInfo.status === "complete") {
         cleanup();
         resolve(tab);
@@ -202,18 +255,28 @@ function waitForTab(tid, timeoutMs) {
   });
 }
 
-function withTimeout(operation, timeoutMs, message) {
-  let timeoutId;
-  const timeout = new Promise((_, reject) => {
+function withTimeout<Result>(
+  operation: Promise<Result>,
+  timeoutMs: number,
+  message: string,
+): Promise<Result> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
   });
-  return Promise.race([operation, timeout]).finally(() =>
-    clearTimeout(timeoutId),
-  );
+  return Promise.race([operation, timeout]).finally(() => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  });
 }
 
-async function withDebugger(tid, configuration, callback) {
-  const target = { tabId: tid };
+async function withDebugger<Result>(
+  tid: number,
+  configuration: Configuration,
+  callback: (target: chrome.debugger.DebuggerSession) => Promise<Result>,
+): Promise<Result> {
+  const target: chrome.debugger.DebuggerSession = { tabId: tid };
   let attached = false;
 
   try {
@@ -231,10 +294,32 @@ async function withDebugger(tid, configuration, callback) {
   }
 }
 
-async function executeJavaScript(tid, script, configuration) {
+type CdpCommand = keyof ProtocolMapping.Commands;
+
+async function sendCdpCommand<Command extends CdpCommand>(
+  target: chrome.debugger.DebuggerSession,
+  method: Command,
+  ...parameters: ProtocolMapping.Commands[Command]["paramsType"]
+): Promise<ProtocolMapping.Commands[Command]["returnType"]> {
+  const commandParameters = parameters[0] as
+    | Record<string, unknown>
+    | undefined;
+  const result = await chrome.debugger.sendCommand(
+    target,
+    method,
+    commandParameters,
+  );
+  return result as ProtocolMapping.Commands[Command]["returnType"];
+}
+
+async function executeJavaScript(
+  tid: number,
+  script: string,
+  configuration: Configuration,
+): Promise<JsonValue | UnserializableJavaScriptResult> {
   return withDebugger(tid, configuration, async (target) => {
     const evaluation = await withTimeout(
-      chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+      sendCdpCommand(target, "Runtime.evaluate", {
         expression: script,
         awaitPromise: true,
         returnByValue: true,
@@ -253,7 +338,7 @@ async function executeJavaScript(tid, script, configuration) {
 
     const result = evaluation.result;
     if (Object.hasOwn(result, "value")) {
-      return result.value;
+      return result.value === undefined ? null : (result.value as JsonValue);
     }
     if (result.unserializableValue) {
       return result.unserializableValue;
@@ -265,14 +350,18 @@ async function executeJavaScript(tid, script, configuration) {
   });
 }
 
-async function executeClick(tid, selector, configuration) {
+async function executeClick(
+  tid: number,
+  selector: string,
+  configuration: Configuration,
+): Promise<ClickResult> {
   return withDebugger(tid, configuration, async (target) => {
-    const { root } = await chrome.debugger.sendCommand(
+    const { root } = await sendCdpCommand(
       target,
       "DOM.getDocument",
       { depth: 0 },
     );
-    const { nodeId } = await chrome.debugger.sendCommand(
+    const { nodeId } = await sendCdpCommand(
       target,
       "DOM.querySelector",
       { nodeId: root.nodeId, selector },
@@ -282,17 +371,20 @@ async function executeClick(tid, selector, configuration) {
       throw new Error(`No element matches selector: ${selector}`);
     }
 
-    await chrome.debugger.sendCommand(target, "DOM.scrollIntoViewIfNeeded", {
+    await sendCdpCommand(target, "DOM.scrollIntoViewIfNeeded", {
       nodeId,
     });
-    const { model } = await chrome.debugger.sendCommand(
+    const { model } = await sendCdpCommand(
       target,
       "DOM.getBoxModel",
       { nodeId },
     );
     const border = model.border;
-    const x = (border[0] + border[2] + border[4] + border[6]) / 4;
-    const y = (border[1] + border[3] + border[5] + border[7]) / 4;
+    if (border.length < 8) {
+      throw new Error(`Element has an invalid clickable box: ${selector}`);
+    }
+    const x = (border[0]! + border[2]! + border[4]! + border[6]!) / 4;
+    const y = (border[1]! + border[3]! + border[5]! + border[7]!) / 4;
 
     if (
       model.width < 1 ||
@@ -303,13 +395,13 @@ async function executeClick(tid, selector, configuration) {
       throw new Error(`Element has no clickable box: ${selector}`);
     }
 
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+    await sendCdpCommand(target, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x,
       y,
       pointerType: "mouse",
     });
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+    await sendCdpCommand(target, "Input.dispatchMouseEvent", {
       type: "mousePressed",
       x,
       y,
@@ -318,7 +410,7 @@ async function executeClick(tid, selector, configuration) {
       clickCount: 1,
       pointerType: "mouse",
     });
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+    await sendCdpCommand(target, "Input.dispatchMouseEvent", {
       type: "mouseReleased",
       x,
       y,
@@ -332,9 +424,13 @@ async function executeClick(tid, selector, configuration) {
   });
 }
 
-async function executeScreenshot(tid, fullPage, configuration) {
+async function executeScreenshot(
+  tid: number,
+  fullPage: boolean,
+  configuration: Configuration,
+): Promise<ScreenshotUploadResult> {
   return withDebugger(tid, configuration, async (target) => {
-    const { data } = await chrome.debugger.sendCommand(
+    const { data } = await sendCdpCommand(
       target,
       "Page.captureScreenshot",
       {
@@ -355,9 +451,10 @@ async function executeScreenshot(tid, fullPage, configuration) {
   });
 }
 
-function describeKey(key, shiftPressed) {
-  if (Object.hasOwn(KEY_DEFINITIONS, key)) {
-    return KEY_DEFINITIONS[key];
+function describeKey(key: string, shiftPressed: boolean): KeyDefinition {
+  const namedDefinition = KEY_DEFINITIONS[key];
+  if (namedDefinition) {
+    return namedDefinition;
   }
 
   const upperKey = key.toUpperCase();
@@ -389,16 +486,21 @@ function describeKey(key, shiftPressed) {
   return { key, text: key, unmodifiedText: key };
 }
 
-async function executeKeyboard(tid, payload, configuration) {
+async function executeKeyboard(
+  tid: number,
+  payload: KeyboardPayload,
+  configuration: Configuration,
+): Promise<KeyboardTextResult | KeyboardKeyResult> {
   return withDebugger(tid, configuration, async (target) => {
-    if (payload.text !== undefined) {
-      await chrome.debugger.sendCommand(target, "Input.insertText", {
+    if ("text" in payload) {
+      await sendCdpCommand(target, "Input.insertText", {
         text: payload.text,
       });
       return { inserted_characters: Array.from(payload.text).length };
     }
 
-    const modifiers = payload.modifiers.reduce(
+    const payloadModifiers = payload.modifiers ?? [];
+    const modifiers = payloadModifiers.reduce(
       (mask, modifier) => mask | MODIFIER_BITS[modifier],
       0,
     );
@@ -409,14 +511,14 @@ async function executeKeyboard(tid, payload, configuration) {
     const commandModifiers =
       MODIFIER_BITS.alt | MODIFIER_BITS.ctrl | MODIFIER_BITS.meta;
     const hasCommandModifier = (modifiers & commandModifiers) !== 0;
-    const keyEvent = {
+    const keyEvent: Omit<Protocol.Input.DispatchKeyEventRequest, "type"> = {
       key: definition.key,
       modifiers,
     };
-    if (definition.code) {
+    if (definition.code !== undefined) {
       keyEvent.code = definition.code;
     }
-    if (definition.keyCode) {
+    if (definition.keyCode !== undefined) {
       keyEvent.windowsVirtualKeyCode = definition.keyCode;
     }
     const keyDownEvent = { ...keyEvent };
@@ -426,19 +528,22 @@ async function executeKeyboard(tid, payload, configuration) {
         definition.unmodifiedText ?? definition.text;
     }
 
-    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+    await sendCdpCommand(target, "Input.dispatchKeyEvent", {
       ...keyDownEvent,
       type: definition.text && !hasCommandModifier ? "keyDown" : "rawKeyDown",
     });
-    await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+    await sendCdpCommand(target, "Input.dispatchKeyEvent", {
       ...keyEvent,
       type: "keyUp",
     });
-    return { key: payload.key, modifiers: payload.modifiers };
+    return { key: payload.key, modifiers: payloadModifiers };
   });
 }
 
-async function runInstruction(instruction, configuration) {
+async function runInstruction(
+  instruction: SupportedInstruction,
+  configuration: Configuration,
+): Promise<ExtensionInstructionResult> {
   const { action, payload } = instruction;
 
   if (action === "tabs") {
@@ -463,23 +568,31 @@ async function runInstruction(instruction, configuration) {
 
     if (operation === "close") {
       const tab = await chrome.tabs.get(payload.tid);
-      await chrome.tabs.remove(tab.id);
-      return { closed: true, tab: tabDetails(tab) };
+      const details = tabDetails(tab);
+      await chrome.tabs.remove(details.tid);
+      return { closed: true, tab: details };
     }
 
     if (operation === "focus") {
       const tab = await chrome.tabs.get(payload.tid);
       await chrome.windows.update(tab.windowId, { focused: true });
-      const focusedTab = await chrome.tabs.update(tab.id, { active: true });
+      const focusedTab = await chrome.tabs.update(payload.tid, { active: true });
+      if (!focusedTab) {
+        throw new Error(`Chromium did not return focused tab ${payload.tid}`);
+      }
       return tabDetails(focusedTab);
     }
 
     if (operation === "navigate") {
-      const navigatedTab = payload.tid
+      const navigatedTab = payload.tid !== undefined
         ? await chrome.tabs.update(payload.tid, { url: payload.url })
         : await createTabWithinLimit(payload.url, configuration.maxTabs);
+      if (!navigatedTab) {
+        throw new Error("Chromium did not return the navigated tab");
+      }
+      const navigatedTabDetails = tabDetails(navigatedTab);
       const loadedTab = await waitForTab(
-        navigatedTab.id,
+        navigatedTabDetails.tid,
         configuration.tabLoadTimeoutMs,
       );
       return tabDetails(loadedTab);
@@ -505,13 +618,21 @@ async function runInstruction(instruction, configuration) {
 
   if (action === "screenshot") {
     await chrome.tabs.get(payload.tid);
-    return executeScreenshot(payload.tid, payload.full_page, configuration);
+    return executeScreenshot(
+      payload.tid,
+      payload.full_page ?? false,
+      configuration,
+    );
   }
 
   throw new Error(`Unknown action: ${action}`);
 }
 
-async function sendResult(instructionId, body, configuration) {
+async function sendResult(
+  instructionId: number,
+  body: InstructionResultRequest,
+  configuration: Configuration,
+): Promise<void> {
   const apiUrl = instructionApiUrl(configuration);
   for (
     let attempt = 1;
@@ -544,9 +665,17 @@ async function sendResult(instructionId, body, configuration) {
   }
 }
 
-async function executeInstruction(instruction, configuration) {
-  let body;
+async function executeInstruction(
+  instruction: ClaimedInstruction,
+  configuration: Configuration,
+): Promise<void> {
+  let body: InstructionResultRequest;
   try {
+    if (!isSupportedInstruction(instruction)) {
+      throw new Error(
+        `Unsupported or invalid instruction: ${instruction.action}`,
+      );
+    }
     const result = await runInstruction(instruction, configuration);
     body = { result };
   } catch (error) {
@@ -557,7 +686,7 @@ async function executeInstruction(instruction, configuration) {
   await sendResult(instruction.id, body, configuration);
 }
 
-function reportError(error) {
+function reportError(error: unknown): void {
   if (error instanceof TypeError) {
     if (!backendUnavailable) {
       console.info("ACOB server unavailable; retrying");
@@ -568,12 +697,93 @@ function reportError(error) {
   console.error(error);
 }
 
-async function poll() {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function hasValidModifiers(
+  value: unknown,
+): value is KeyboardModifier[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (modifier) =>
+        typeof modifier === "string" &&
+        Object.hasOwn(MODIFIER_BITS, modifier),
+    )
+  );
+}
+
+function isClaimedInstruction(value: unknown): value is ClaimedInstruction {
+  return (
+    isRecord(value) &&
+    isPositiveInteger(value.id) &&
+    typeof value.action === "string" &&
+    Object.hasOwn(value, "payload")
+  );
+}
+
+function isSupportedInstruction(
+  value: ClaimedInstruction,
+): value is SupportedInstruction {
+  if (!isRecord(value.payload)) {
+    return false;
+  }
+
+  const payload = value.payload;
+  if (value.action === "click") {
+    return (
+      isPositiveInteger(payload.tid) && typeof payload.selector === "string"
+    );
+  }
+  if (value.action === "javascript") {
+    return isPositiveInteger(payload.tid) && typeof payload.script === "string";
+  }
+  if (value.action === "keyboard") {
+    if (
+      !isPositiveInteger(payload.tid) ||
+      (payload.modifiers !== undefined &&
+        !hasValidModifiers(payload.modifiers))
+    ) {
+      return false;
+    }
+    return typeof payload.text === "string"
+      ? (payload.modifiers?.length ?? 0) === 0 && payload.key === undefined
+      : isKeyboardKey(payload.key) && payload.text === undefined;
+  }
+  if (value.action === "screenshot") {
+    return (
+      isPositiveInteger(payload.tid) &&
+      (payload.full_page === undefined ||
+        typeof payload.full_page === "boolean")
+    );
+  }
+  if (value.action !== "tabs") {
+    return false;
+  }
+  if (payload.operation === "list") {
+    return true;
+  }
+  if (payload.operation === "close" || payload.operation === "focus") {
+    return isPositiveInteger(payload.tid);
+  }
+  return (
+    payload.operation === "navigate" &&
+    typeof payload.url === "string" &&
+    (payload.tid === undefined || isPositiveInteger(payload.tid))
+  );
+}
+
+async function poll(): Promise<void> {
   if (pollInProgress) {
     return;
   }
 
-  const executions = [];
+  const executions: Promise<void>[] = [];
   pollInProgress = true;
   try {
     const configuration = await getConfiguration();
@@ -604,11 +814,27 @@ async function poll() {
       throw new Error(`Could not fetch instruction: HTTP ${response.status}`);
     }
 
-    const instructions = await response.json();
-    if (!Array.isArray(instructions) || instructions.length > limit) {
+    const instructions: unknown = await response.json();
+    if (!Array.isArray(instructions)) {
       throw new Error("ACOB server returned an invalid instruction batch");
     }
+    let scheduledExecutions = 0;
     for (const instruction of instructions) {
+      if (!isClaimedInstruction(instruction)) {
+        reportError(new Error("ACOB server returned an invalid instruction"));
+        continue;
+      }
+      if (scheduledExecutions >= limit) {
+        executions.push(
+          sendResult(
+            instruction.id,
+            { error: "ACOB server returned more instructions than requested" },
+            configuration,
+          ).catch(reportError),
+        );
+        continue;
+      }
+      scheduledExecutions += 1;
       activeExecutions++;
       executions.push(
         executeInstruction(instruction, configuration)
@@ -626,7 +852,10 @@ async function poll() {
   await Promise.allSettled(executions);
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  if (!isRuntimeMessage(message)) {
+    return;
+  }
   if (message.type === "poll") {
     poll().then(
       () => sendResponse({ ok: true }),

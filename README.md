@@ -39,14 +39,54 @@ Stop and remove the service with `docker compose down`. The SQLite database is s
 
 ## Browser extension
 
-With either server running, load the extension in Chromium 116 or newer:
+Install the extension toolchain and create a production build:
+
+```bash
+cd extension
+npm ci
+npm run build
+```
+
+With either server running, load the built extension in Chromium 116 or newer:
 
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
-3. Select **Load unpacked** and choose the `extension/` directory.
+3. Select **Load unpacked** and choose the `extension/dist/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-`extension/settings.js` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load, JavaScript, and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+The extension source is strict TypeScript under `extension/src/`. `settings.ts` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup uses Tailwind CSS and generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load, JavaScript, and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+
+Run the extension checks independently:
+
+```bash
+cd extension
+npm run typecheck
+npm test
+npm run build
+```
+
+The extension is also a reusable typed package. Its generated entry point exports
+`ACOBSettings` plus the configuration, instruction, result, and runtime-message
+contracts from `extension/src/types.ts`:
+
+```typescript
+import {
+  ACOBSettings,
+  type Configuration,
+  type InstructionRequest,
+} from "@zpaceway/acob-extension";
+
+const configuration: Configuration = ACOBSettings.normalizeConfiguration({
+  baseUrl: "https://acob.example",
+});
+const request: InstructionRequest = {
+  action: "tabs",
+  operation: "list",
+};
+```
+
+`npm run build` emits JavaScript, source maps, declaration files, the compiled
+Tailwind stylesheet, and extension assets into `extension/dist/`.
 
 ## Python client
 
@@ -164,3 +204,10 @@ Reads are non-destructive while the instruction is `pending` or `processing`. Th
 Invalid requests return an `Invalid request` error with a `details` list containing the field, message, and validation type for each problem.
 
 The browser ID must be a lowercase dashless UUIDv4. API clients select a browser by using its ID in every instruction route.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, verification, and
+pull request guidance. Report vulnerabilities privately according to
+[SECURITY.md](SECURITY.md). Community participation is governed by the
+[Code of Conduct](CODE_OF_CONDUCT.md).

@@ -1,0 +1,47 @@
+{
+  "name": "@zpaceway/acob-extension",
+  "version": "0.1.0",
+  "description": "Chromium extension for executing ACOB browser instructions.",
+  "keywords": [
+    "browser-automation",
+    "chrome-extension",
+    "chromium",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zpaceway/acob.git",
+    "directory": "extension"
+  },
+  "bugs": {
+    "url": "https://github.com/zpaceway/acob/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "LICENSE", "README.md"],
+  "scripts": {
+    "build": "tsx build.ts",
+    "prepack": "npm run build",
+    "test": "tsx --test tests/settings.test.ts tests/keyboard.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "@types/chrome": "0.2.2",
+    "@types/node": "26.1.2",
+    "devtools-protocol": "0.0.1669207",
+    "tsx": "4.23.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2"
+  }
+}

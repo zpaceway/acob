@@ -1,11 +1,7 @@
-const assert = require("node:assert/strict");
-const { randomUUID } = require("node:crypto");
-const test = require("node:test");
+import assert from "node:assert/strict";
+import test from "node:test";
 
-globalThis.crypto = { randomUUID };
-require("./settings.js");
-
-const settings = globalThis.ACOBSettings;
+import { ACOBSettings as settings } from "../src/settings.js";
 const BID = "0123456789ab4def8123456789abcdef";
 
 test("normalizes a complete default configuration", () => {
