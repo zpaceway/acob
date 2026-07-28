@@ -35,6 +35,7 @@ run:
 
 docker:
 	@echo "Building Docker image..."
+	docker compose down --remove-orphans
 	docker compose up -d --build
 
 publish-client:
