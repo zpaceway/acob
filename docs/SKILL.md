@@ -9,11 +9,18 @@ Use ACOB (Agent Controlled Browser) to control the user's existing Chromium sess
 
 ## Architecture
 
-ACOB has three parts:
+ACOB has three runtime components:
 
-1. `ACOBClient` asynchronously submits an instruction to the selected browser's API queue.
-2. The Chromium extension claims queued instructions from its browser-specific `/next/` route and executes independent work concurrently.
-3. The extension posts the result under the same browser ID. `ACOBClient` asynchronously polls and consumes the browser-specific terminal response.
+1. `ACOBClient` provides the asynchronous Python API used by the agent.
+2. The Django server stores transient, browser-specific instruction queues and
+   results.
+3. The Chromium extension polls its queue, executes independent work
+   concurrently, and posts each result.
+
+For each action, `ACOBClient` submits an instruction to the selected browser's
+server queue and polls its detail route. The extension claims the instruction
+from `/next/`, executes it, and posts the result under the same browser ID. The
+client then consumes the browser-specific terminal response.
 
 The Python action methods are awaitable. They handle submission and non-blocking polling, then return the completed browser `result`. Do not implement a second polling loop around an action method.
 
@@ -27,9 +34,9 @@ The API has five actions:
 
 ## Preconditions
 
-Before controlling the browser, confirm:
-
-- The ACOB extension is connected to the target Chromium browser.
+Before controlling the browser, confirm that the `acob` Python module is
+installed and the server endpoint is reachable. The extension must be enabled
+in the target Chromium profile and configured to poll that endpoint.
 
 Use the target browser's lowercase dashless UUIDv4 from the extension popup.
 Initialize one client for that browser inside an async context. Omit `endpoint`
@@ -56,9 +63,13 @@ asyncio.run(main())
 ```
 
 If the endpoint is unavailable, report the connection failure and ask the user
-to confirm the deployed server and extension connection. If the user has not
-identified the target browser and its ID is unavailable, ask for the browser ID
-shown in the extension popup before creating the client.
+to confirm the deployed server. ACOB currently has no heartbeat or connection
+status endpoint; a successful `tabs(operation="list")` call is the end-to-end
+check that the selected extension is polling. If that call times out, ask the
+user to confirm that the extension is enabled and configured for the same
+endpoint. If the user has not identified the target browser and its ID is
+unavailable, ask for the browser ID shown in the extension popup before
+creating the client.
 
 ## Core Workflow
 
@@ -92,7 +103,12 @@ instruction = await client.submit("tabs", operation="list")
 terminal = await client.wait(instruction["id"])
 ```
 
-Possible statuses are `pending`, `processing`, `completed`, and `failed`. Pending and processing reads are non-destructive. The first terminal read atomically deletes the instruction, so preserve the dictionary returned by `wait()`. The high-level action methods already preserve and process that response internally.
+Possible statuses are `pending`, `processing`, `completed`, and `failed`.
+Pending and processing reads are non-destructive. The first terminal reader to
+win the server's conditional deletion receives the instruction, so preserve the
+dictionary returned by `wait()`. A competing or later terminal read receives
+404. The high-level action methods already preserve and process that response
+internally.
 
 ## Tab Operations
 

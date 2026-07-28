@@ -1,3 +1,5 @@
+name: acob
+
 services:
   acob:
     build: .

@@ -18,6 +18,7 @@ List the exact automated commands and manual browser checks performed.
 - [ ] Python client tests
 - [ ] Extension typecheck and tests
 - [ ] Extension production build
+- [ ] Static website preview and link checks
 - [ ] Manual Chromium verification, when applicable
 
 ## Checklist

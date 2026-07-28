@@ -2,14 +2,16 @@
 
 ## Supported Versions
 
-Security fixes are applied to the current `master` branch and the latest
-release. Older releases are not maintained with backported security fixes.
+Security fixes are applied to the current `master` branch. The server,
+extension, and Python client are versioned independently; when a component is
+released, only its latest release is supported unless a release notice states
+otherwise. Older versions do not receive backported fixes.
 
 | Version | Supported |
 | --- | --- |
-| Latest release | Yes |
 | `master` | Yes |
-| Older releases | No |
+| Latest release of each component | Yes |
+| Older component releases | No |
 
 ## Reporting a Vulnerability
 
@@ -36,6 +38,12 @@ reporter, and credit reporters who want public attribution.
 ACOB is a browser-control system with intentionally powerful access. The
 extension uses Chromium's debugger API and host access for all URLs. The HTTP
 API can enqueue JavaScript, input, navigation, and screenshot instructions.
+
+The checked-in server configuration is for trusted local development. It has
+no API authentication or TLS, uses a committed development secret, enables
+Django debug mode, accepts every host, and exempts API POST routes from CSRF
+protection. The Compose configuration publishes the API port on all host
+interfaces.
 
 - Bind the server to a trusted interface unless network access is explicitly
   secured by authentication and transport controls outside ACOB.

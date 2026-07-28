@@ -1,0 +1,25 @@
+CLIENT_DIST_DIR ?= dist
+
+.PHONY: format check test build publish
+
+format:
+	@echo "Formatting Python code..."
+	uv run ruff check --fix .
+	uv run black acob tests
+
+check:
+	uv run ruff check .
+	uv run black --check acob tests
+	uv run pyright
+
+test:
+	uv run python -m unittest discover -s tests -v
+
+build:
+	@echo "Building acob-client..."
+	uv build --out-dir "$(CLIENT_DIST_DIR)" --clear
+	uvx twine check "$(CLIENT_DIST_DIR)"/*
+
+publish: build
+	@echo "Publishing acob-client..."
+	uvx twine upload "$(CLIENT_DIST_DIR)"/*

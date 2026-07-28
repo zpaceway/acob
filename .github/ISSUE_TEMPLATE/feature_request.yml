@@ -11,6 +11,7 @@ body:
         - Django server or API
         - Chromium extension
         - Python client
+        - Website
         - Build or packaging
         - Documentation
         - Cross-component protocol

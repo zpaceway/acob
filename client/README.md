@@ -4,11 +4,16 @@ The ACOB Python client asynchronously controls one Chromium installation
 through an ACOB server. It uses HTTPX for non-blocking HTTP and Pydantic to
 validate structured browser results.
 
-Install it from the repository:
+It requires Python 3.10 or newer. Install it from this directory:
 
 ```bash
-pip install ./client
+python -m pip install .
 ```
+
+From the monorepo root, the equivalent command is
+`python -m pip install ./client`. The [server](../srv/README.md) and
+[Chromium extension](../extension/README.md) must also be running to execute
+browser instructions.
 
 All operations that communicate with ACOB are awaitable. Create a client with
 the browser ID shown in the extension popup and close it with `async with`:
@@ -49,12 +54,17 @@ client = ACOBClient(
     "0123456789ab4def8123456789abcdef",
     endpoint="http://127.0.0.1:8000",
     timeout=90,
+    poll_interval=0.5,
 )
 try:
     tabs = await client.tabs(operation="list")
 finally:
     await client.aclose()
 ```
+
+`timeout` is the default maximum duration for a complete browser instruction.
+`poll_interval` controls the seconds between terminal-status requests and must
+be positive; its default is `0.5`.
 
 Keep a client within one event loop. A client can safely serve concurrent tasks,
 and its reusable HTTP session remains open until the context exits or
@@ -155,3 +165,23 @@ try:
 except ACOBTimeoutError as error:
     terminal_response = await client.wait(error.instruction_id, timeout=30)
 ```
+
+## Development
+
+Install [`uv`](https://docs.astral.sh/uv/), then run the component-local checks:
+
+```bash
+uv sync
+make check
+make test
+make build
+```
+
+`make check` runs Ruff, Black in check mode, and Pyright. `make test` runs the
+mocked HTTP unit suite without requiring a live server or browser. `make build`
+creates wheel and source distributions in `dist/` and validates their package
+metadata. `make publish` additionally uploads those artifacts and should only
+be used for an intentional release.
+
+See the [root README](../README.md) for the full repository layout and
+[`docs/SKILL.md`](../docs/SKILL.md) for agent-oriented usage guidance.

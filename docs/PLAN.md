@@ -1,6 +1,10 @@
 # ACOB Feature Plan
 
-This document turns the project review into an implementation roadmap. ACOB is intentionally a small, local-first Django service and Chromium extension; proposed features should preserve that simplicity unless a broader deployment model is explicitly adopted.
+This document turns the project review into an implementation roadmap. ACOB is
+intentionally a small, local-first system organized as a component-owned
+monorepo: Django server, Chromium extension, Python client, agent documentation,
+and static website. Proposed features should preserve that simplicity unless a
+broader deployment model is explicitly adopted.
 
 ## Current Baseline
 
@@ -16,14 +20,19 @@ ACOB currently provides:
 - An asynchronous Python client with concurrent instruction submission and polling.
 - Centralized extension settings with generated popup controls.
 - Strict Pydantic request validation, Docker support, and agent integration through `SKILL.md`.
+- Independent component tooling and documentation under `client/`, `docs/`, `extension/`, `srv/`, and `web/`.
 
-## Current Milestone
+## Completed Milestone
 
 ### Transient Instructions
 
 Status: implemented.
 
-Instruction rows are transport state, not history. They should remain available while `pending` or `processing` so agents can poll safely. The first agent request that reads a `completed` or `failed` instruction will return the terminal response and atomically delete the row. Later reads will return `404 Instruction not found`.
+Instruction rows are transport state, not history. They remain available while
+`pending` or `processing` so agents can poll safely. The first agent request
+that reads a `completed` or `failed` instruction returns the terminal response
+and conditionally deletes the row. A competing or later terminal read returns
+`404 Instruction not found`.
 
 Agent documentation must make the one-shot behavior explicit: capture every terminal response immediately and never expect a terminal instruction to be retrievable twice.
 
@@ -31,23 +40,34 @@ Agent documentation must make the one-shot behavior explicit: capture every term
 
 Status: implemented.
 
-Add a `screenshot` action targeting a tab. It should support viewport capture and optional full-page capture through the Chromium Debugger API.
+The `screenshot` action targets a tab and supports viewport capture and
+optional full-page capture through the Chromium Debugger API.
 
-Screenshot bytes will cross the extension API as base64 and be stored base64-encoded in a dedicated transient database table. Encoded captures are limited to 30 MiB so an oversized result can fail cleanly below the server request limit. The completed instruction result will contain screenshot metadata and a browser-scoped download endpoint, never the base64 payload itself.
+Screenshot bytes cross the extension API as base64 and are stored
+base64-encoded in a dedicated transient database table. Encoded captures are
+limited to 30 MiB so an oversized result fails cleanly below the server request
+limit. The completed instruction result contains screenshot metadata and a
+browser-scoped download endpoint, never the base64 payload itself.
 
-The first successful request to the download endpoint will decode and return the image, then atomically delete its database row. Later downloads will return 404. Agents must save or process the first response because interrupted or repeated downloads are not recoverable.
+A download request decodes the image and deletes its database row before
+returning the response. Later sequential downloads return 404. Agents must save
+or process the first response because interrupted or repeated downloads are not
+recoverable. The current SQLite implementation does not guarantee exclusive
+consumption by concurrent download requests.
 
 ### Keyboard Input
 
 Status: implemented.
 
-Add a `keyboard` action targeting the element that currently has keyboard focus in a tab. It should support:
+The `keyboard` action targets the element that currently has keyboard focus in
+a tab. It supports:
 
 - Text input through Chromium's text-input command.
 - Individual keys such as Enter, Tab, Escape, Backspace, Delete, and arrow keys.
 - Optional Alt, Ctrl, Meta, and Shift modifiers for shortcuts.
 
-The action should leave tab and window focus unchanged while dispatching input. Agents should click or otherwise focus the intended page control before typing.
+The action leaves tab and window focus unchanged while dispatching input.
+Agents should click or otherwise focus the intended page control before typing.
 
 ### Tab Navigation
 
@@ -84,7 +104,8 @@ Status: deferred by decision.
 ### API Hardening
 
 - Add an optional shared API token before supporting non-localhost deployments.
-- Add rate limits and instruction payload size limits.
+- Add rate limits and tighter action-specific instruction payload limits below
+  Django's existing 32 MiB request-body ceiling.
 - Add expiry cleanup for instructions that are never completed or consumed and screenshots that are never downloaded.
 - Add a small operational dashboard and paginated queue listing only if queue diagnostics become necessary; consumed results should not be restored as history by default.
 - Add structured logging and a health-check endpoint.
@@ -104,6 +125,9 @@ Status: deferred by decision.
 
 ## Project Maintenance
 
-- Add a license before wider distribution.
-- Add `CONTRIBUTING.md` and a changelog when external contributions or releases begin.
-- Keep `README.md`, `SKILL.md`, API schemas, extension behavior, migrations, and tests synchronized for every action or lifecycle change.
+- The repository and extension package use the MIT License, and contribution
+  guidance lives in `CONTRIBUTING.md`.
+- Add a changelog when external releases begin.
+- Keep the root and component READMEs, `SKILL.md`, API schemas, extension
+  behavior, client models, migrations, and tests synchronized for every action
+  or lifecycle change.

@@ -1,50 +1,72 @@
 # ACOB
 
-ACOB (Agent Controlled Browser) is a small Django server and Chromium extension for controlling browser tabs through an HTTP API.
+ACOB (Agent Controlled Browser) is a local-first browser-control system. A
+Django API queues instructions, a Chromium extension executes them in the
+user's browser, and an asynchronous Python client gives agents a typed API for
+tabs, clicks, keyboard input, screenshots, and JavaScript.
 
-The server temporarily stores instructions in SQLite. At its configured polling interval, the extension claims a configurable batch of instructions, runs them concurrently, and sends each result back. Completed instructions and screenshots are consumed on first read rather than retained as history.
+The repository is organized as a component-owned monorepo. Each project keeps
+its source, dependencies, tooling, and documentation in its own directory.
+
+## Repository Layout
+
+| Directory | Project |
+| --- | --- |
+| [`client/`](client/README.md) | Independently installable Python API client. |
+| [`docs/`](docs/README.md) | Project roadmap and installable agent skill. |
+| [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
+| [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
+| [`web/`](web/README.md) | Buildless static marketing website. |
+
+There is no root dependency manifest or root task runner. Run commands from the
+relevant component directory, or use tools such as `make -C <directory>` and
+`npm --prefix <directory>` from the repository root.
 
 ## Local setup
 
-Install dependencies:
+The server requires Python 3.14 or newer and
+[`uv`](https://docs.astral.sh/uv/). Install its dependencies, prepare SQLite,
+and start Django:
 
 ```bash
-uv sync
+uv --directory srv sync
+make -C srv dev
 ```
 
-Prepare the database and start the development server:
-
-```bash
-make dev
-```
-
-The server listens on `http://127.0.0.1:58347`. Override the address with Make variables when needed, for example `make dev HOST=0.0.0.0 PORT=8000`. Use `make run` instead to serve the application with Uvicorn.
+The server listens on `http://127.0.0.1:58347`. Override the address with Make
+variables, for example `make -C srv dev HOST=0.0.0.0 PORT=8000`. Use
+`make -C srv run` to serve the ASGI application with Uvicorn. These settings are
+intended for local development and do not provide API authentication or TLS;
+review [SECURITY.md](SECURITY.md) before exposing ACOB to a network.
 
 ## Docker
 
 Build the image and start the server with Docker Compose:
 
 ```bash
-docker compose up --build
+docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose service applies migrations through `make run` and exposes the server at `http://127.0.0.1:58347`. To run it in the background and follow its logs:
+The Compose service applies migrations through `make run` and publishes port
+`58347` on the host. To run it in the background and follow its logs:
 
 ```bash
-docker compose up --build --detach
-docker compose logs --follow acob
+docker compose -f srv/compose.yaml up --build --detach
+docker compose -f srv/compose.yaml logs --follow acob
 ```
 
-Stop and remove the service with `docker compose down`. The SQLite database is stored inside the container, so its data is lost when the container is removed or replaced.
+Stop and remove it with `docker compose -f srv/compose.yaml down`. The SQLite
+database is stored inside the container, so its data is lost when the container
+is removed or replaced. Compose publishes the port on all host interfaces by
+default; do not run this configuration on an untrusted network.
 
 ## Browser extension
 
 Install the extension toolchain and create a production build:
 
 ```bash
-cd extension
-npm ci
-npm run build
+npm --prefix extension ci
+npm --prefix extension run build
 ```
 
 With either server running, load the built extension in Chromium 116 or newer:
@@ -54,15 +76,19 @@ With either server running, load the built extension in Chromium 116 or newer:
 3. Select **Load unpacked** and choose the `extension/dist/` directory.
 4. Open the ACOB extension popup and copy its automatically generated browser ID.
 
-The extension source is strict TypeScript under `extension/src/`. `settings.ts` is the single source for all extension defaults, validation constraints, labels, hints, and UI visibility/editability flags. The popup uses Tailwind CSS and generates controls for visible settings, including the server URL, polling interval and batch size, execution and tab limits, page-load, JavaScript, and HTTP request timeouts, screenshot size limit, and result retry behavior. Popup status duration and debugger protocol version remain centralized but hidden and read-only. Each extension installation gets a dashless UUID browser ID. Instructions are stored and claimed under that ID, allowing one server to control multiple independent browsers. Rotating the ID moves the extension to a new instruction queue.
+The extension source is strict TypeScript under `extension/src/`. Each
+installation gets a dashless UUID browser ID. Instructions are stored and
+claimed under that ID, allowing one server to control multiple independent
+browsers. Rotating the ID moves the extension to a new instruction queue. See
+[`extension/README.md`](extension/README.md) for its architecture, settings,
+permissions, package exports, and manual verification steps.
 
 Run the extension checks independently:
 
 ```bash
-cd extension
-npm run typecheck
-npm test
-npm run build
+npm --prefix extension run typecheck
+npm --prefix extension test
+npm --prefix extension run build
 ```
 
 The extension is also a reusable typed package. Its generated entry point exports
@@ -90,10 +116,11 @@ Tailwind stylesheet, and extension assets into `extension/dist/`.
 
 ## Python client
 
-An independently installable Python client is available in `client/`:
+From the repository root, install the independently packaged Python client with
+Python 3.10 or newer:
 
 ```bash
-pip install ./client
+python -m pip install ./client
 ```
 
 It exports the asynchronous `ACOBClient`, which submits instructions, waits for
@@ -121,6 +148,31 @@ Pass `endpoint="http://host:port"` to target a non-default server. Independent
 actions can be launched together with `asyncio.gather()`. See
 [`client/README.md`](client/README.md) for every action, parallel execution,
 low-level queue access, timeout behavior, and error types.
+
+## Agent Documentation
+
+[`docs/SKILL.md`](docs/SKILL.md) teaches compatible agents how to use the
+Python client safely. Install it for one of the supported agent hosts from the
+repository root:
+
+```bash
+make -C docs install-skill-claude
+make -C docs install-skill-opencode
+```
+
+See [`docs/README.md`](docs/README.md) for prerequisites and maintenance notes.
+
+## Website
+
+The standalone site in `web/` is static and is not served by Django. Preview it
+without installing dependencies:
+
+```bash
+python -m http.server 8000 --directory web
+```
+
+Open `http://127.0.0.1:8000`. See [`web/README.md`](web/README.md) for its file
+layout and deployment expectations.
 
 ## API
 
