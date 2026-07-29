@@ -112,6 +112,7 @@ let backendUnavailable = false;
 let configurationPromise: Promise<Configuration> | null = null;
 let pollInProgress = false;
 let tabCreationQueue: Promise<void> = Promise.resolve();
+let turndownScriptPromise: Promise<string> | null = null;
 
 async function loadConfiguration(): Promise<Configuration> {
   const stored = await chrome.storage.local.get<
@@ -271,6 +272,44 @@ function withTimeout<Result>(
   });
 }
 
+function loadTurndownScript(): Promise<string> {
+  if (!turndownScriptPromise) {
+    const scriptUrl = chrome.runtime.getURL("turndown.js");
+    turndownScriptPromise = fetch(scriptUrl)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Could not load Turndown: HTTP ${response.status}`);
+        }
+        const source = await response.text();
+        if (!source.trim()) {
+          throw new Error("Could not load Turndown: extension asset is empty");
+        }
+        return `(function () {
+${source}
+window.TurndownService = TurndownService;
+}).call(window);
+//# sourceURL=${scriptUrl}`;
+      })
+      .catch((error) => {
+        turndownScriptPromise = null;
+        throw error;
+      });
+  }
+  return turndownScriptPromise;
+}
+
+function throwEvaluationException(
+  evaluation: Protocol.Runtime.EvaluateResponse,
+): void {
+  if (!evaluation.exceptionDetails) {
+    return;
+  }
+  const message =
+    evaluation.exceptionDetails.exception?.description ??
+    evaluation.exceptionDetails.text;
+  throw new Error(message);
+}
+
 async function withDebugger<Result>(
   tid: number,
   configuration: Configuration,
@@ -317,7 +356,18 @@ async function executeJavaScript(
   script: string,
   configuration: Configuration,
 ): Promise<JsonValue | UnserializableJavaScriptResult> {
+  const turndownScript = await loadTurndownScript();
   return withDebugger(tid, configuration, async (target) => {
+    const installation = await withTimeout(
+      sendCdpCommand(target, "Runtime.evaluate", {
+        expression: turndownScript,
+        returnByValue: true,
+      }),
+      configuration.javascriptTimeoutMs,
+      "Timed out loading Turndown",
+    );
+    throwEvaluationException(installation);
+
     const evaluation = await withTimeout(
       sendCdpCommand(target, "Runtime.evaluate", {
         expression: script,
@@ -328,13 +378,7 @@ async function executeJavaScript(
       configuration.javascriptTimeoutMs,
       "Timed out waiting for JavaScript to finish",
     );
-
-    if (evaluation.exceptionDetails) {
-      const message =
-        evaluation.exceptionDetails.exception?.description ??
-        evaluation.exceptionDetails.text;
-      throw new Error(message);
-    }
+    throwEvaluationException(evaluation);
 
     const result = evaluation.result;
     if (Object.hasOwn(result, "value")) {

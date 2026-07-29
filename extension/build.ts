@@ -24,6 +24,9 @@ const assets = [
   "offscreen.html",
   "popup.html",
 ];
+const turndownDirectory = path.dirname(
+  require.resolve("turndown/package.json"),
+);
 
 await rm(outputDirectory, { recursive: true, force: true });
 execFileSync(
@@ -37,10 +40,23 @@ execFileSync(
 );
 await mkdir(outputDirectory, { recursive: true });
 await Promise.all(
-  assets.map((asset) =>
+  [
+    ...assets.map((asset) => ({
+      source: path.join(extensionDirectory, asset),
+      destination: asset,
+    })),
+    {
+      source: path.join(turndownDirectory, "dist/turndown.js"),
+      destination: "turndown.js",
+    },
+    {
+      source: path.join(turndownDirectory, "LICENSE"),
+      destination: "turndown.LICENSE.txt",
+    },
+  ].map(({ source, destination }) =>
     copyFile(
-      path.join(extensionDirectory, asset),
-      path.join(outputDirectory, asset),
+      source,
+      path.join(outputDirectory, destination),
     ),
   ),
 );

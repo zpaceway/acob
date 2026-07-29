@@ -8,6 +8,8 @@ The extension requires Node.js 20 or newer for development and Chromium 116 or
 newer at runtime. It polls the browser-specific queue exposed by the
 [Django server](../srv/README.md), executes claimed work through Chrome APIs
 and the Chromium DevTools Protocol, and posts each result back to the server.
+Before each JavaScript instruction, it exposes its bundled Turndown dependency
+as `window.TurndownService` in the target page.
 
 ## Development
 
@@ -22,7 +24,8 @@ npm run build
 
 Load `dist/` as an unpacked extension in Chromium 116 or newer. The build emits
 the service worker, popup and offscreen modules, extension assets, source maps,
-and TypeScript declaration files. Do not edit `dist/` directly.
+TypeScript declaration files, Turndown's browser distribution, and its license.
+Do not edit `dist/` directly.
 
 The same tasks are available as `make install`, `make typecheck`, `make test`,
 and `make build`. Unit tests cover settings and keyboard validation; type-only

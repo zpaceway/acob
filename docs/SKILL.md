@@ -289,6 +289,11 @@ The extension evaluates the script through the Chromium Debugger API with:
 - User gesture enabled.
 - Results returned by value.
 - Page content security policy bypassed for evaluation.
+- The bundled Turndown constructor exposed as `window.TurndownService`
+  immediately before the agent script runs.
+
+Do not fetch Turndown or add a CDN `<script>` tag. The extension supplies it
+locally on every JavaScript instruction, including after page navigation.
 
 **Never submit JavaScript that can loop or wait forever.** ACOB awaits returned promises and applies an extension-side execution timeout, but every polling loop, retry, observer, event wait, and other asynchronous script must still have its own finite timeout or attempt limit. Do not use recursive `setTimeout`, `setInterval`, or an unresolved promise without such a bound; prefer a one-shot inspection followed by another instruction.
 
@@ -368,6 +373,38 @@ Better still, return structured data rather than markup:
     text: article.textContent?.trim().slice(0, 500) ?? "",
   })))();
 ```
+
+### Convert Content To Markdown
+
+When the readable content matters but the original HTML, styling, and element
+attributes do not, use the bundled Turndown service to return compact Markdown:
+
+```javascript
+(() => {
+  const content = document.querySelector("main, article, [role=main]");
+  if (!content) {
+    return null;
+  }
+
+  const turndown = new window.TurndownService({
+    headingStyle: "atx",
+    bulletListMarker: "-",
+    codeBlockStyle: "fenced",
+  });
+  turndown.remove(["script", "style", "noscript", "svg"]);
+  return turndown.turndown(content);
+})();
+```
+
+`turndown()` accepts an HTML string, element, document, or document fragment.
+Create and configure a service in the instruction that uses it. Prefer a
+specific content root over `document.body`; convert the body only when the
+whole page is genuinely needed.
+
+Markdown is a lossy content representation. Continue to return structured
+objects when links, attributes, controls, records, or exact table structure
+matter, and inspect the DOM rather than Markdown before interacting with the
+page. Only the core Turndown package is bundled; GFM plugins are not available.
 
 ## Practical Recipes
 
@@ -599,6 +636,8 @@ except ACOBInstructionError as error:
 - Account for asynchronous application rendering after page-load completion.
 - Focus the intended control before sending keyboard input.
 - Prefer structured, minimal extraction over full HTML.
+- Use `window.TurndownService` for compact prose extraction when HTML details
+  do not matter; do not load Turndown from the network.
 - Return evidence from mutations, such as the selected element or resulting value.
 - Preserve unrelated tabs and user state.
 - Never submit passwords, purchases, messages, deletions, or other consequential actions without clear user authorization.
