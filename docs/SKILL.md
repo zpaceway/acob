@@ -289,11 +289,19 @@ The extension evaluates the script through the Chromium Debugger API with:
 - User gesture enabled.
 - Results returned by value.
 - Page content security policy bypassed for evaluation.
-- The bundled Turndown constructor exposed as `window.TurndownService`
-  immediately before the agent script runs.
+- Bundled jQuery and Turndown references exposed through the frozen
+  `window.__acob__` namespace immediately before the agent script runs.
 
-Do not fetch Turndown or add a CDN `<script>` tag. The extension supplies it
-locally on every JavaScript instruction, including after page navigation.
+Use `window.__acob__.jQuery` or `window.__acob__.$` for jQuery and
+`window.__acob__.TurndownService` for Turndown. The extension also provides the
+compatibility globals `window.jQuery`, `window.$`, and
+`window.TurndownService`. Prefer `window.__acob__` because its library
+references cannot be reassigned accidentally. This namespace is not a security
+boundary: it runs in the page's main world and page scripts can inspect and
+invoke its values.
+
+Do not fetch these libraries or add CDN `<script>` tags. The extension supplies
+them locally on every JavaScript instruction, including after page navigation.
 
 **Never submit JavaScript that can loop or wait forever.** ACOB awaits returned promises and applies an extension-side execution timeout, but every polling loop, retry, observer, event wait, and other asynchronous script must still have its own finite timeout or attempt limit. Do not use recursive `setTimeout`, `setInterval`, or an unresolved promise without such a bound; prefer a one-shot inspection followed by another instruction.
 
@@ -349,30 +357,54 @@ For applications that never become meaningfully ready at the window `load` event
 
 ## Reading Page Content
 
-To read the complete page markup:
+**Always reduce page content inside the browser before returning it.** Use
+native DOM APIs or bundled jQuery to select only relevant elements, filter and
+normalize their values, cap large collections and strings, and return plain
+JSON-serializable data. Do not return the full DOM or all body text merely to
+analyze it agent-side.
 
-```javascript
-document.documentElement.outerHTML;
-```
-
-Full-page HTML can be extremely large. Prefer targeted extraction:
-
-```javascript
-(() => {
-  const main = document.querySelector("main");
-  return main?.outerHTML ?? null;
-})();
-```
-
-Better still, return structured data rather than markup:
+Native DOM APIs are normally the clearest option:
 
 ```javascript
 (() =>
-  [...document.querySelectorAll("article")].map((article) => ({
-    heading: article.querySelector("h2, h3")?.textContent?.trim() ?? null,
-    text: article.textContent?.trim().slice(0, 500) ?? "",
+  [...document.querySelectorAll("main article")].slice(0, 20).map((article) => ({
+    heading: article.querySelector("h1, h2, h3")?.textContent?.trim() ?? null,
+    text: article.textContent?.replace(/\s+/g, " ").trim().slice(0, 500) ?? "",
   })))();
 ```
+
+jQuery can make traversal and filtering more concise:
+
+```javascript
+(() => {
+  const $ = window.__acob__.$;
+  return $("main article")
+    .slice(0, 20)
+    .map(function () {
+      const article = $(this);
+      return {
+        heading: article.find("h1, h2, h3").first().text().trim() || null,
+        text: article.text().replace(/\s+/g, " ").trim().slice(0, 500),
+      };
+    })
+    .get();
+})();
+```
+
+Useful jQuery methods include `.find()`, `.filter()`, `.closest()`, `.first()`,
+`.text()`, `.attr()`, `.prop()`, `.val()`, and `.map().get()`. Return plain
+values from JavaScript, never DOM elements or jQuery objects. jQuery does not
+pierce shadow roots; use native `element.shadowRoot` traversal when required.
+
+When exact markup is specifically needed, return the smallest relevant
+subtree:
+
+```javascript
+document.querySelector("main")?.outerHTML ?? null;
+```
+
+Use `document.documentElement.outerHTML` only when the user explicitly needs
+the complete page markup.
 
 ### Convert Content To Markdown
 
@@ -386,7 +418,7 @@ attributes do not, use the bundled Turndown service to return compact Markdown:
     return null;
   }
 
-  const turndown = new window.TurndownService({
+  const turndown = new window.__acob__.TurndownService({
     headingStyle: "atx",
     bulletListMarker: "-",
     codeBlockStyle: "fenced",
@@ -635,9 +667,11 @@ except ACOBInstructionError as error:
 - Use `client.tabs(operation="navigate", ...)` for both new and existing tabs.
 - Account for asynchronous application rendering after page-load completion.
 - Focus the intended control before sending keyboard input.
-- Prefer structured, minimal extraction over full HTML.
-- Use `window.TurndownService` for compact prose extraction when HTML details
-  do not matter; do not load Turndown from the network.
+- Always use native DOM APIs or `window.__acob__.jQuery` to select, filter,
+  normalize, and cap page content before returning it.
+- Prefer structured, minimal extraction over full HTML or body text.
+- Use `window.__acob__.TurndownService` for compact prose extraction when HTML
+  details do not matter; do not load page libraries from the network.
 - Return evidence from mutations, such as the selected element or resulting value.
 - Preserve unrelated tabs and user state.
 - Never submit passwords, purchases, messages, deletions, or other consequential actions without clear user authorization.

@@ -24,6 +24,7 @@ const assets = [
   "offscreen.html",
   "popup.html",
 ];
+const jqueryDistDirectory = path.dirname(require.resolve("jquery"));
 const turndownDirectory = path.dirname(
   require.resolve("turndown/package.json"),
 );
@@ -45,6 +46,14 @@ await Promise.all(
       source: path.join(extensionDirectory, asset),
       destination: asset,
     })),
+    {
+      source: path.join(jqueryDistDirectory, "jquery.min.js"),
+      destination: "jquery.min.js",
+    },
+    {
+      source: path.join(jqueryDistDirectory, "../LICENSE.txt"),
+      destination: "jquery.LICENSE.txt",
+    },
     {
       source: path.join(turndownDirectory, "dist/turndown.js"),
       destination: "turndown.js",

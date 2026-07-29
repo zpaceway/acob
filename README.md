@@ -220,7 +220,7 @@ Every `tabs` instruction requires an `operation`. The `list` operation returns e
 
 The screenshot is stored base64-encoded in SQLite until the first `GET` to that URL. That request returns the decoded PNG and deletes the screenshot row. A second request returns 404, and an interrupted first download cannot be retried. Do not probe the URL; save or process its first response directly. Encoded screenshots are limited to 30 MiB; larger captures complete as failed instructions rather than being retained.
 
-`javascript` requires a `tid` and evaluates the supplied script in that tab. Its result must be JSON-serializable. The extension uses Chromium's debugger permission so execution is not blocked by the page's content security policy. It installs the bundled HTML-to-Markdown converter as `window.TurndownService` before each script runs, so agents can return compact Markdown without loading a page or CDN script.
+`javascript` requires a `tid` and evaluates the supplied script in that tab. Its result must be JSON-serializable. The extension uses Chromium's debugger permission so execution is not blocked by the page's content security policy. Before each script, it installs bundled jQuery and Turndown under the frozen `window.__acob__` namespace, with compatibility aliases at `window.$`, `window.jQuery`, and `window.TurndownService`. Agents can therefore select and reduce page content or return compact Markdown without loading page or CDN scripts.
 
 To navigate an existing tab:
 

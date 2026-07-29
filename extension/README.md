@@ -8,8 +8,9 @@ The extension requires Node.js 20 or newer for development and Chromium 116 or
 newer at runtime. It polls the browser-specific queue exposed by the
 [Django server](../srv/README.md), executes claimed work through Chrome APIs
 and the Chromium DevTools Protocol, and posts each result back to the server.
-Before each JavaScript instruction, it exposes its bundled Turndown dependency
-as `window.TurndownService` in the target page.
+Before each JavaScript instruction, it exposes bundled jQuery and Turndown in a
+frozen `window.__acob__` namespace. Conventional `window.$`, `window.jQuery`,
+and `window.TurndownService` globals are also available.
 
 ## Development
 
@@ -24,8 +25,8 @@ npm run build
 
 Load `dist/` as an unpacked extension in Chromium 116 or newer. The build emits
 the service worker, popup and offscreen modules, extension assets, source maps,
-TypeScript declaration files, Turndown's browser distribution, and its license.
-Do not edit `dist/` directly.
+TypeScript declaration files, the jQuery and Turndown browser distributions,
+and their licenses. Do not edit `dist/` directly.
 
 The same tasks are available as `make install`, `make typecheck`, `make test`,
 and `make build`. Unit tests cover settings and keyboard validation; type-only
@@ -53,6 +54,11 @@ real browser input, JavaScript evaluation, screenshots, and polling, but they
 also grant broad access to the active browser profile. Use a dedicated profile
 without unrelated sensitive sessions and do not connect it to an untrusted
 server. See the repository [security policy](../SECURITY.md).
+
+The frozen `window.__acob__` namespace protects library references from
+accidental reassignment and name collisions. It is not an isolation boundary;
+the libraries intentionally run in, and are accessible to, the page's main
+JavaScript world.
 
 ## Typed API
 
