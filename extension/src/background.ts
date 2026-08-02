@@ -716,7 +716,39 @@ async function executeScroll(
 ): Promise<ScrollResult> {
   return withDebugger(tid, configuration, async (target) => {
     const evaluation = await sendCdpCommand(target, "Runtime.evaluate", {
-      expression: `window.scrollBy({left: 0, top: ${y}, behavior: "instant"})`,
+      expression: `
+        (() => {
+          const distance = ${y};
+          const canScroll = (el) => el.scrollHeight - el.clientHeight > 1;
+          const doc = document.scrollingElement || document.documentElement;
+          if (canScroll(doc)) {
+            window.scrollBy({ left: 0, top: distance, behavior: "instant" });
+            return;
+          }
+          const centerX = Math.floor(window.innerWidth / 2);
+          const centerY = Math.floor(window.innerHeight / 2);
+          let node = document.elementFromPoint(centerX, centerY);
+          while (node) {
+            if (canScroll(node)) {
+              node.scrollTop += distance;
+              return;
+            }
+            node = node.parentElement;
+          }
+          let best = null;
+          let bestRoom = 0;
+          for (const el of document.querySelectorAll("*")) {
+            const room = el.scrollHeight - el.clientHeight;
+            if (room > 1 && room > bestRoom) {
+              bestRoom = room;
+              best = el;
+            }
+          }
+          if (best) {
+            best.scrollTop += distance;
+          }
+        })()
+      `,
       returnByValue: true,
       userGesture: true,
     });
