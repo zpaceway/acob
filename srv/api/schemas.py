@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal, Self
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -19,6 +20,7 @@ NonEmptyString = Annotated[
 ]
 NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
+ScrollY = Annotated[float, Field(allow_inf_nan=False)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 
@@ -88,37 +90,48 @@ class ScreenshotInstruction(ApiModel):
     full_page: bool = False
 
 
-class TabsInstruction(ApiModel):
-    action: Literal["tabs"]
-    operation: Literal["list", "close", "focus", "navigate"]
-    tid: Tid | None = None
-    url: NonEmptyString | None = None
+class ListInstruction(ApiModel):
+    action: Literal["list"]
 
-    @model_validator(mode="after")
-    def validate_operation(self) -> Self:
-        targeted_operations = {"close", "focus"}
-        if self.operation in targeted_operations and self.tid is None:
-            raise ValueError(f"tid is required to {self.operation} a tab")
-        if (
-            self.operation not in targeted_operations | {"navigate"}
-            and self.tid is not None
-        ):
-            raise ValueError(
-                "tid is only valid when closing, focusing, or navigating a tab"
-            )
-        if self.operation == "navigate" and self.url is None:
-            raise ValueError("url is required to navigate")
-        if self.operation != "navigate" and self.url is not None:
-            raise ValueError("url is only valid when navigating")
-        return self
+
+class CloseInstruction(ApiModel):
+    action: Literal["close"]
+    tid: Tid
+
+
+class FocusInstruction(ApiModel):
+    action: Literal["focus"]
+    tid: Tid
+
+
+class NavigateInstruction(ApiModel):
+    action: Literal["navigate"]
+    url: NonEmptyString
+    tid: Tid | None = None
+
+
+class ReloadInstruction(ApiModel):
+    action: Literal["reload"]
+    tid: Tid
+
+
+class ScrollInstruction(ApiModel):
+    action: Literal["scroll"]
+    tid: Tid
+    y: ScrollY
 
 
 InstructionRequest = Annotated[
-    ClickInstruction
+    CloseInstruction
+    | ClickInstruction
+    | FocusInstruction
     | JavaScriptInstruction
     | KeyboardInstruction
+    | ListInstruction
+    | NavigateInstruction
+    | ReloadInstruction
     | ScreenshotInstruction
-    | TabsInstruction,
+    | ScrollInstruction,
     Field(discriminator="action"),
 ]
 instruction_adapter: TypeAdapter[InstructionRequest] = TypeAdapter(InstructionRequest)
@@ -135,6 +148,11 @@ class ScreenshotResult(ApiModel):
     ]
 
 
+class ScrollResult(ApiModel):
+    scrolled: Literal[True]
+    y: ScrollY
+
+
 class InstructionResultRequest(ApiModel):
     result: JsonValue = None
     error: NonEmptyString | None = None
@@ -148,6 +166,16 @@ class InstructionResultRequest(ApiModel):
 
 class NextInstructionsQuery(ApiModel):
     limit: int = Field(default=1, ge=1, le=MAX_INSTRUCTION_CLAIM_LIMIT)
+
+
+class ExtensionReloadAcknowledgement(ApiModel):
+    token: UUID
+
+
+class ExtensionReloadResponse(ApiModel):
+    token: UUID
+    status: Literal["pending"] = "pending"
+    requested_at: datetime
 
 
 class InstructionResponse(ApiModel):

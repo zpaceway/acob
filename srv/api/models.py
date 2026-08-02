@@ -1,4 +1,5 @@
 from typing import ClassVar
+from uuid import uuid4
 
 from django.db import models
 
@@ -10,10 +11,15 @@ class Instruction(models.Model):
 
     class Action(models.TextChoices):
         CLICK = "click"
+        CLOSE = "close"
+        FOCUS = "focus"
         JAVASCRIPT = "javascript"
         KEYBOARD = "keyboard"
+        LIST = "list"
+        NAVIGATE = "navigate"
+        RELOAD = "reload"
         SCREENSHOT = "screenshot"
-        TABS = "tabs"
+        SCROLL = "scroll"
 
     class Status(models.TextChoices):
         PENDING = "pending"
@@ -47,3 +53,13 @@ class Screenshot(models.Model):
     content_type = models.CharField(max_length=32, default="image/png")
     full_page = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ExtensionReload(models.Model):
+    bid = models.CharField(
+        max_length=32,
+        unique=True,
+        validators=[validate_bid],
+    )
+    token = models.UUIDField(default=uuid4, editable=False, unique=True)
+    requested_at = models.DateTimeField(auto_now_add=True)

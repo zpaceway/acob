@@ -20,24 +20,26 @@ from acob import (
     KeyboardKeyResult,
     KeyboardTextResult,
     ListedTab,
+    ReinstallResult,
+    ScrollResult,
     Tab,
 )
 
 if TYPE_CHECKING:
 
     async def _check_return_types(client: ACOBClient) -> None:
-        _listed: list[ListedTab] = await client.tabs(operation="list")
-        _navigated: Tab = await client.tabs(
-            operation="navigate",
-            url="https://example.com",
-        )
-        _focused: Tab = await client.tabs(operation="focus", tid=1)
-        _closed: ClosedTab = await client.tabs(operation="close", tid=1)
+        _listed: list[ListedTab] = await client.list()
+        _navigated: Tab = await client.navigate("https://example.com")
+        _focused: Tab = await client.focus(1)
+        _closed: ClosedTab = await client.close(1)
+        _reloaded: Tab = await client.reload(1)
+        _scrolled: ScrollResult = await client.scroll(1, 500)
         _clicked: ClickResult = await client.click(1, "button")
         _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
         _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
         _screenshot: bytes = await client.screenshot(1)
         _javascript: int = await client.javascript(1, "1")
+        _reinstall: ReinstallResult = await client.reinstall()
 
 
 class FailingTransport(httpx.AsyncBaseTransport):
@@ -98,7 +100,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 ACOBClient(self.BID, endpoint)
 
-    async def test_tabs_submits_and_consumes_terminal_response(self):
+    async def test_list_submits_and_consumes_terminal_response(self):
         tab = {
             "tid": 12,
             "window_id": 3,
@@ -119,7 +121,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("acob.client.asyncio.sleep", new_callable=AsyncMock) as sleep:
-            result = await client.tabs(operation="list")
+            result = await client.list()
 
         self.assertEqual(result, [ListedTab.model_validate(tab)])
         self.assertEqual(len(requests), 3)
@@ -133,7 +135,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             json.loads(submitted_request.content),
-            {"action": "tabs", "operation": "list"},
+            {"action": "list"},
         )
 
         terminal_request = requests[2]
@@ -149,12 +151,12 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         request_json = AsyncMock(return_value={"id": 1, "status": "pending"})
 
         with patch.object(client, "_request_json", request_json):
-            await client.submit("tabs", operation="list")
+            await client.submit("list")
 
         request_json.assert_awaited_once_with(
             "POST",
             f"http://acob.test/api/browsers/{self.BID}/instructions/",
-            {"operation": "list", "action": "tabs"},
+            {"action": "list"},
             timeout=60,
         )
 
@@ -175,6 +177,8 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
                 tab,
                 tab,
                 {"closed": True, "tab": tab},
+                tab,
+                {"scrolled": True, "y": 500.0},
                 {
                     "clicked": True,
                     "selector": "button[type=submit]",
@@ -188,18 +192,16 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(client, "execute", execute):
-            listed = await client.tabs(operation="list")
-            navigated = await client.tabs(
-                operation="navigate",
-                url="https://example.com",
-            )
-            navigated_existing = await client.tabs(
-                operation="navigate",
+            listed = await client.list()
+            navigated = await client.navigate("https://example.com")
+            navigated_existing = await client.navigate(
+                "https://example.org",
                 tid=10,
-                url="https://example.org",
             )
-            focused = await client.tabs(operation="focus", tid=10)
-            closed = await client.tabs(operation="close", tid=10)
+            focused = await client.focus(10)
+            closed = await client.close(10)
+            reloaded = await client.reload(10)
+            scrolled = await client.scroll(10, 500)
             clicked = await client.click(10, "button[type=submit]")
             inserted = await client.keyboard(10, text="ACOB")
             pressed = await client.keyboard(
@@ -214,6 +216,8 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(navigated_existing, Tab)
         self.assertIsInstance(focused, Tab)
         self.assertIsInstance(closed, ClosedTab)
+        self.assertIsInstance(reloaded, Tab)
+        self.assertIsInstance(scrolled, ScrollResult)
         self.assertIsInstance(clicked, ClickResult)
         self.assertIsInstance(inserted, KeyboardTextResult)
         self.assertIsInstance(pressed, KeyboardKeyResult)
@@ -222,22 +226,22 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execute.call_args_list,
             [
-                call("tabs", timeout=None, operation="list"),
+                call("list", timeout=None),
                 call(
-                    "tabs",
+                    "navigate",
                     timeout=None,
-                    operation="navigate",
                     url="https://example.com",
                 ),
                 call(
-                    "tabs",
+                    "navigate",
                     timeout=None,
-                    operation="navigate",
-                    tid=10,
                     url="https://example.org",
+                    tid=10,
                 ),
-                call("tabs", timeout=None, operation="focus", tid=10),
-                call("tabs", timeout=None, operation="close", tid=10),
+                call("focus", tid=10, timeout=None),
+                call("close", tid=10, timeout=None),
+                call("reload", tid=10, timeout=None),
+                call("scroll", tid=10, y=500, timeout=None),
                 call(
                     "click",
                     tid=10,
@@ -335,7 +339,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         client._http_client = httpx.AsyncClient(transport=FailingTransport())
 
         with self.assertRaisesRegex(ACOBConnectionError, "connection refused"):
-            await client.submit("tabs", operation="list")
+            await client.submit("list")
 
     async def test_screenshot_returns_bytes_and_consumes_its_download(self):
         image = b"\x89PNG\r\n\x1a\nACOB"
@@ -409,10 +413,23 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ),
             self.assertRaisesRegex(
                 ACOBProtocolError,
-                "tabs returned an invalid result",
+                "list returned an invalid result",
             ),
         ):
-            await client.tabs(operation="list")
+            await client.list()
+
+        with (
+            patch.object(
+                client,
+                "execute",
+                AsyncMock(return_value={"scrolled": True, "y": float("inf")}),
+            ),
+            self.assertRaisesRegex(
+                ACOBProtocolError,
+                "scroll returned an invalid result",
+            ),
+        ):
+            await client.scroll(12, 500)
 
     async def test_javascript_returns_the_value_unchanged(self):
         client = self.make_client()
@@ -422,6 +439,32 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             result = await client.javascript(12, "window.value")
 
         self.assertIs(result, value)
+
+    async def test_reinstall_uses_the_out_of_band_recovery_endpoint(self):
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (
+                    202,
+                    {
+                        "token": "01234567-89ab-4def-8123-456789abcdef",
+                        "status": "pending",
+                        "requested_at": "2026-08-01T12:00:00Z",
+                    },
+                )
+            ],
+        )
+
+        result = await client.reinstall()
+
+        self.assertIsInstance(result, ReinstallResult)
+        self.assertEqual(result.status, "pending")
+        self.assertEqual(requests[0].method, "POST")
+        self.assertEqual(
+            str(requests[0].url),
+            f"http://acob.test/api/browsers/{self.BID}/extension/reload/",
+        )
 
     async def test_timeout_retains_instruction_id_for_later_recovery(self):
         client = self.make_client()
@@ -481,7 +524,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         await client.aclose()
 
         with self.assertRaisesRegex(ACOBError, "ACOBClient is closed"):
-            await client.submit("tabs", operation="list")
+            await client.submit("list")
 
 
 if __name__ == "__main__":

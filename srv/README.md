@@ -58,10 +58,10 @@ From the monorepo root, run:
 docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose project is named `acob` and publishes host port `58347`. The SQLite
-database lives inside the container because no volume is configured; removing
-or replacing the container removes queued instructions, screenshots, and other
-database state.
+The Compose project, service, image, and container are named `acob-srv` and
+publish host port `58347`. The SQLite database lives inside the container
+because no volume is configured; removing or replacing the container removes
+queued instructions, screenshots, and other database state.
 
 ## API
 
@@ -75,15 +75,27 @@ browser ID under `/api/browsers/<bid>/`.
 | `GET` | `instructions/<id>/` | Read status or consume a terminal response. |
 | `POST` | `instructions/<id>/result/` | Complete a claimed instruction. |
 | `GET` | `screenshots/<id>/` | Download and consume a captured PNG. |
+| `POST` | `extension/reload/` | Queue an unpacked-extension reload. |
+| `GET` | `extension/reload/` | Read the pending extension reload command. |
+| `POST` | `extension/reload/acknowledge/` | Acknowledge recovery from the new worker. |
 
-Supported actions are `tabs`, `click`, `keyboard`, `screenshot`, and
-`javascript`. See the root [API guide](../README.md#api) for payload examples.
+Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
+`click`, `keyboard`, `screenshot`, and `javascript`. See the root
+[API guide](../README.md#api) for payload examples.
 
 Instructions are transport state, not history. Pending and processing reads are
 non-destructive. The first successful detail request for a completed or failed
 instruction returns its terminal response and deletes the row. Screenshot
 downloads likewise delete stored image data after decoding it, so callers must
-preserve the first response rather than probe the URL.
+preserve the first response and must not probe the URL.
+
+The reload endpoint is out-of-band from instructions so it remains available
+when normal execution is wedged. The extension persists the command token,
+stops active JavaScript work, reloads affected tabs, calls
+`chrome.runtime.reload()`, and acknowledges after its new worker starts. The
+reload request conditionally fails work that is already `processing`, and the
+acknowledgement catches any processing race before removing the command.
+Pending instructions remain available to the restarted extension.
 
 ## Storage And Security
 

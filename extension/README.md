@@ -29,10 +29,44 @@ TypeScript declaration files, the jQuery and Turndown browser distributions,
 and their licenses. Do not edit `dist/` directly.
 
 The same tasks are available as `make install`, `make typecheck`, `make test`,
-and `make build`. Unit tests cover settings and keyboard validation; type-only
-contracts are checked by TypeScript. Changes to the manifest, service worker,
-offscreen polling, popup, Chrome APIs, or debugger behavior still require a
-manual unpacked-extension test against a running server.
+and `make build`. Unit tests cover settings, keyboard validation, and timeout
+cleanup; type-only contracts are checked by TypeScript. Changes to the manifest,
+service worker, offscreen polling, popup, Chrome APIs, or debugger behavior
+require a manual unpacked-extension test against a running server.
+
+## JavaScript Timeouts
+
+Chromium's `Runtime.terminateExecution` is the hard execution stop. A timed-out
+tab is then reloaded before the failure is reported, which stops asynchronous
+work in the discarded page context without changing successful JavaScript
+evaluation semantics.
+
+## Browser Actions
+
+Tab management actions are `list`, `navigate`, `focus`, `close`, and `reload`.
+`reload` waits for the target tab to finish loading. `scroll` moves a target tab
+vertically by a finite `y` distance in CSS pixels; positive values move down and
+negative values move up. It returns the requested distance with a `scrolled`
+confirmation.
+
+Instructions with a known target tab run in a per-tab queue. Work on different
+tabs can still overlap, while reloads, navigation, input, screenshots, and
+JavaScript on the same tab execute in claim order.
+
+## Extension Recovery
+
+The public `reinstall` operation calls
+`POST /api/browsers/<bid>/extension/reload/` independently of normal
+instructions. The service worker checks this command before claiming work,
+persists its token, stops active JavaScript, reloads affected tabs, and calls
+`chrome.runtime.reload()`. Its next instance acknowledges the token and resumes
+polling. Because the extension is unpacked, this restart also reads the latest
+files already built into `dist/`. The `reload` action targets one tab through
+the instruction queue.
+
+The service worker creates the offscreen polling document at startup, and that
+document schedules subsequent polls. A disabled extension or a terminated
+Chromium process requires an external browser supervisor or user action.
 
 ## Runtime Configuration
 
@@ -113,4 +147,4 @@ Run `npm run build` before using a repository checkout as a local file
 dependency. Published tarballs run the build automatically through `prepack`.
 
 See the [root README](../README.md) for the monorepo layout and
-[`docs/SKILL.md`](../docs/SKILL.md) for agent usage.
+[`PLAN.md`](../PLAN.md) for product direction and future milestones.

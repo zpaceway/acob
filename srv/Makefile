@@ -44,4 +44,4 @@ docker:
 
 logs:
 	@echo "Viewing Docker logs..."
-	docker compose logs -f
+	docker compose logs -f acob-srv

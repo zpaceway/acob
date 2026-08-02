@@ -3,7 +3,7 @@ import json
 import math
 from collections.abc import Sequence
 from types import TracebackType
-from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
+from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast, overload
 from urllib.parse import SplitResult, urljoin, urlsplit
 from uuid import UUID
 
@@ -20,7 +20,6 @@ from pydantic import (
 DEFAULT_ENDPOINT = "http://127.0.0.1:58347"
 
 JsonObject: TypeAlias = dict[str, JsonValue]
-TabOperation: TypeAlias = Literal["list", "close", "focus", "navigate"]
 KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
 
 
@@ -46,6 +45,11 @@ class ClosedTab(_ResultModel):
     tab: Tab
 
 
+class ScrollResult(_ResultModel):
+    scrolled: Literal[True]
+    y: Annotated[float, Field(allow_inf_nan=False)]
+
+
 class ClickResult(_ResultModel):
     clicked: Literal[True]
     selector: str
@@ -60,6 +64,14 @@ class KeyboardTextResult(_ResultModel):
 class KeyboardKeyResult(_ResultModel):
     key: str
     modifiers: list[KeyboardModifier]
+
+
+class ReinstallResult(_ResultModel):
+    token: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    status: Literal["pending"]
+    requested_at: str = Field(min_length=1)
 
 
 class _ScreenshotMetadata(_ResultModel):
@@ -146,6 +158,9 @@ class ACOBClient:
             "poll_interval",
         )
         self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
+        self._reinstall_url = (
+            f"{self.endpoint}/api/browsers/{self.bid}/extension/reload/"
+        )
         self._http_client: httpx.AsyncClient | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -259,69 +274,83 @@ class ACOBClient:
             raise ACOBInstructionError(instruction_id, terminal)
         return terminal.get("result")
 
-    @overload
-    async def tabs(
-        self,
-        operation: Literal["list"],
-        *,
-        tid: None = None,
-        url: None = None,
-        timeout: float | None = None,
-    ) -> list[ListedTab]: ...
+    async def list(self, *, timeout: float | None = None) -> list[ListedTab]:
+        """List Chromium tabs."""
+        result = await self.execute("list", timeout=timeout)
+        try:
+            return _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
+        except ValidationError as error:
+            raise ACOBProtocolError("list returned an invalid result") from error
 
-    @overload
-    async def tabs(
+    async def navigate(
         self,
-        operation: Literal["navigate"],
-        *,
-        tid: int | None = None,
         url: str,
-        timeout: float | None = None,
-    ) -> Tab: ...
-
-    @overload
-    async def tabs(
-        self,
-        operation: Literal["focus"],
-        *,
-        tid: int,
-        url: None = None,
-        timeout: float | None = None,
-    ) -> Tab: ...
-
-    @overload
-    async def tabs(
-        self,
-        operation: Literal["close"],
-        *,
-        tid: int,
-        url: None = None,
-        timeout: float | None = None,
-    ) -> ClosedTab: ...
-
-    async def tabs(
-        self,
-        operation: TabOperation,
         *,
         tid: int | None = None,
-        url: str | None = None,
         timeout: float | None = None,
-    ) -> list[ListedTab] | Tab | ClosedTab:
-        """Run a list, navigate, focus, or close tab operation."""
-        payload: JsonObject = {"operation": operation}
+    ) -> Tab:
+        """Navigate a tab, or create an inactive tab when tid is omitted."""
+        payload: JsonObject = {"url": url}
         if tid is not None:
             payload["tid"] = tid
-        if url is not None:
-            payload["url"] = url
-        result = await self.execute("tabs", timeout=timeout, **payload)
-        if operation == "list":
-            try:
-                return _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
-            except ValidationError as error:
-                raise ACOBProtocolError("tabs returned an invalid result") from error
-        if operation in {"navigate", "focus"}:
-            return self._expect_model(result, Tab, "tabs")
-        return self._expect_model(result, ClosedTab, "tabs")
+        return self._expect_model(
+            await self.execute("navigate", timeout=timeout, **payload),
+            Tab,
+            "navigate",
+        )
+
+    async def focus(
+        self,
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> Tab:
+        """Focus a Chromium tab and its window."""
+        return self._expect_model(
+            await self.execute("focus", tid=tid, timeout=timeout),
+            Tab,
+            "focus",
+        )
+
+    async def close(
+        self,
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> ClosedTab:
+        """Close a Chromium tab."""
+        return self._expect_model(
+            await self.execute("close", tid=tid, timeout=timeout),
+            ClosedTab,
+            "close",
+        )
+
+    async def reload(
+        self,
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> Tab:
+        """Reload a Chromium tab and wait for it to load."""
+        return self._expect_model(
+            await self.execute("reload", tid=tid, timeout=timeout),
+            Tab,
+            "reload",
+        )
+
+    async def scroll(
+        self,
+        tid: int,
+        y: float,
+        *,
+        timeout: float | None = None,
+    ) -> ScrollResult:
+        """Scroll a Chromium tab vertically by y CSS pixels."""
+        return self._expect_model(
+            await self.execute("scroll", tid=tid, y=y, timeout=timeout),
+            ScrollResult,
+            "scroll",
+        )
 
     async def click(
         self,
@@ -437,6 +466,18 @@ class ACOBClient:
             tid=tid,
             script=script,
             timeout=timeout,
+        )
+
+    async def reinstall(self) -> ReinstallResult:
+        """Reinstall the unpacked extension from disk through its recovery channel."""
+        return self._expect_model(
+            await self._request_json(
+                "POST",
+                self._reinstall_url,
+                timeout=min(self._REQUEST_TIMEOUT, self.timeout),
+            ),
+            ReinstallResult,
+            "reinstall",
         )
 
     async def _request_json(

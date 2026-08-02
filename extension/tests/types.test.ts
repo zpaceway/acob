@@ -6,8 +6,10 @@ import type {
   InstructionRequest,
   InstructionResultFor,
   ListedTab,
+  ScrollResult,
   SettingName,
   SupportedInstruction,
+  TabDetails,
 } from "../src/types.js";
 
 type Equal<Left, Right> =
@@ -17,19 +19,27 @@ type Equal<Left, Right> =
     : false;
 type Expect<Value extends true> = Value;
 type ListTabsResultIsTyped = Expect<
-  Equal<
-    InstructionResultFor<{ action: "tabs"; operation: "list" }>,
-    ListedTab[]
-  >
+  Equal<InstructionResultFor<{ action: "list" }>, ListedTab[]>
 >;
 type CloseTabResultIsTyped = Expect<
   Equal<
     InstructionResultFor<{
-      action: "tabs";
-      operation: "close";
+      action: "close";
       tid: number;
     }>,
     ClosedTab
+  >
+>;
+type ReloadTabResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{ action: "reload"; tid: number }>,
+    TabDetails
+  >
+>;
+type ScrollResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{ action: "scroll"; tid: number; y: number }>,
+    ScrollResult
   >
 >;
 
@@ -74,11 +84,12 @@ const characterRequest: InstructionRequest = {
 // @ts-expect-error Settings metadata is immutable.
 ACOBSettings.definitions.baseUrl.defaultValue = "https://other.example";
 const invalidRequest: InstructionRequest = {
-  action: "tabs",
-  operation: "list",
-  // @ts-expect-error A tabs list request must not target a tab.
+  action: "list",
+  // @ts-expect-error A list request must not target a tab.
   tid: 1,
 };
+// @ts-expect-error The grouped tabs action was removed.
+const legacyTabsRequest: InstructionRequest = { action: "tabs", operation: "list" };
 const invalidKeyRequest: InstructionRequest = {
   action: "keyboard",
   tid: 1,
@@ -94,8 +105,13 @@ void request;
 void textRequest;
 void characterRequest;
 void invalidRequest;
+void legacyTabsRequest;
 void invalidKeyRequest;
 const listTabsResultIsTyped: ListTabsResultIsTyped = true;
 void listTabsResultIsTyped;
 const closeTabResultIsTyped: CloseTabResultIsTyped = true;
 void closeTabResultIsTyped;
+const reloadTabResultIsTyped: ReloadTabResultIsTyped = true;
+void reloadTabResultIsTyped;
+const scrollResultIsTyped: ScrollResultIsTyped = true;
+void scrollResultIsTyped;

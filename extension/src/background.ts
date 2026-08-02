@@ -1,4 +1,6 @@
 import { ACOBSettings } from "./settings.js";
+import { loadConfiguration } from "./storage.js";
+import { withTerminationOnTimeout, withTimeout } from "./timeouts.js";
 import { isKeyboardKey, isRuntimeMessage } from "./types.js";
 import type { Protocol } from "devtools-protocol";
 import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js";
@@ -14,6 +16,7 @@ import type {
   KeyboardPayload,
   KeyboardTextResult,
   ScreenshotUploadResult,
+  ScrollResult,
   SupportedInstruction,
   TabDetails,
   UnserializableJavaScriptResult,
@@ -25,6 +28,12 @@ interface KeyDefinition {
   keyCode?: number;
   text?: string;
   unmodifiedText?: string;
+}
+
+interface ActiveJavaScriptExecution {
+  tid: number;
+  finished: Promise<void>;
+  stop: () => Promise<void>;
 }
 
 const KEY_DEFINITIONS: Record<string, KeyDefinition> = {
@@ -107,27 +116,16 @@ const UNSHIFTED_CHARACTERS: Record<string, string> = Object.fromEntries(
 );
 
 let activeExecutions = 0;
+const activeJavaScriptExecutions = new Set<ActiveJavaScriptExecution>();
 let offscreenPromise: Promise<void> | null = null;
 let backendUnavailable = false;
 let configurationPromise: Promise<Configuration> | null = null;
 let pageLibrariesScriptPromise: Promise<string> | null = null;
 let pollInProgress = false;
+let reloadScheduled = false;
 let tabCreationQueue: Promise<void> = Promise.resolve();
-
-async function loadConfiguration(): Promise<Configuration> {
-  const stored = await chrome.storage.local.get<
-    Partial<Record<keyof Configuration, unknown>>
-  >([...ACOBSettings.storageKeys]);
-  const configuration = ACOBSettings.normalizeConfiguration(stored);
-  if (
-    ACOBSettings.storageKeys.some(
-      (name) => stored[name] !== configuration[name],
-    )
-  ) {
-    await chrome.storage.local.set(configuration);
-  }
-  return configuration;
-}
+const tabExecutionQueues = new Map<number, Promise<void>>();
+const PENDING_RELOAD_TOKEN_KEY = "pendingExtensionReloadToken";
 
 async function getConfiguration(): Promise<Configuration> {
   if (!configurationPromise) {
@@ -147,14 +145,106 @@ function instructionApiUrl(configuration: Configuration): string {
   return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
 }
 
-async function createOffscreenDocument(): Promise<void> {
+function extensionReloadUrl(configuration: Configuration): string {
+  const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
+  return `${baseUrl}/api/browsers/${configuration.bid}/extension/reload`;
+}
+
+async function applyExtensionReload(
+  configuration: Configuration,
+): Promise<boolean> {
+  const reloadUrl = extensionReloadUrl(configuration);
+  const stored = await chrome.storage.local.get<
+    Record<typeof PENDING_RELOAD_TOKEN_KEY, unknown>
+  >(PENDING_RELOAD_TOKEN_KEY);
+  const pendingToken = stored[PENDING_RELOAD_TOKEN_KEY];
+
+  if (typeof pendingToken === "string") {
+    const acknowledgement = await fetch(`${reloadUrl}/acknowledge/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: pendingToken }),
+      signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
+    });
+    if (!acknowledgement.ok && acknowledgement.status !== 409) {
+      throw new Error(
+        `Could not acknowledge extension reload: HTTP ${acknowledgement.status}`,
+      );
+    }
+    await chrome.storage.local.remove(PENDING_RELOAD_TOKEN_KEY);
+  }
+
+  const response = await fetch(`${reloadUrl}/`, {
+    signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
+  });
+  if (response.status === 204) {
+    return false;
+  }
+  if (!response.ok) {
+    throw new Error(`Could not check extension reload: HTTP ${response.status}`);
+  }
+
+  const command: unknown = await response.json();
+  if (
+    typeof command !== "object" ||
+    command === null ||
+    !("token" in command) ||
+    typeof command.token !== "string"
+  ) {
+    throw new Error("ACOB server returned an invalid extension reload command");
+  }
+
+  await chrome.storage.local.set({
+    [PENDING_RELOAD_TOKEN_KEY]: command.token,
+  });
+  reloadScheduled = true;
+  await stopActiveJavaScriptExecutions(configuration);
+  chrome.runtime.reload();
+  return true;
+}
+
+async function stopActiveJavaScriptExecutions(
+  configuration: Configuration,
+): Promise<void> {
+  const executions = [...activeJavaScriptExecutions];
+  await Promise.allSettled(
+    executions.map((execution) =>
+      withTimeout(
+        execution.stop(),
+        5000,
+        `Timed out stopping JavaScript in tab ${execution.tid}`,
+      ),
+    ),
+  );
+  await Promise.allSettled(
+    [...new Set(executions.map((execution) => execution.tid))].map(
+      async (tid) => {
+        await reloadTab(tid, configuration.tabLoadTimeoutMs);
+      },
+    ),
+  );
+  await Promise.allSettled(
+    executions.map((execution) =>
+      withTimeout(
+        execution.finished,
+        5000,
+        `Timed out finalizing JavaScript in tab ${execution.tid}`,
+      ),
+    ),
+  );
+}
+
+async function configureOffscreenDocument(recreate: boolean): Promise<void> {
   const documentUrl = chrome.runtime.getURL("offscreen.html");
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ["OFFSCREEN_DOCUMENT"],
     documentUrls: [documentUrl],
   });
 
-  if (contexts.length === 0) {
+  if (recreate && contexts.length > 0) {
+    await chrome.offscreen.closeDocument();
+  }
+  if (recreate || contexts.length === 0) {
     await chrome.offscreen.createDocument({
       url: "offscreen.html",
       reasons: ["WORKERS"],
@@ -163,14 +253,18 @@ async function createOffscreenDocument(): Promise<void> {
   }
 }
 
-function ensureOffscreenDocument(): Promise<void> {
-  if (!offscreenPromise) {
-    offscreenPromise = createOffscreenDocument().finally(() => {
+function ensureOffscreenDocument(recreate = false): Promise<void> {
+  const previous = offscreenPromise ?? Promise.resolve();
+  const operation = previous
+    .catch(() => undefined)
+    .then(() => configureOffscreenDocument(recreate));
+  const tracked = operation.finally(() => {
+    if (offscreenPromise === tracked) {
       offscreenPromise = null;
-    });
-  }
-
-  return offscreenPromise;
+    }
+  });
+  offscreenPromise = tracked;
+  return tracked;
 }
 
 function tabDetails(tab: chrome.tabs.Tab): TabDetails {
@@ -256,19 +350,40 @@ function waitForTab(tid: number, timeoutMs: number): Promise<chrome.tabs.Tab> {
   });
 }
 
-function withTimeout<Result>(
-  operation: Promise<Result>,
-  timeoutMs: number,
-  message: string,
-): Promise<Result> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([operation, timeout]).finally(() => {
-    if (timeoutId !== undefined) {
+function reloadTab(tid: number, timeoutMs: number): Promise<chrome.tabs.Tab> {
+  return new Promise<chrome.tabs.Tab>((resolve, reject) => {
+    let loading = false;
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for the page to reload"));
+    }, timeoutMs);
+
+    function cleanup(): void {
       clearTimeout(timeoutId);
+      chrome.tabs.onUpdated.removeListener(handleUpdate);
     }
+
+    function handleUpdate(
+      updatedTid: number,
+      changeInfo: chrome.tabs.OnUpdatedInfo,
+      tab: chrome.tabs.Tab,
+    ): void {
+      if (updatedTid !== tid) {
+        return;
+      }
+      if (changeInfo.status === "loading") {
+        loading = true;
+      } else if (loading && changeInfo.status === "complete") {
+        cleanup();
+        resolve(tab);
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(handleUpdate);
+    chrome.tabs.reload(tid).catch((error) => {
+      cleanup();
+      reject(error);
+    });
   });
 }
 
@@ -399,29 +514,85 @@ async function executeJavaScript(
   script: string,
   configuration: Configuration,
 ): Promise<JsonValue | UnserializableJavaScriptResult> {
+  if (reloadScheduled) {
+    throw new Error("Extension reload is in progress");
+  }
   const pageLibrariesScript = await loadPageLibrariesScript();
+  if (reloadScheduled) {
+    throw new Error("Extension reload is in progress");
+  }
   return withDebugger(tid, configuration, async (target) => {
-    const installation = await withTimeout(
-      sendCdpCommand(target, "Runtime.evaluate", {
-        expression: pageLibrariesScript,
-        returnByValue: true,
-      }),
-      configuration.javascriptTimeoutMs,
-      "Timed out loading page libraries",
-    );
-    throwEvaluationException(installation);
-
-    const evaluation = await withTimeout(
-      sendCdpCommand(target, "Runtime.evaluate", {
+    let stopPromise: Promise<void> | null = null;
+    const stopExecution = (): Promise<void> => {
+      stopPromise ??= withTimeout(
+        sendCdpCommand(target, "Runtime.terminateExecution"),
+        2000,
+        "Timed out terminating Chromium execution",
+      );
+      return stopPromise;
+    };
+    const stopTimedOutExecution = async (): Promise<void> => {
+      let terminationError: unknown;
+      try {
+        await stopExecution();
+      } catch (error) {
+        terminationError = error;
+      }
+      try {
+        await reloadTab(
+          tid,
+          Math.min(configuration.tabLoadTimeoutMs, 7000),
+        );
+      } catch (reloadError) {
+        if (terminationError !== undefined) {
+          throw new AggregateError(
+            [terminationError, reloadError],
+            "Could not stop timed-out JavaScript or reload its tab",
+          );
+        }
+        throw reloadError;
+      }
+    };
+    let markFinished: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
+    const activeExecution = { tid, finished, stop: stopExecution };
+    activeJavaScriptExecutions.add(activeExecution);
+    let evaluation: Protocol.Runtime.EvaluateResponse;
+    try {
+      if (reloadScheduled) {
+        throw new Error("Extension reload is in progress");
+      }
+      const installation = await withTimeout(
+        sendCdpCommand(target, "Runtime.evaluate", {
+          expression: pageLibrariesScript,
+          returnByValue: true,
+        }),
+        configuration.javascriptTimeoutMs,
+        "Timed out loading page libraries",
+      );
+      throwEvaluationException(installation);
+      if (reloadScheduled) {
+        throw new Error("Extension reload is in progress");
+      }
+      const evaluationPromise = sendCdpCommand(target, "Runtime.evaluate", {
         expression: script,
         awaitPromise: true,
         returnByValue: true,
         userGesture: true,
-      }),
-      configuration.javascriptTimeoutMs,
-      "Timed out waiting for JavaScript to finish",
-    );
-    throwEvaluationException(evaluation);
+      });
+      evaluation = await withTerminationOnTimeout(
+        evaluationPromise,
+        configuration.javascriptTimeoutMs,
+        "Timed out waiting for JavaScript to finish",
+        stopTimedOutExecution,
+      );
+      throwEvaluationException(evaluation);
+    } finally {
+      activeJavaScriptExecutions.delete(activeExecution);
+      markFinished();
+    }
 
     const result = evaluation.result;
     if (Object.hasOwn(result, "value")) {
@@ -538,6 +709,22 @@ async function executeScreenshot(
   });
 }
 
+async function executeScroll(
+  tid: number,
+  y: number,
+  configuration: Configuration,
+): Promise<ScrollResult> {
+  return withDebugger(tid, configuration, async (target) => {
+    const evaluation = await sendCdpCommand(target, "Runtime.evaluate", {
+      expression: `window.scrollBy({left: 0, top: ${y}, behavior: "instant"})`,
+      returnByValue: true,
+      userGesture: true,
+    });
+    throwEvaluationException(evaluation);
+    return { scrolled: true, y };
+  });
+}
+
 function describeKey(key: string, shiftPressed: boolean): KeyDefinition {
   const namedDefinition = KEY_DEFINITIONS[key];
   if (namedDefinition) {
@@ -627,65 +814,89 @@ async function executeKeyboard(
   });
 }
 
-async function runInstruction(
+function runInTabExecutionQueue<Result>(
+  tid: number,
+  operation: () => Promise<Result>,
+): Promise<Result> {
+  const previous = tabExecutionQueues.get(tid) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  tabExecutionQueues.set(tid, tail);
+  void tail.then(() => {
+    if (tabExecutionQueues.get(tid) === tail) {
+      tabExecutionQueues.delete(tid);
+    }
+  });
+  return result;
+}
+
+async function runInstructionAction(
   instruction: SupportedInstruction,
   configuration: Configuration,
 ): Promise<ExtensionInstructionResult> {
   const { action, payload } = instruction;
 
-  if (action === "tabs") {
-    if (!payload.operation) {
-      throw new Error("tabs operation is required");
-    }
-    const operation = payload.operation;
+  if (action === "list") {
+    const [tabs, windows] = await Promise.all([
+      chrome.tabs.query({}),
+      chrome.windows.getAll(),
+    ]);
+    const focusedWindowIds = new Set(
+      windows.filter((window) => window.focused).map((window) => window.id),
+    );
+    return tabs.map((tab) => ({
+      ...tabDetails(tab),
+      focused: tab.active && focusedWindowIds.has(tab.windowId),
+    }));
+  }
 
-    if (operation === "list") {
-      const [tabs, windows] = await Promise.all([
-        chrome.tabs.query({}),
-        chrome.windows.getAll(),
-      ]);
-      const focusedWindowIds = new Set(
-        windows.filter((window) => window.focused).map((window) => window.id),
-      );
-      return tabs.map((tab) => ({
-        ...tabDetails(tab),
-        focused: tab.active && focusedWindowIds.has(tab.windowId),
-      }));
-    }
+  if (action === "close") {
+    const tab = await chrome.tabs.get(payload.tid);
+    const details = tabDetails(tab);
+    await chrome.tabs.remove(details.tid);
+    return { closed: true, tab: details };
+  }
 
-    if (operation === "close") {
-      const tab = await chrome.tabs.get(payload.tid);
-      const details = tabDetails(tab);
-      await chrome.tabs.remove(details.tid);
-      return { closed: true, tab: details };
+  if (action === "focus") {
+    const tab = await chrome.tabs.get(payload.tid);
+    await chrome.windows.update(tab.windowId, { focused: true });
+    const focusedTab = await chrome.tabs.update(payload.tid, { active: true });
+    if (!focusedTab) {
+      throw new Error(`Chromium did not return focused tab ${payload.tid}`);
     }
+    return tabDetails(focusedTab);
+  }
 
-    if (operation === "focus") {
-      const tab = await chrome.tabs.get(payload.tid);
-      await chrome.windows.update(tab.windowId, { focused: true });
-      const focusedTab = await chrome.tabs.update(payload.tid, { active: true });
-      if (!focusedTab) {
-        throw new Error(`Chromium did not return focused tab ${payload.tid}`);
-      }
-      return tabDetails(focusedTab);
+  if (action === "navigate") {
+    const navigatedTab = payload.tid !== undefined
+      ? await chrome.tabs.update(payload.tid, { url: payload.url })
+      : await createTabWithinLimit(payload.url, configuration.maxTabs);
+    if (!navigatedTab) {
+      throw new Error("Chromium did not return the navigated tab");
     }
+    const navigatedTabDetails = tabDetails(navigatedTab);
+    const loadedTab = await waitForTab(
+      navigatedTabDetails.tid,
+      configuration.tabLoadTimeoutMs,
+    );
+    return tabDetails(loadedTab);
+  }
 
-    if (operation === "navigate") {
-      const navigatedTab = payload.tid !== undefined
-        ? await chrome.tabs.update(payload.tid, { url: payload.url })
-        : await createTabWithinLimit(payload.url, configuration.maxTabs);
-      if (!navigatedTab) {
-        throw new Error("Chromium did not return the navigated tab");
-      }
-      const navigatedTabDetails = tabDetails(navigatedTab);
-      const loadedTab = await waitForTab(
-        navigatedTabDetails.tid,
-        configuration.tabLoadTimeoutMs,
-      );
-      return tabDetails(loadedTab);
-    }
+  if (action === "reload") {
+    await chrome.tabs.get(payload.tid);
+    const loadedTab = await reloadTab(
+      payload.tid,
+      configuration.tabLoadTimeoutMs,
+    );
+    return tabDetails(loadedTab);
+  }
 
-    throw new Error(`Unknown tabs operation: ${operation}`);
+  if (action === "scroll") {
+    await chrome.tabs.get(payload.tid);
+    return executeScroll(payload.tid, payload.y, configuration);
   }
 
   if (action === "javascript") {
@@ -715,6 +926,18 @@ async function runInstruction(
   throw new Error(`Unknown action: ${action}`);
 }
 
+function runInstruction(
+  instruction: SupportedInstruction,
+  configuration: Configuration,
+): Promise<ExtensionInstructionResult> {
+  const { payload } = instruction;
+  const tid = "tid" in payload ? payload.tid : undefined;
+  const operation = () => runInstructionAction(instruction, configuration);
+  return tid === undefined
+    ? operation()
+    : runInTabExecutionQueue(tid, operation);
+}
+
 async function sendResult(
   instructionId: number,
   body: InstructionResultRequest,
@@ -726,6 +949,9 @@ async function sendResult(
     attempt <= configuration.resultRetryAttempts;
     attempt += 1
   ) {
+    if (reloadScheduled) {
+      return;
+    }
     try {
       const response = await fetch(`${apiUrl}/${instructionId}/result/`, {
         method: "POST",
@@ -756,6 +982,9 @@ async function executeInstruction(
   instruction: ClaimedInstruction,
   configuration: Configuration,
 ): Promise<void> {
+  if (reloadScheduled) {
+    return;
+  }
   let body: InstructionResultRequest;
   try {
     if (!isSupportedInstruction(instruction)) {
@@ -769,6 +998,9 @@ async function executeInstruction(
     body = {
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+  if (reloadScheduled) {
+    return;
   }
   await sendResult(instruction.id, body, configuration);
 }
@@ -849,24 +1081,32 @@ function isSupportedInstruction(
         typeof payload.full_page === "boolean")
     );
   }
-  if (value.action !== "tabs") {
-    return false;
-  }
-  if (payload.operation === "list") {
+  if (value.action === "list") {
     return true;
   }
-  if (payload.operation === "close" || payload.operation === "focus") {
+  if (
+    value.action === "close" ||
+    value.action === "focus" ||
+    value.action === "reload"
+  ) {
     return isPositiveInteger(payload.tid);
   }
+  if (value.action === "navigate") {
+    return (
+      typeof payload.url === "string" &&
+      (payload.tid === undefined || isPositiveInteger(payload.tid))
+    );
+  }
   return (
-    payload.operation === "navigate" &&
-    typeof payload.url === "string" &&
-    (payload.tid === undefined || isPositiveInteger(payload.tid))
+    value.action === "scroll" &&
+    isPositiveInteger(payload.tid) &&
+    typeof payload.y === "number" &&
+    Number.isFinite(payload.y)
   );
 }
 
 async function poll(): Promise<void> {
-  if (pollInProgress) {
+  if (pollInProgress || reloadScheduled) {
     return;
   }
 
@@ -874,6 +1114,9 @@ async function poll(): Promise<void> {
   pollInProgress = true;
   try {
     const configuration = await getConfiguration();
+    if (await applyExtensionReload(configuration)) {
+      return;
+    }
     if (activeExecutions >= configuration.maxConcurrentExecutions) {
       return;
     }
@@ -970,4 +1213,4 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   ensureOffscreenDocument().catch(console.error);
 });
-ensureOffscreenDocument().catch(console.error);
+ensureOffscreenDocument(true).catch(console.error);

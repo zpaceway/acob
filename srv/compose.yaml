@@ -1,7 +1,9 @@
-name: acob
+name: acob-srv
 
 services:
-  acob:
+  acob-srv:
+    image: acob-srv:latest
+    container_name: acob-srv
     build: .
     command: make run
     environment:

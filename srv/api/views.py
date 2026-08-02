@@ -2,6 +2,7 @@ import base64
 import binascii
 
 from django.db import transaction
+from django.db.models import Exists
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.utils import timezone
@@ -9,14 +10,18 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
-from .models import Instruction, Screenshot
+from .models import ExtensionReload, Instruction, Screenshot
+from .recovery import EXTENSION_RELOAD_ERROR, request_extension_reload
 from .schemas import (
     ApiModel,
     ErrorResponse,
+    ExtensionReloadAcknowledgement,
+    ExtensionReloadResponse,
     InstructionResponse,
     InstructionResultRequest,
     NextInstructionsQuery,
     ScreenshotResult,
+    ScrollResult,
     ValidationErrorResponse,
     ValidationIssue,
     instruction_adapter,
@@ -123,7 +128,10 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
         return validation_error_response(error)
 
     instructions: list[Instruction] = []
+    no_pending_reload = ~Exists(ExtensionReload.objects.filter(bid=bid))
     while len(instructions) < query.limit:
+        if ExtensionReload.objects.filter(bid=bid).exists():
+            break
         candidate = (
             Instruction.objects.filter(
                 bid=bid,
@@ -135,13 +143,17 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
         if candidate is None:
             break
 
-        claimed = Instruction.objects.filter(
-            id=candidate["id"],
-            bid=bid,
-            status=Instruction.Status.PENDING,
-        ).update(
-            status=Instruction.Status.PROCESSING,
-            updated_at=timezone.now(),
+        claimed = (
+            Instruction.objects.filter(
+                id=candidate["id"],
+                bid=bid,
+                status=Instruction.Status.PENDING,
+            )
+            .filter(no_pending_reload)
+            .update(
+                status=Instruction.Status.PROCESSING,
+                updated_at=timezone.now(),
+            )
         )
         if claimed:
             instructions.append(Instruction.objects.get(id=candidate["id"]))
@@ -191,7 +203,21 @@ def complete_instruction(
             return validation_error_response(error)
         except binascii.Error, ValueError:
             return error_response("Invalid screenshot data")
+    elif (
+        instruction.action == Instruction.Action.SCROLL and result_request.error is None
+    ):
+        try:
+            result = ScrollResult.model_validate(result).model_dump(mode="json")
+        except ValidationError as error:
+            return validation_error_response(error)
 
+    final_status = (
+        Instruction.Status.FAILED
+        if result_request.error
+        else Instruction.Status.COMPLETED
+    )
+    completed_at = timezone.now()
+    screenshot = None
     with transaction.atomic():
         if captured_screenshot is not None:
             screenshot = Screenshot.objects.create(
@@ -211,14 +237,29 @@ def complete_instruction(
                 "tid": screenshot.tid,
             }
 
-        instruction.result = result
-        instruction.error = result_request.error or ""
-        instruction.status = (
-            Instruction.Status.FAILED
-            if result_request.error
-            else Instruction.Status.COMPLETED
+        completed = Instruction.objects.filter(
+            id=instruction_id,
+            bid=bid,
+            status=Instruction.Status.PROCESSING,
+        ).update(
+            result=result,
+            error=result_request.error or "",
+            status=final_status,
+            updated_at=completed_at,
         )
-        instruction.save(update_fields=["result", "error", "status", "updated_at"])
+        if not completed and screenshot is not None:
+            screenshot.delete()
+
+    if not completed:
+        current = Instruction.objects.filter(id=instruction_id, bid=bid).first()
+        if current is None:
+            return error_response("Instruction not found", status=404)
+        return instruction_response(current)
+
+    instruction.result = result
+    instruction.error = result_request.error or ""
+    instruction.status = final_status
+    instruction.updated_at = completed_at
     return instruction_response(instruction)
 
 
@@ -247,3 +288,64 @@ def download_screenshot(
     response["Cache-Control"] = "no-store"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def extension_reload(request: HttpRequest, bid: str) -> HttpResponse:
+    if request.method == "POST":
+        reload_request = request_extension_reload(bid)
+        response = model_response(
+            ExtensionReloadResponse(
+                token=reload_request.token,
+                requested_at=reload_request.requested_at,
+            ),
+            status=202,
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
+    pending_reload = ExtensionReload.objects.filter(bid=bid).first()
+    if pending_reload is None:
+        no_content_response = HttpResponse(status=204)
+        no_content_response["Cache-Control"] = "no-store"
+        return no_content_response
+    pending_response = model_response(
+        ExtensionReloadResponse(
+            token=pending_reload.token,
+            requested_at=pending_reload.requested_at,
+        )
+    )
+    pending_response["Cache-Control"] = "no-store"
+    return pending_response
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def acknowledge_extension_reload(request: HttpRequest, bid: str) -> HttpResponse:
+    try:
+        acknowledgement = ExtensionReloadAcknowledgement.model_validate_json(
+            request.body
+        )
+    except ValidationError as error:
+        return validation_error_response(error)
+
+    with transaction.atomic():
+        reload_request = (
+            ExtensionReload.objects.select_for_update().filter(bid=bid).first()
+        )
+        if reload_request is None:
+            return HttpResponse(status=204)
+        if reload_request.token != acknowledgement.token:
+            return error_response("Extension reload token does not match", status=409)
+
+        Instruction.objects.filter(
+            bid=bid,
+            status=Instruction.Status.PROCESSING,
+        ).update(
+            status=Instruction.Status.FAILED,
+            error=EXTENSION_RELOAD_ERROR,
+            updated_at=timezone.now(),
+        )
+        reload_request.delete()
+    return HttpResponse(status=204)

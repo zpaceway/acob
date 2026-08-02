@@ -13,11 +13,12 @@ from .client import (
     KeyboardModifier,
     KeyboardTextResult,
     ListedTab,
+    ReinstallResult,
+    ScrollResult,
     Tab,
-    TabOperation,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -34,7 +35,8 @@ __all__ = [
     "KeyboardModifier",
     "KeyboardTextResult",
     "ListedTab",
+    "ReinstallResult",
+    "ScrollResult",
     "Tab",
-    "TabOperation",
     "__version__",
 ]

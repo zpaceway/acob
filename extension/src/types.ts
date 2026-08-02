@@ -98,16 +98,20 @@ export interface SettingsApi {
 
 export type InstructionAction =
   | "click"
+  | "close"
+  | "focus"
   | "javascript"
   | "keyboard"
+  | "list"
+  | "navigate"
+  | "reload"
   | "screenshot"
-  | "tabs";
+  | "scroll";
 export type InstructionStatus =
   | "pending"
   | "processing"
   | "completed"
   | "failed";
-export type TabOperation = "list" | "close" | "focus" | "navigate";
 export type KeyboardModifier = "alt" | "ctrl" | "meta" | "shift";
 export const NAMED_KEYBOARD_KEYS = Object.freeze([
   "ArrowDown",
@@ -150,31 +154,29 @@ export function keyboardCharacter(value: string): KeyboardCharacter {
   return value as KeyboardCharacter;
 }
 
-export interface ListTabsPayload {
-  operation: "list";
-}
+export type ListTabsPayload = Record<string, never>;
 
 export interface CloseTabPayload {
-  operation: "close";
   tid: number;
 }
 
 export interface FocusTabPayload {
-  operation: "focus";
   tid: number;
 }
 
 export interface NavigateTabPayload {
-  operation: "navigate";
   tid?: number;
   url: string;
 }
 
-export type TabsPayload =
-  | ListTabsPayload
-  | CloseTabPayload
-  | FocusTabPayload
-  | NavigateTabPayload;
+export interface ReloadTabPayload {
+  tid: number;
+}
+
+export interface ScrollPayload {
+  tid: number;
+  y: number;
+}
 
 export interface ClickPayload {
   tid: number;
@@ -207,10 +209,15 @@ export interface ScreenshotPayload {
 
 export interface InstructionPayloadMap {
   click: ClickPayload;
+  close: CloseTabPayload;
+  focus: FocusTabPayload;
   javascript: JavaScriptPayload;
   keyboard: KeyboardPayload;
+  list: ListTabsPayload;
+  navigate: NavigateTabPayload;
+  reload: ReloadTabPayload;
   screenshot: ScreenshotPayload;
-  tabs: TabsPayload;
+  scroll: ScrollPayload;
 }
 
 export type SupportedInstruction<
@@ -241,16 +248,29 @@ export interface Instruction {
   updated_at: string;
 }
 
-export type TabsInstructionRequest =
-  | { action: "tabs"; operation: "list" }
-  | { action: "tabs"; operation: "close"; tid: number }
-  | { action: "tabs"; operation: "focus"; tid: number }
-  | {
-      action: "tabs";
-      operation: "navigate";
-      tid?: number;
-      url: string;
-    };
+export interface ListTabsInstructionRequest {
+  action: "list";
+}
+
+export interface CloseTabInstructionRequest extends CloseTabPayload {
+  action: "close";
+}
+
+export interface FocusTabInstructionRequest extends FocusTabPayload {
+  action: "focus";
+}
+
+export interface NavigateTabInstructionRequest extends NavigateTabPayload {
+  action: "navigate";
+}
+
+export interface ReloadTabInstructionRequest extends ReloadTabPayload {
+  action: "reload";
+}
+
+export interface ScrollInstructionRequest extends ScrollPayload {
+  action: "scroll";
+}
 
 export interface ClickInstructionRequest extends ClickPayload {
   action: "click";
@@ -284,10 +304,15 @@ export interface ScreenshotInstructionRequest {
 
 export type InstructionRequest =
   | ClickInstructionRequest
+  | CloseTabInstructionRequest
+  | FocusTabInstructionRequest
   | JavaScriptInstructionRequest
   | KeyboardInstructionRequest
+  | ListTabsInstructionRequest
+  | NavigateTabInstructionRequest
+  | ReloadTabInstructionRequest
   | ScreenshotInstructionRequest
-  | TabsInstructionRequest;
+  | ScrollInstructionRequest;
 
 export interface TabDetails {
   tid: number;
@@ -305,6 +330,11 @@ export interface ListedTab extends TabDetails {
 export interface ClosedTab {
   closed: true;
   tab: TabDetails;
+}
+
+export interface ScrollResult {
+  scrolled: true;
+  y: number;
 }
 
 export interface ClickResult {
@@ -353,16 +383,15 @@ export type InstructionResultFor<Request extends InstructionRequest> =
           ? KeyboardKeyResult
           : Request extends { action: "screenshot" }
             ? ScreenshotResult
-            : Request extends { action: "tabs"; operation: "list" }
+            : Request extends { action: "list" }
               ? ListedTab[]
-              : Request extends { action: "tabs"; operation: "close" }
+              : Request extends { action: "close" }
                 ? ClosedTab
-                : Request extends {
-                      action: "tabs";
-                      operation: "focus" | "navigate";
-                    }
+                : Request extends { action: "focus" | "navigate" | "reload" }
                   ? TabDetails
-                  : never;
+                  : Request extends { action: "scroll" }
+                    ? ScrollResult
+                    : never;
 
 export type InstructionResult = InstructionResultFor<InstructionRequest>;
 
@@ -371,6 +400,7 @@ export type ExtensionInstructionResult =
   | ListedTab[]
   | TabDetails
   | ClosedTab
+  | ScrollResult
   | ClickResult
   | KeyboardTextResult
   | KeyboardKeyResult
