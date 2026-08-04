@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import builtins
 import math
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast
+from dataclasses import dataclass, field
+from typing import Annotated, Any, cast
 
 from acob import (
-    DEFAULT_ENDPOINT,
     ACOBClient,
     ClickResult,
     ClosedTab,
@@ -43,9 +43,11 @@ SERVER_DESCRIPTION = (
     "extension recovery."
 )
 SERVER_INSTRUCTIONS = (
-    "ACOB controls one existing Chromium session selected when this server starts. "
-    "It uses the user's live tabs and authenticated browser state, so tool calls "
-    "can cause real side effects.\n\n"
+    "ACOB controls one existing Chromium session selected by the browser ID in "
+    "the connection URL and talks to the API origin in the optional endpoint query "
+    "parameter, which defaults to the Docker API endpoint. It uses the user's live "
+    "tabs and authenticated browser state, so tool calls can cause real side "
+    "effects.\n\n"
     "Begin with list and identify the target from its title, URL, "
     "and domain before using a tab ID. Never guess a tab ID or alter an unrelated "
     "tab. Await navigation and use the returned tid before dependent actions.\n\n"
@@ -60,6 +62,7 @@ SERVER_INSTRUCTIONS = (
     "repeat side-effecting work. reinstall reloads the unpacked extension from disk, "
     "interrupts active work, and is only for explicit recovery after rebuilding it."
 )
+DEFAULT_ACOB_ENDPOINT = "http://host.docker.internal:58347"
 DEFAULT_MCP_PORT = 58349
 DEFAULT_ALLOWED_HOSTS = (
     "127.0.0.1:*",
@@ -119,16 +122,12 @@ ScrollY = Annotated[
         description="Relative vertical distance in CSS pixels; positive is down.",
     ),
 ]
-Transport = Literal["stdio", "streamable-http"]
 
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    bid: str
-    endpoint: str = DEFAULT_ENDPOINT
     timeout: float = 60.0
     poll_interval: float = 0.5
-    transport: Transport = "stdio"
     host: str = "127.0.0.1"
     port: int = DEFAULT_MCP_PORT
     path: str = "/mcp"
@@ -138,24 +137,13 @@ class Settings:
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         values = os.environ if environ is None else environ
-        bid = values.get("ACOB_BID", "").strip()
-        if not bid:
-            raise ValueError("ACOB_BID is required")
-
-        raw_transport = values.get("ACOB_MCP_TRANSPORT", "stdio")
-        if raw_transport not in {"stdio", "streamable-http"}:
-            raise ValueError("ACOB_MCP_TRANSPORT must be 'stdio' or 'streamable-http'")
-
         path = values.get("ACOB_MCP_PATH", "/mcp").strip()
         if not path.startswith("/"):
             raise ValueError("ACOB_MCP_PATH must start with '/'")
 
         return cls(
-            bid=bid,
-            endpoint=values.get("ACOB_ENDPOINT", DEFAULT_ENDPOINT),
             timeout=_positive_float(values, "ACOB_TIMEOUT", 60.0),
             poll_interval=_positive_float(values, "ACOB_POLL_INTERVAL", 0.5),
-            transport=cast(Transport, raw_transport),
             host=values.get("ACOB_MCP_HOST", "127.0.0.1"),
             port=_port(values.get("ACOB_MCP_PORT", str(DEFAULT_MCP_PORT))),
             path=path,
@@ -169,10 +157,41 @@ class Settings:
             ),
         )
 
+    def route(self) -> str:
+        """Streamable HTTP route; the BID path segment selects the browser."""
+        return f"{self.path.rstrip('/')}/{{bid}}"
+
 
 @dataclass(frozen=True, slots=True)
 class AppContext:
-    client: ACOBClient
+    timeout: float
+    poll_interval: float
+    default_client: ACOBClient | None = None
+    clients: dict[tuple[str, str], ACOBClient] = field(default_factory=dict)
+
+    def client_for(self, request: Any) -> ACOBClient:
+        """Return the client addressed by the connection URL, creating it once."""
+        if self.default_client is not None:
+            return self.default_client
+        bid, endpoint = _connection_target(request)
+        key = (bid, endpoint)
+        client = self.clients.get(key)
+        if client is None:
+            client = ACOBClient(
+                bid,
+                endpoint=endpoint,
+                timeout=self.timeout,
+                poll_interval=self.poll_interval,
+            )
+            self.clients[key] = client
+        return client
+
+    async def aclose(self) -> None:
+        """Close every client created for incoming connections."""
+        if self.default_client is not None:
+            await self.default_client.aclose()
+        for client in self.clients.values():
+            await client.aclose()
 
 
 def create_server(
@@ -180,19 +199,17 @@ def create_server(
     *,
     client: ACOBClient | None = None,
 ) -> MCPServer[AppContext]:
-    acob_client = client or ACOBClient(
-        settings.bid,
-        endpoint=settings.endpoint,
-        timeout=settings.timeout,
-        poll_interval=settings.poll_interval,
-    )
-
     @asynccontextmanager
     async def lifespan(_server: MCPServer[AppContext]) -> AsyncIterator[AppContext]:
+        context = AppContext(
+            timeout=settings.timeout,
+            poll_interval=settings.poll_interval,
+            default_client=client,
+        )
         try:
-            yield AppContext(client=acob_client)
+            yield context
         finally:
-            await acob_client.aclose()
+            await context.aclose()
 
     server = MCPServer(
         "acob",
@@ -210,9 +227,9 @@ def create_server(
     async def list(
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
-    ) -> list[ListedTab]:
+    ) -> builtins.list[ListedTab]:
         """List Chromium tabs."""
-        return await ctx.request_context.lifespan_context.client.list(timeout=timeout)
+        return await _client(ctx).list(timeout=timeout)
 
     @server.tool(
         annotations=ToolAnnotations(open_world_hint=True),
@@ -224,7 +241,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> Tab:
         """Navigate a tab, or open an inactive tab when tid is omitted."""
-        return await ctx.request_context.lifespan_context.client.navigate(
+        return await _client(ctx).navigate(
             url,
             tid=tid,
             timeout=timeout,
@@ -239,7 +256,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> Tab:
         """Focus a Chromium tab and its window."""
-        return await ctx.request_context.lifespan_context.client.focus(
+        return await _client(ctx).focus(
             tid,
             timeout=timeout,
         )
@@ -257,7 +274,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> ClosedTab:
         """Close a Chromium tab."""
-        return await ctx.request_context.lifespan_context.client.close(
+        return await _client(ctx).close(
             tid,
             timeout=timeout,
         )
@@ -275,7 +292,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> Tab:
         """Reload a Chromium tab and wait for it to load."""
-        return await ctx.request_context.lifespan_context.client.reload(
+        return await _client(ctx).reload(
             tid,
             timeout=timeout,
         )
@@ -290,7 +307,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> ScrollResult:
         """Scroll a Chromium tab vertically by y CSS pixels."""
-        return await ctx.request_context.lifespan_context.client.scroll(
+        return await _client(ctx).scroll(
             tid,
             y,
             timeout=timeout,
@@ -306,7 +323,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> ClickResult:
         """Send real mouse input to the center of a CSS-selected element."""
-        return await ctx.request_context.lifespan_context.client.click(
+        return await _client(ctx).click(
             tid,
             selector,
             timeout=timeout,
@@ -320,12 +337,12 @@ def create_server(
         ctx: Context[AppContext],
         text: NonEmptyText | None = None,
         key: NonEmptyString | None = None,
-        modifiers: list[KeyboardModifier] | None = None,
+        modifiers: builtins.list[KeyboardModifier] | None = None,
         timeout: ToolTimeout | None = None,
     ) -> KeyboardTextResult | KeyboardKeyResult:
         """Insert text or dispatch one key to the focused page control."""
         _validate_keyboard(text, key, modifiers)
-        acob = ctx.request_context.lifespan_context.client
+        acob = _client(ctx)
         if text is not None:
             return await acob.keyboard(tid, text=text, timeout=timeout)
         assert key is not None
@@ -346,7 +363,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> Image:
         """Capture a Chromium tab and return a PNG image."""
-        png = await ctx.request_context.lifespan_context.client.screenshot(
+        png = await _client(ctx).screenshot(
             tid,
             full_page=full_page,
             timeout=timeout,
@@ -363,7 +380,7 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> JsonValue:
         """Evaluate JavaScript in a Chromium tab and return its JSON value."""
-        result = await ctx.request_context.lifespan_context.client.javascript(
+        result = await _client(ctx).javascript(
             tid,
             script,
             timeout=timeout,
@@ -379,7 +396,7 @@ def create_server(
     )
     async def reinstall(ctx: Context[AppContext]) -> ReinstallResult:
         """Reinstall the unpacked extension, interrupting active browser work."""
-        return await ctx.request_context.lifespan_context.client.reinstall()
+        return await _client(ctx).reinstall()
 
     return server
 
@@ -391,10 +408,6 @@ def main() -> None:
     except ValueError as error:
         raise SystemExit(f"Invalid ACOB MCP configuration: {error}") from error
 
-    if settings.transport == "stdio":
-        server.run("stdio")
-        return
-
     security = TransportSecuritySettings(
         allowed_hosts=list(settings.allowed_hosts),
         allowed_origins=list(settings.allowed_origins),
@@ -403,7 +416,7 @@ def main() -> None:
         "streamable-http",
         host=settings.host,
         port=settings.port,
-        streamable_http_path=settings.path,
+        streamable_http_path=settings.route(),
         json_response=True,
         stateless_http=True,
         transport_security=security,
@@ -414,6 +427,11 @@ async def _enforce_tool_arguments(
     ctx: ServerRequestContext[Any, Any],
     call_next: CallNext,
 ) -> HandlerResult:
+    try:
+        ctx.lifespan_context.client_for(ctx.request)
+    except ValueError as error:
+        raise MCPError(INVALID_PARAMS, str(error)) from error
+
     if ctx.method == "tools/call" and isinstance(ctx.params, Mapping):
         name = ctx.params.get("name")
         arguments = ctx.params.get("arguments")
@@ -446,6 +464,26 @@ async def _enforce_tool_arguments(
                 if isinstance(input_schema, dict):
                     input_schema["additionalProperties"] = False
     return result
+
+
+def _client(ctx: Context[AppContext]) -> ACOBClient:
+    request_context = ctx.request_context
+    return request_context.lifespan_context.client_for(request_context.request)
+
+
+def _connection_target(request: Any) -> tuple[str, str]:
+    """Read the browser ID and ACOB API origin from the connection URL."""
+    if request is None:
+        raise ValueError("connections must include the browser ID in the URL path")
+    bid = request.path_params.get("bid", "")
+    endpoint = request.query_params.get("endpoint")
+    if endpoint is None:
+        endpoint = DEFAULT_ACOB_ENDPOINT
+    else:
+        endpoint = endpoint.strip()
+        if not endpoint:
+            raise ValueError("the 'endpoint' query parameter cannot be blank")
+    return bid, endpoint
 
 
 def _validate_keyboard(

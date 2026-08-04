@@ -26,6 +26,7 @@ Issues = "https://github.com/zpaceway/acob/issues"
 [dependency-groups]
 dev = [
     "black>=26.5.1",
+    "mypy>=2.3.0",
     "pyright>=1.1.411",
     "ruff>=0.16.0",
 ]
@@ -50,3 +51,6 @@ include = ["src", "tests"]
 pythonVersion = "3.10"
 venvPath = "."
 venv = ".venv"
+
+[tool.mypy]
+python_version = "3.10"

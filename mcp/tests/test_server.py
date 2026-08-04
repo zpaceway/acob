@@ -1,5 +1,6 @@
 import base64
 import unittest
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 from acob import (
@@ -16,25 +17,22 @@ from mcp import Client, MCPError
 from mcp.types import ImageContent, TextContent
 
 from acob_mcp.server import (
+    DEFAULT_ACOB_ENDPOINT,
     SERVER_DESCRIPTION,
     SERVER_INSTRUCTIONS,
     SERVER_TITLE,
+    AppContext,
     Settings,
     create_server,
 )
 
 
 class SettingsTests(unittest.TestCase):
-    BID = "0123456789ab4def8123456789abcdef"
-
-    def test_loads_process_and_transport_settings(self):
+    def test_loads_settings_from_env(self):
         settings = Settings.from_env(
             {
-                "ACOB_BID": self.BID,
-                "ACOB_ENDPOINT": "http://acob.test:8000/",
                 "ACOB_TIMEOUT": "12.5",
                 "ACOB_POLL_INTERVAL": "0.1",
-                "ACOB_MCP_TRANSPORT": "streamable-http",
                 "ACOB_MCP_HOST": "0.0.0.0",
                 "ACOB_MCP_PORT": "9000",
                 "ACOB_MCP_PATH": "/browser",
@@ -43,30 +41,39 @@ class SettingsTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(settings.bid, self.BID)
-        self.assertEqual(settings.endpoint, "http://acob.test:8000/")
         self.assertEqual(settings.timeout, 12.5)
         self.assertEqual(settings.poll_interval, 0.1)
-        self.assertEqual(settings.transport, "streamable-http")
         self.assertEqual(settings.host, "0.0.0.0")
         self.assertEqual(settings.port, 9000)
         self.assertEqual(settings.path, "/browser")
         self.assertEqual(settings.allowed_hosts, ("localhost:*", "acob.test"))
         self.assertEqual(settings.allowed_origins, ("https://acob.test",))
 
-    def test_rejects_missing_or_invalid_settings(self):
+    def test_defaults_apply_when_env_is_empty(self):
+        settings = Settings.from_env({})
+
+        self.assertEqual(settings.timeout, 60.0)
+        self.assertEqual(settings.poll_interval, 0.5)
+        self.assertEqual(settings.host, "127.0.0.1")
+        self.assertEqual(settings.port, 58349)
+        self.assertEqual(settings.path, "/mcp")
+
+    def test_builds_the_connection_route_with_a_bid_segment(self):
+        self.assertEqual(Settings().route(), "/mcp/{bid}")
+        self.assertEqual(Settings(path="/browser/").route(), "/browser/{bid}")
+
+    def test_rejects_invalid_settings(self):
         invalid = (
-            ({}, "ACOB_BID is required"),
             (
-                {"ACOB_BID": self.BID, "ACOB_TIMEOUT": "inf"},
+                {"ACOB_TIMEOUT": "inf"},
                 "ACOB_TIMEOUT must be a positive finite number",
             ),
             (
-                {"ACOB_BID": self.BID, "ACOB_MCP_PORT": "0"},
+                {"ACOB_MCP_PORT": "0"},
                 "ACOB_MCP_PORT must be an integer from 1 to 65535",
             ),
             (
-                {"ACOB_BID": self.BID, "ACOB_MCP_PATH": "mcp"},
+                {"ACOB_MCP_PATH": "mcp"},
                 "ACOB_MCP_PATH must start with '/'",
             ),
         )
@@ -77,12 +84,87 @@ class SettingsTests(unittest.TestCase):
                     Settings.from_env(environ)
 
 
-class MCPServerTests(unittest.IsolatedAsyncioTestCase):
+class AppContextTests(unittest.IsolatedAsyncioTestCase):
     BID = "0123456789ab4def8123456789abcdef"
 
+    @staticmethod
+    def request(bid=None, endpoint=None):
+        return SimpleNamespace(
+            path_params={} if bid is None else {"bid": bid},
+            query_params={} if endpoint is None else {"endpoint": endpoint},
+        )
+
+    def test_builds_and_caches_one_client_per_bid_and_endpoint(self):
+        context = AppContext(timeout=12.5, poll_interval=0.1)
+
+        first = context.client_for(self.request(self.BID, "http://acob.test:8000"))
+        second = context.client_for(self.request(self.BID, "http://acob.test:8000"))
+        other = context.client_for(self.request(self.BID, "http://other.test:9000"))
+
+        self.assertIs(first, second)
+        self.assertIsNot(first, other)
+        self.assertEqual(first.bid, self.BID)
+        self.assertEqual(first.endpoint, "http://acob.test:8000")
+        self.assertEqual(first.timeout, 12.5)
+        self.assertEqual(first.poll_interval, 0.1)
+
+    def test_uses_the_default_endpoint_when_query_parameter_is_absent(self):
+        context = AppContext(timeout=60.0, poll_interval=0.5)
+
+        client = context.client_for(self.request(self.BID))
+
+        self.assertEqual(client.endpoint, DEFAULT_ACOB_ENDPOINT)
+
+    def test_rejects_a_blank_endpoint_query_parameter(self):
+        context = AppContext(timeout=60.0, poll_interval=0.5)
+
+        with self.assertRaisesRegex(ValueError, "'endpoint' query parameter"):
+            context.client_for(self.request(self.BID, "  "))
+
+    def test_requires_a_valid_bid_and_endpoint_url(self):
+        context = AppContext(timeout=60.0, poll_interval=0.5)
+
+        with self.assertRaisesRegex(ValueError, "bid"):
+            context.client_for(self.request("not-a-bid", "http://acob.test:8000"))
+        with self.assertRaisesRegex(ValueError, "endpoint"):
+            context.client_for(self.request(self.BID, "acob.test:8000"))
+
+    def test_requires_an_http_request_without_a_default_client(self):
+        context = AppContext(timeout=60.0, poll_interval=0.5)
+
+        with self.assertRaisesRegex(ValueError, "URL path"):
+            context.client_for(None)
+
+    def test_default_client_ignores_the_connection_url(self):
+        default_client = create_autospec(ACOBClient, instance=True)
+        context = AppContext(
+            timeout=60.0,
+            poll_interval=0.5,
+            default_client=default_client,
+        )
+
+        self.assertIs(context.client_for(None), default_client)
+
+    async def test_aclose_closes_default_and_cached_clients(self):
+        default_client = create_autospec(ACOBClient, instance=True)
+        context = AppContext(
+            timeout=60.0,
+            poll_interval=0.5,
+            default_client=default_client,
+        )
+        cached = create_autospec(ACOBClient, instance=True)
+        context.clients[(self.BID, "http://acob.test:8000")] = cached
+
+        await context.aclose()
+
+        default_client.aclose.assert_awaited_once_with()
+        cached.aclose.assert_awaited_once_with()
+
+
+class MCPServerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.acob = create_autospec(ACOBClient, instance=True)
-        self.server = create_server(Settings(bid=self.BID), client=self.acob)
+        self.server = create_server(Settings(), client=self.acob)
 
     async def test_advertises_agent_facing_identity_and_instructions(self):
         async with Client(self.server, raise_exceptions=True) as client:

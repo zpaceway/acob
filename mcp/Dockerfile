@@ -1,8 +1,7 @@
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 ENV ACOB_MCP_HOST=0.0.0.0 \
-    ACOB_MCP_PORT=58349 \
-    ACOB_MCP_TRANSPORT=streamable-http
+    ACOB_MCP_PORT=58349
 
 WORKDIR /app
 

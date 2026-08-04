@@ -11,8 +11,10 @@ with `../srv/`.
 MCP host -> acob-mcp -> acob-client -> Django REST API -> Chromium extension
 ```
 
-One process controls one browser. Set `ACOB_BID` when starting the process;
-the browser ID is runtime routing configuration, not authentication.
+One process serves connections for multiple browsers. Each Streamable HTTP
+connection supplies its browser ID in the URL path and can override its Django
+API origin with the `endpoint` query parameter. These values are runtime
+routing configuration, not authentication.
 
 ## Requirements
 
@@ -32,65 +34,41 @@ The local uv source points `acob-client` at `../client/`. Published wheels and
 source distributions retain the normal `acob-client>=0.4.0` dependency and can
 be installed without the monorepo sibling.
 
-## Stdio
-
-Stdio is the default transport. MCP hosts launch one process for each browser:
-
-```json
-{
-  "mcpServers": {
-    "acob": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/acob/mcp",
-        "run",
-        "acob-mcp"
-      ],
-      "env": {
-        "ACOB_BID": "0123456789ab4def8123456789abcdef",
-        "ACOB_ENDPOINT": "http://127.0.0.1:58347"
-      }
-    }
-  }
-}
-```
-
 ## Streamable HTTP
 
-Run the same app as an independent Streamable HTTP server:
+Run the Streamable HTTP server:
 
 ```bash
-ACOB_BID=0123456789ab4def8123456789abcdef \
-  ACOB_MCP_TRANSPORT=streamable-http \
-  uv run acob-mcp
+uv run acob-mcp
 ```
 
-Clients connect to `http://127.0.0.1:58349/mcp`. The BID is already fixed by
-the process, so clients do not send a custom header:
+Clients must include the browser ID after the configured MCP path:
 
 ```json
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58349/mcp"
+      "url": "http://127.0.0.1:58349/mcp/0123456789ab4def8123456789abcdef"
     }
   }
 }
 ```
+
+Without a query parameter, the endpoint defaults to
+`http://host.docker.internal:58347`, which is the API address reachable from
+the Docker-based MCP deployment. To target another API origin, use
+`?endpoint=http://127.0.0.1:58347`. A blank `endpoint` query value fails the
+MCP connection request.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ACOB_BID` | required | Lowercase dashless UUIDv4 shown by the extension. |
-| `ACOB_ENDPOINT` | `http://127.0.0.1:58347` | Django REST API origin. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
-| `ACOB_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http`. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
 | `ACOB_MCP_PORT` | `58349` | HTTP listen port. |
-| `ACOB_MCP_PATH` | `/mcp` | Streamable HTTP route. |
+| `ACOB_MCP_PATH` | `/mcp` | Streamable HTTP path prefix; the browser ID is appended. |
 | `ACOB_MCP_ALLOWED_HOSTS` | localhost variants | Comma-separated HTTP Host allowlist. |
 | `ACOB_MCP_ALLOWED_ORIGINS` | localhost variants | Comma-separated HTTP Origin allowlist. |
 
@@ -136,15 +114,16 @@ docker compose -f srv/compose.yaml up --detach --build
 Then run the adapter from the repository root:
 
 ```bash
-ACOB_BID=0123456789ab4def8123456789abcdef \
-  docker compose -f mcp/compose.yaml up --build
+docker compose -f mcp/compose.yaml up --build
 ```
 
-Compose publishes only MCP on `127.0.0.1:58349`. The default `ACOB_ENDPOINT` is
-`http://host.docker.internal:58347`, which reaches the port published by the
-independent `acob-srv` Compose service. Override it when the API is elsewhere.
-The image and container are both named `acob-mcp`. Set `ACOB_MCP_PORT` to change
-the published MCP host port. Build the adapter image without Compose with:
+Compose publishes only MCP on `127.0.0.1:58349`. Connect with
+`http://127.0.0.1:58349/mcp/<bid>` to use the default endpoint, or add an
+`endpoint` query parameter for another API origin. The default is reachable
+from the container at `http://host.docker.internal:58347`, which points to the
+API port published by the independent `acob-srv` Compose service. The image
+and container are both named `acob-mcp`. Set `ACOB_MCP_PORT` to change the
+published MCP host port. Build the adapter image without Compose with:
 
 ```bash
 docker build -f mcp/Dockerfile -t acob-mcp .

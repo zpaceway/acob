@@ -10,6 +10,7 @@ format:
 check:
 	uv run ruff check .
 	uv run black --check acob tests
+	uv run mypy --no-incremental acob tests
 	uv run pyright
 
 test:

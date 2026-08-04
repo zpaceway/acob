@@ -88,8 +88,8 @@ Python client or MCP host
 
 ### MCP Adapter
 
-- One MCP process targets one configured browser.
-- Stdio and stateless Streamable HTTP transports are supported.
+- One MCP process serves multiple browser connections.
+- Stateless Streamable HTTP uses the connection URL for browser and API routing.
 - Tool schemas are derived from typed functions and reject unknown arguments.
 - The tool set mirrors the high-level Python client action set.
 - Screenshots are returned as MCP PNG image content.
@@ -263,7 +263,7 @@ local execution path.
   builds, extension builds, container builds, and documentation links.
 - Add a deterministic local fixture site and real-Chromium smoke suite.
 - Exercise every browser action through server, extension, and client.
-- Exercise MCP stdio against the same runtime.
+- Exercise MCP Streamable HTTP against the same runtime.
 - Add fault injection for server outages, tab closure, debugger conflicts,
   worker restart, and lost result responses.
 - Add automated HTML, link, accessibility, and keyboard checks for the website.
@@ -595,8 +595,8 @@ MCP, documentation, containers, and release artifacts.
 - Disabled capabilities are not presented as usable tools.
 - MCP annotations match each action's mutation and retry behavior.
 - Large artifacts stay within host message limits.
-- Fresh-install tests cover server, extension, Python client, MCP stdio, MCP
-  HTTP, and static site deployment.
+- Fresh-install tests cover server, extension, Python client, MCP HTTP, and
+  static site deployment.
 - Documentation contains no capability claim without matching verification.
 - Supported runtime versions match the CI matrix.
 
@@ -610,7 +610,7 @@ MCP, documentation, containers, and release artifacts.
 | Chromium integration | Every action, real pointer and keyboard behavior, semantic inspection, frames, shadow roots, dialogs, traces, files, and worker restart. |
 | Failure injection | Lost responses, server outage, worker suspension, browser restart, tab closure, navigation, debugger conflict, lease expiry, and interrupted artifacts. |
 | Client integration | Authentication, deadlines, cancellation, result acknowledgement, media types, checksums, and artifact retries against a real server. |
-| MCP integration | Stdio and HTTP authentication, cancellation, progress, capability-gated tools, annotations, image limits, and structured errors. |
+| MCP integration | HTTP authentication, cancellation, progress, capability-gated tools, annotations, image limits, and structured errors. |
 | Security | Role enforcement, token redaction, host validation, content types, origin policy, private-network rules, path traversal, and secret leakage. |
 | Accessibility | Semantic roles and names, focus order, keyboard workflows, missing-name diagnostics, and website checks. |
 | Packaging | Wheel and source contents, extension archive, container user and health, licenses, lockfile reproducibility, and clean installs. |

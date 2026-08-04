@@ -171,40 +171,34 @@ The standalone [`mcp/`](mcp/README.md) project uses the official `mcp` Python
 SDK and talks to Django through `acob-client`. It has its own dependencies,
 tests, package, process, and container.
 
-Each MCP process controls the browser configured by `ACOB_BID`. Stdio is the
-default transport:
+The MCP adapter runs as a Streamable HTTP server. Each connection selects its
+browser with the BID path segment. The optional `endpoint` query parameter
+overrides the default Docker-reachable Django API origin:
 
 ```json
 {
   "mcpServers": {
     "acob": {
-      "command": "uv",
-      "args": ["--directory", "/absolute/path/to/acob/mcp", "run", "acob-mcp"],
-      "env": {
-        "ACOB_BID": "0123456789ab4def8123456789abcdef",
-        "ACOB_ENDPOINT": "http://127.0.0.1:58347"
-      }
+      "url": "http://127.0.0.1:58349/mcp/0123456789ab4def8123456789abcdef"
     }
   }
 }
 ```
 
-Run it as a separate Streamable HTTP service when a URL is needed:
+Run it as a separate service:
 
 ```bash
-ACOB_BID=0123456789ab4def8123456789abcdef \
-  ACOB_MCP_TRANSPORT=streamable-http \
-  uv --directory mcp run acob-mcp
+uv --directory mcp run acob-mcp
 ```
 
-Clients then connect to `http://127.0.0.1:58349/mcp` without a custom BID
-header. The browser ID is process configuration and is not authentication.
+The default endpoint is `http://host.docker.internal:58347`. Add
+`?endpoint=http://127.0.0.1:58347` to target another API origin. The BID and
+endpoint value are routing configuration and are not authentication.
 The Compose workflow starts only the MCP adapter. Its image includes the adapter
 and `acob-client`; run `acob-srv` or another reachable ACOB API independently:
 
 ```bash
-ACOB_BID=0123456789ab4def8123456789abcdef \
-  docker compose -f mcp/compose.yaml up --build
+docker compose -f mcp/compose.yaml up --build
 ```
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,

@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "black>=26.5.1",
+    "mypy>=2.3.0",
     "pyright>=1.1.411",
     "ruff>=0.16.0",
 ]
@@ -40,3 +41,6 @@ select = ["B", "E", "F", "I", "RUF", "UP"]
 [tool.pyright]
 include = ["acob", "tests"]
 pythonVersion = "3.10"
+
+[tool.mypy]
+python_version = "3.10"

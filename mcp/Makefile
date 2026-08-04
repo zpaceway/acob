@@ -1,8 +1,6 @@
 MCP_DIST_DIR ?= dist
-HOST ?= 127.0.0.1
-PORT ?= 58349
 
-.PHONY: format check test build run run-http docker logs
+.PHONY: format check test build run docker logs
 
 format:
 	@echo "Formatting ACOB MCP code..."
@@ -12,6 +10,7 @@ format:
 check:
 	uv run ruff check .
 	uv run black --check src tests
+	uv run mypy --no-incremental src tests
 	uv run pyright
 
 test:
@@ -24,9 +23,6 @@ build:
 
 run:
 	uv run acob-mcp
-
-run-http:
-	ACOB_MCP_TRANSPORT=streamable-http ACOB_MCP_HOST=$(HOST) ACOB_MCP_PORT=$(PORT) uv run acob-mcp
 
 docker:
 	@echo "Building Docker image..."

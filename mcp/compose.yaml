@@ -8,11 +8,8 @@ services:
       context: ..
       dockerfile: mcp/Dockerfile
     environment:
-      ACOB_BID: ${ACOB_BID:?Set ACOB_BID to the extension browser ID}
-      ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://host.docker.internal:58347}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
-      ACOB_MCP_TRANSPORT: ${ACOB_MCP_TRANSPORT:-streamable-http}
       ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}
       ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58349}
       ACOB_MCP_PATH: ${ACOB_MCP_PATH:-/mcp}
