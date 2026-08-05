@@ -10,16 +10,18 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
-from .models import ExtensionReload, Instruction, Screenshot
-from .recovery import EXTENSION_RELOAD_ERROR, request_extension_reload
+from .models import Instruction, Reinstall, Screenshot
+from .recovery import EXTENSION_REINSTALL_ERROR, request_reinstall
 from .schemas import (
     ApiModel,
     ErrorResponse,
-    ExtensionReloadAcknowledgement,
-    ExtensionReloadResponse,
     InstructionResponse,
     InstructionResultRequest,
     NextInstructionsQuery,
+    ReinstallAcknowledgement,
+    ReinstallCommand,
+    ReinstallCommandPayload,
+    ReinstallResponse,
     ScreenshotResult,
     ScrollResult,
     ValidationErrorResponse,
@@ -127,10 +129,23 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
     except ValidationError as error:
         return validation_error_response(error)
 
+    pending_reinstall = Reinstall.objects.filter(bid=bid).first()
+    if pending_reinstall is not None:
+        reinstall_command = JsonResponse(
+            [
+                ReinstallCommand(
+                    payload=ReinstallCommandPayload(token=pending_reinstall.token)
+                ).model_dump(mode="json")
+            ],
+            safe=False,
+        )
+        reinstall_command["Cache-Control"] = "no-store"
+        return reinstall_command
+
     instructions: list[Instruction] = []
-    no_pending_reload = ~Exists(ExtensionReload.objects.filter(bid=bid))
+    no_pending_reinstall = ~Exists(Reinstall.objects.filter(bid=bid))
     while len(instructions) < query.limit:
-        if ExtensionReload.objects.filter(bid=bid).exists():
+        if Reinstall.objects.filter(bid=bid).exists():
             break
         candidate = (
             Instruction.objects.filter(
@@ -149,7 +164,7 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
                 bid=bid,
                 status=Instruction.Status.PENDING,
             )
-            .filter(no_pending_reload)
+            .filter(no_pending_reinstall)
             .update(
                 status=Instruction.Status.PROCESSING,
                 updated_at=timezone.now(),
@@ -292,28 +307,28 @@ def download_screenshot(
 
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
-def extension_reload(request: HttpRequest, bid: str) -> HttpResponse:
+def reinstall(request: HttpRequest, bid: str) -> HttpResponse:
     if request.method == "POST":
-        reload_request = request_extension_reload(bid)
+        reinstall_request = request_reinstall(bid)
         response = model_response(
-            ExtensionReloadResponse(
-                token=reload_request.token,
-                requested_at=reload_request.requested_at,
+            ReinstallResponse(
+                token=reinstall_request.token,
+                requested_at=reinstall_request.requested_at,
             ),
             status=202,
         )
         response["Cache-Control"] = "no-store"
         return response
 
-    pending_reload = ExtensionReload.objects.filter(bid=bid).first()
-    if pending_reload is None:
+    pending_reinstall = Reinstall.objects.filter(bid=bid).first()
+    if pending_reinstall is None:
         no_content_response = HttpResponse(status=204)
         no_content_response["Cache-Control"] = "no-store"
         return no_content_response
     pending_response = model_response(
-        ExtensionReloadResponse(
-            token=pending_reload.token,
-            requested_at=pending_reload.requested_at,
+        ReinstallResponse(
+            token=pending_reinstall.token,
+            requested_at=pending_reinstall.requested_at,
         )
     )
     pending_response["Cache-Control"] = "no-store"
@@ -322,30 +337,28 @@ def extension_reload(request: HttpRequest, bid: str) -> HttpResponse:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def acknowledge_extension_reload(request: HttpRequest, bid: str) -> HttpResponse:
+def acknowledge_reinstall(request: HttpRequest, bid: str) -> HttpResponse:
     try:
-        acknowledgement = ExtensionReloadAcknowledgement.model_validate_json(
-            request.body
-        )
+        acknowledgement = ReinstallAcknowledgement.model_validate_json(request.body)
     except ValidationError as error:
         return validation_error_response(error)
 
     with transaction.atomic():
-        reload_request = (
-            ExtensionReload.objects.select_for_update().filter(bid=bid).first()
+        reinstall_request = (
+            Reinstall.objects.select_for_update().filter(bid=bid).first()
         )
-        if reload_request is None:
+        if reinstall_request is None:
             return HttpResponse(status=204)
-        if reload_request.token != acknowledgement.token:
-            return error_response("Extension reload token does not match", status=409)
+        if reinstall_request.token != acknowledgement.token:
+            return error_response("Reinstall token does not match", status=409)
 
         Instruction.objects.filter(
             bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             status=Instruction.Status.FAILED,
-            error=EXTENSION_RELOAD_ERROR,
+            error=EXTENSION_REINSTALL_ERROR,
             updated_at=timezone.now(),
         )
-        reload_request.delete()
+        reinstall_request.delete()
     return HttpResponse(status=204)

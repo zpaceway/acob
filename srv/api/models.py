@@ -55,7 +55,7 @@ class Screenshot(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-class ExtensionReload(models.Model):
+class Reinstall(models.Model):
     bid = models.CharField(
         max_length=32,
         unique=True,

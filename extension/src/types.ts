@@ -236,6 +236,13 @@ export interface ClaimedInstruction {
   payload: unknown;
 }
 
+// Delivered by the claim route in place of queued work, so it carries no
+// instruction id and is never completed through the result route.
+export interface ReinstallCommand {
+  action: "reinstall";
+  payload: { token: string };
+}
+
 export interface Instruction {
   id: number;
   bid: string;

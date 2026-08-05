@@ -4,8 +4,8 @@ import json
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import ExtensionReload, Instruction, Screenshot
-from .recovery import EXTENSION_RELOAD_ERROR
+from .models import Instruction, Reinstall, Screenshot
+from .recovery import EXTENSION_REINSTALL_ERROR
 
 
 class InstructionApiTests(TestCase):
@@ -27,8 +27,8 @@ class InstructionApiTests(TestCase):
             data,
         )
 
-    def extension_reload_path(self, suffix=""):
-        return f"/api/browsers/{self.BID}/extension/reload/{suffix}"
+    def reinstall_path(self, suffix=""):
+        return f"/api/browsers/{self.BID}/reinstall/{suffix}"
 
     def test_instruction_flow(self):
         created = self.post_json(
@@ -127,13 +127,23 @@ class InstructionApiTests(TestCase):
             [instruction.id for instruction in instructions[4:]],
         )
 
-    def test_pending_extension_reload_blocks_instruction_claims(self):
+    def test_pending_reinstall_blocks_instruction_claims(self):
         instruction = Instruction.objects.create(bid=self.BID, action="list")
-        ExtensionReload.objects.create(bid=self.BID)
+        reinstall_request = Reinstall.objects.create(bid=self.BID)
 
         response = self.client.get(self.instruction_path("next/?limit=4"))
 
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            response.json(),
+            [
+                {
+                    "action": "reinstall",
+                    "payload": {"token": str(reinstall_request.token)},
+                }
+            ],
+        )
         instruction.refresh_from_db()
         self.assertEqual(instruction.status, Instruction.Status.PENDING)
 
@@ -577,10 +587,10 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid screenshot data")
         self.assertFalse(Screenshot.objects.exists())
 
-    def test_extension_reload_is_idempotent_until_acknowledged(self):
-        first = self.client.post(self.extension_reload_path())
-        second = self.client.post(self.extension_reload_path())
-        pending = self.client.get(self.extension_reload_path())
+    def test_reinstall_is_idempotent_until_acknowledged(self):
+        first = self.client.post(self.reinstall_path())
+        second = self.client.post(self.reinstall_path())
+        pending = self.client.get(self.reinstall_path())
 
         self.assertEqual(first.status_code, 202)
         self.assertEqual(first.headers["Cache-Control"], "no-store")
@@ -588,33 +598,41 @@ class InstructionApiTests(TestCase):
         self.assertEqual(second.json()["token"], first.json()["token"])
         self.assertEqual(pending.status_code, 200)
         self.assertEqual(pending.json()["token"], first.json()["token"])
-        self.assertEqual(ExtensionReload.objects.count(), 1)
+        self.assertEqual(Reinstall.objects.count(), 1)
 
-    def test_extension_reload_request_recovers_processing_work(self):
+    def test_reinstall_request_recovers_processing_work(self):
         processing = Instruction.objects.create(
             bid=self.BID,
             action="javascript",
             status=Instruction.Status.PROCESSING,
         )
         pending = Instruction.objects.create(bid=self.BID, action="list")
-        requested = self.client.post(self.extension_reload_path())
+        requested = self.client.post(self.reinstall_path())
         token = requested.json()["token"]
 
         processing.refresh_from_db()
         pending.refresh_from_db()
         self.assertEqual(processing.status, Instruction.Status.FAILED)
-        self.assertEqual(processing.error, EXTENSION_RELOAD_ERROR)
+        self.assertEqual(processing.error, EXTENSION_REINSTALL_ERROR)
         self.assertEqual(pending.status, Instruction.Status.PENDING)
 
         mismatch = self.post_json(
-            self.extension_reload_path("acknowledge/"),
+            self.reinstall_path("acknowledge/"),
             {"token": "00000000-0000-4000-8000-000000000000"},
         )
         self.assertEqual(mismatch.status_code, 409)
-        self.assertTrue(ExtensionReload.objects.exists())
+        self.assertTrue(Reinstall.objects.exists())
+
+        command = self.client.get(self.instruction_path("next/?limit=4"))
+        self.assertEqual(command.status_code, 200)
+        self.assertEqual(command.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            command.json(),
+            [{"action": "reinstall", "payload": {"token": token}}],
+        )
 
         acknowledged = self.post_json(
-            self.extension_reload_path("acknowledge/"),
+            self.reinstall_path("acknowledge/"),
             {"token": token},
         )
 
@@ -622,12 +640,19 @@ class InstructionApiTests(TestCase):
         processing.refresh_from_db()
         pending.refresh_from_db()
         self.assertEqual(processing.status, Instruction.Status.FAILED)
-        self.assertEqual(processing.error, EXTENSION_RELOAD_ERROR)
+        self.assertEqual(processing.error, EXTENSION_REINSTALL_ERROR)
         self.assertEqual(pending.status, Instruction.Status.PENDING)
-        self.assertFalse(ExtensionReload.objects.exists())
-        self.assertEqual(self.client.get(self.extension_reload_path()).status_code, 204)
+        self.assertFalse(Reinstall.objects.exists())
+        self.assertEqual(self.client.get(self.reinstall_path()).status_code, 204)
+
+        reclaimed = self.client.get(self.instruction_path("next/"))
+        self.assertEqual(reclaimed.status_code, 200)
+        self.assertEqual(reclaimed.json()[0]["id"], pending.id)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Instruction.Status.PROCESSING)
+
         repeated = self.post_json(
-            self.extension_reload_path("acknowledge/"),
+            self.reinstall_path("acknowledge/"),
             {"token": token},
         )
         self.assertEqual(repeated.status_code, 204)

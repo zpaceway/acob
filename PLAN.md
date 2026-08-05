@@ -50,7 +50,8 @@ Python client or MCP host
 - Terminal instruction responses are consumed on the first terminal read.
 - Screenshots use browser-scoped download records that are deleted when served.
 - Screenshot payloads and scroll results receive action-specific validation.
-- Extension recovery uses a dedicated command and acknowledgement channel.
+- Extension recovery delivers its reinstall command through the instruction
+  queue with a token and acknowledgement handshake.
 - Local development and container workflows use Django, SQLite, and Uvicorn.
 
 ### Extension
@@ -84,7 +85,7 @@ Python client or MCP host
   exception types.
 - Independent operations and waits can run concurrently in one event loop.
 - Screenshot downloads are constrained to the configured server origin.
-- Extension reinstall uses the recovery channel.
+- Extension reinstall is delivered through the instruction queue.
 
 ### MCP Adapter
 

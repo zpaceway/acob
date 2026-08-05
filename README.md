@@ -146,19 +146,20 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-After rebuilding an unpacked extension, request an out-of-band reload so
-Chromium reads the updated files from `extension/dist/`:
+After rebuilding an unpacked extension, request a reinstall so Chromium reads
+the updated files from `extension/dist/`:
 
 ```python
 reinstall_request = await client.reinstall()
 print(reinstall_request.token)
 ```
 
-The command does not use the normal instruction queue. The extension checks it
-before claiming work, stops active JavaScript executions, reloads affected
-tabs, restarts itself, and acknowledges the command from the new worker.
-Processing instructions interrupted by the restart fail explicitly instead of
-remaining stuck indefinitely.
+The command does not go through a separate polling channel. While a reinstall
+is pending the server claims no queue work and instead delivers a `reinstall`
+command from `instructions/next/`. The extension stops active JavaScript
+executions, reloads affected tabs, restarts itself, and acknowledges the
+command from the new worker. Processing instructions interrupted by the
+restart fail explicitly instead of remaining stuck indefinitely.
 
 Pass `endpoint="http://host:port"` to target a non-default server. Independent
 actions can be launched together with `asyncio.gather()`. See
@@ -325,7 +326,7 @@ For example, an input can be updated and notified with:
 }
 ```
 
-The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`.
+The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`. While a reinstall is pending, the response is a single `reinstall` command instead of queued work.
 
 Use the ID returned when creating an instruction to retrieve its status and result:
 
@@ -340,11 +341,13 @@ Invalid requests return an `Invalid request` error with a `details` list contain
 The browser ID must be a lowercase dashless UUIDv4. API clients select a browser by using its ID in every instruction route.
 
 The client and MCP `reinstall` operation requests an unpacked-extension reload
-with `POST /api/browsers/<bid>/extension/reload/`. The `reload` instruction
-reloads one tab through the instruction queue. `GET` on the extension route and
-`POST extension/reload/acknowledge/` form the extension-side control handshake.
-The initial POST is idempotent while one reinstall is pending and returns `202`
-with its token.
+with `POST /api/browsers/<bid>/reinstall/`. While such a reinstall is
+pending, `instructions/next/` returns a `reinstall` command instead of
+claiming queue work; the extension executes it and restarts itself.
+`POST reinstall/acknowledge/` from the restarted worker completes the
+handshake. The initial POST is idempotent while one reinstall is pending and
+returns `202` with its token. The `reload` instruction reloads one tab through
+the instruction queue.
 
 ## Contributing and security
 

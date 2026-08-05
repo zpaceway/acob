@@ -15,6 +15,7 @@ import type {
   KeyboardModifier,
   KeyboardPayload,
   KeyboardTextResult,
+  ReinstallCommand,
   ScreenshotUploadResult,
   ScrollResult,
   SupportedInstruction,
@@ -122,10 +123,10 @@ let backendUnavailable = false;
 let configurationPromise: Promise<Configuration> | null = null;
 let pageLibrariesScriptPromise: Promise<string> | null = null;
 let pollInProgress = false;
-let reloadScheduled = false;
+let reinstallScheduled = false;
 let tabCreationQueue: Promise<void> = Promise.resolve();
 const tabExecutionQueues = new Map<number, Promise<void>>();
-const PENDING_RELOAD_TOKEN_KEY = "pendingExtensionReloadToken";
+const PENDING_REINSTALL_TOKEN_KEY = "pendingReinstallToken";
 
 async function getConfiguration(): Promise<Configuration> {
   if (!configurationPromise) {
@@ -145,62 +146,47 @@ function instructionApiUrl(configuration: Configuration): string {
   return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
 }
 
-function extensionReloadUrl(configuration: Configuration): string {
+function reinstallUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
-  return `${baseUrl}/api/browsers/${configuration.bid}/extension/reload`;
+  return `${baseUrl}/api/browsers/${configuration.bid}/reinstall`;
 }
 
-async function applyExtensionReload(
+async function acknowledgePendingReinstall(
   configuration: Configuration,
-): Promise<boolean> {
-  const reloadUrl = extensionReloadUrl(configuration);
+): Promise<void> {
   const stored = await chrome.storage.local.get<
-    Record<typeof PENDING_RELOAD_TOKEN_KEY, unknown>
-  >(PENDING_RELOAD_TOKEN_KEY);
-  const pendingToken = stored[PENDING_RELOAD_TOKEN_KEY];
-
-  if (typeof pendingToken === "string") {
-    const acknowledgement = await fetch(`${reloadUrl}/acknowledge/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: pendingToken }),
-      signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
-    });
-    if (!acknowledgement.ok && acknowledgement.status !== 409) {
-      throw new Error(
-        `Could not acknowledge extension reload: HTTP ${acknowledgement.status}`,
-      );
-    }
-    await chrome.storage.local.remove(PENDING_RELOAD_TOKEN_KEY);
+    Record<typeof PENDING_REINSTALL_TOKEN_KEY, unknown>
+  >(PENDING_REINSTALL_TOKEN_KEY);
+  const pendingToken = stored[PENDING_REINSTALL_TOKEN_KEY];
+  if (typeof pendingToken !== "string") {
+    return;
   }
 
-  const response = await fetch(`${reloadUrl}/`, {
+  const reinstallBaseUrl = reinstallUrl(configuration);
+  const acknowledgement = await fetch(`${reinstallBaseUrl}/acknowledge/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: pendingToken }),
     signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
   });
-  if (response.status === 204) {
-    return false;
+  if (!acknowledgement.ok && acknowledgement.status !== 409) {
+    throw new Error(
+      `Could not acknowledge extension reinstall: HTTP ${acknowledgement.status}`,
+    );
   }
-  if (!response.ok) {
-    throw new Error(`Could not check extension reload: HTTP ${response.status}`);
-  }
+  await chrome.storage.local.remove(PENDING_REINSTALL_TOKEN_KEY);
+}
 
-  const command: unknown = await response.json();
-  if (
-    typeof command !== "object" ||
-    command === null ||
-    !("token" in command) ||
-    typeof command.token !== "string"
-  ) {
-    throw new Error("ACOB server returned an invalid extension reload command");
-  }
-
+async function executeReinstallCommand(
+  configuration: Configuration,
+  token: string,
+): Promise<void> {
   await chrome.storage.local.set({
-    [PENDING_RELOAD_TOKEN_KEY]: command.token,
+    [PENDING_REINSTALL_TOKEN_KEY]: token,
   });
-  reloadScheduled = true;
+  reinstallScheduled = true;
   await stopActiveJavaScriptExecutions(configuration);
   chrome.runtime.reload();
-  return true;
 }
 
 async function stopActiveJavaScriptExecutions(
@@ -514,12 +500,12 @@ async function executeJavaScript(
   script: string,
   configuration: Configuration,
 ): Promise<JsonValue | UnserializableJavaScriptResult> {
-  if (reloadScheduled) {
-    throw new Error("Extension reload is in progress");
+  if (reinstallScheduled) {
+    throw new Error("Extension reinstall is in progress");
   }
   const pageLibrariesScript = await loadPageLibrariesScript();
-  if (reloadScheduled) {
-    throw new Error("Extension reload is in progress");
+  if (reinstallScheduled) {
+    throw new Error("Extension reinstall is in progress");
   }
   return withDebugger(tid, configuration, async (target) => {
     let stopPromise: Promise<void> | null = null;
@@ -561,8 +547,8 @@ async function executeJavaScript(
     activeJavaScriptExecutions.add(activeExecution);
     let evaluation: Protocol.Runtime.EvaluateResponse;
     try {
-      if (reloadScheduled) {
-        throw new Error("Extension reload is in progress");
+      if (reinstallScheduled) {
+        throw new Error("Extension reinstall is in progress");
       }
       const installation = await withTimeout(
         sendCdpCommand(target, "Runtime.evaluate", {
@@ -573,8 +559,8 @@ async function executeJavaScript(
         "Timed out loading page libraries",
       );
       throwEvaluationException(installation);
-      if (reloadScheduled) {
-        throw new Error("Extension reload is in progress");
+      if (reinstallScheduled) {
+        throw new Error("Extension reinstall is in progress");
       }
       const evaluationPromise = sendCdpCommand(target, "Runtime.evaluate", {
         expression: script,
@@ -981,7 +967,7 @@ async function sendResult(
     attempt <= configuration.resultRetryAttempts;
     attempt += 1
   ) {
-    if (reloadScheduled) {
+    if (reinstallScheduled) {
       return;
     }
     try {
@@ -1014,7 +1000,7 @@ async function executeInstruction(
   instruction: ClaimedInstruction,
   configuration: Configuration,
 ): Promise<void> {
-  if (reloadScheduled) {
+  if (reinstallScheduled) {
     return;
   }
   let body: InstructionResultRequest;
@@ -1031,7 +1017,7 @@ async function executeInstruction(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  if (reloadScheduled) {
+  if (reinstallScheduled) {
     return;
   }
   await sendResult(instruction.id, body, configuration);
@@ -1050,6 +1036,15 @@ function reportError(error: unknown): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReinstallCommand(value: unknown): value is ReinstallCommand {
+  return (
+    isRecord(value) &&
+    value.action === "reinstall" &&
+    isRecord(value.payload) &&
+    typeof value.payload.token === "string"
+  );
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -1138,7 +1133,7 @@ function isSupportedInstruction(
 }
 
 async function poll(): Promise<void> {
-  if (pollInProgress || reloadScheduled) {
+  if (pollInProgress || reinstallScheduled) {
     return;
   }
 
@@ -1146,9 +1141,7 @@ async function poll(): Promise<void> {
   pollInProgress = true;
   try {
     const configuration = await getConfiguration();
-    if (await applyExtensionReload(configuration)) {
-      return;
-    }
+    await acknowledgePendingReinstall(configuration);
     if (activeExecutions >= configuration.maxConcurrentExecutions) {
       return;
     }
@@ -1182,6 +1175,13 @@ async function poll(): Promise<void> {
     }
     let scheduledExecutions = 0;
     for (const instruction of instructions) {
+      if (isReinstallCommand(instruction)) {
+        await executeReinstallCommand(
+          configuration,
+          instruction.payload.token,
+        );
+        return;
+      }
       if (!isClaimedInstruction(instruction)) {
         reportError(new Error("ACOB server returned an invalid instruction"));
         continue;

@@ -74,7 +74,8 @@ MCP connection request.
 
 Every queued browser-action tool accepts an optional positive `timeout`
 override for result polling after submission. It is not an end-to-end MCP call
-deadline. `reinstall` uses the recovery channel and has no timeout argument.
+deadline. `reinstall` requests an extension reload delivered through the
+instruction queue and has no timeout argument.
 Host and Origin allowlists are enforced by the MCP SDK to protect local HTTP
 servers from DNS rebinding. Add explicit entries before using another hostname.
 
@@ -93,8 +94,9 @@ servers from DNS rebinding. Add explicit entries before using another hostname.
 - `reinstall`: reload the unpacked extension from disk and interrupt active work.
 
 Positive `scroll.y` values move down and negative values move up. `reload` is a
-queued instruction for one tab. `reinstall` uses the extension recovery endpoint
-after rebuilding the unpacked files.
+queued instruction for one tab. `reinstall` reloads the unpacked extension from
+disk after rebuilding the files; the server delivers the command through the
+instruction queue.
 
 The SDK derives input and output schemas from the typed functions. ACOB client
 failures are returned as MCP tool errors so the calling model can respond.

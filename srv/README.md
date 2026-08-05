@@ -75,9 +75,9 @@ browser ID under `/api/browsers/<bid>/`.
 | `GET` | `instructions/<id>/` | Read status or consume a terminal response. |
 | `POST` | `instructions/<id>/result/` | Complete a claimed instruction. |
 | `GET` | `screenshots/<id>/` | Download and consume a captured PNG. |
-| `POST` | `extension/reload/` | Queue an unpacked-extension reload. |
-| `GET` | `extension/reload/` | Read the pending extension reload command. |
-| `POST` | `extension/reload/acknowledge/` | Acknowledge recovery from the new worker. |
+| `POST` | `reinstall/` | Queue an unpacked-extension reinstall. |
+| `GET` | `reinstall/` | Read the pending reinstall command for manual inspection. |
+| `POST` | `reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, and `javascript`. See the root
@@ -89,12 +89,13 @@ instruction returns its terminal response and deletes the row. Screenshot
 downloads likewise delete stored image data after decoding it, so callers must
 preserve the first response and must not probe the URL.
 
-The reload endpoint is out-of-band from instructions so it remains available
-when normal execution is wedged. The extension persists the command token,
-stops active JavaScript work, reloads affected tabs, calls
+While a reinstall is pending, `instructions/next/` claims no queue work and
+instead returns the `reinstall` command directly to the extension; the
+extension does not poll the reinstall route separately. The extension persists
+the command token, stops active JavaScript work, reloads affected tabs, calls
 `chrome.runtime.reload()`, and acknowledges after its new worker starts. The
-reload request conditionally fails work that is already `processing`, and the
-acknowledgement catches any processing race before removing the command.
+reinstall request conditionally fails work that is already `processing`, and
+the acknowledgement catches any processing race before removing the command.
 Pending instructions remain available to the restarted extension.
 
 ## Storage And Security

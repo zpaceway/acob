@@ -158,9 +158,7 @@ class ACOBClient:
             "poll_interval",
         )
         self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
-        self._reinstall_url = (
-            f"{self.endpoint}/api/browsers/{self.bid}/extension/reload/"
-        )
+        self._reinstall_url = f"{self.endpoint}/api/browsers/{self.bid}/reinstall/"
         self._http_client: httpx.AsyncClient | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -469,7 +467,7 @@ class ACOBClient:
         )
 
     async def reinstall(self) -> ReinstallResult:
-        """Reinstall the unpacked extension from disk through its recovery channel."""
+        """Reinstall the unpacked extension from disk after rebuilding it."""
         return self._expect_model(
             await self._request_json(
                 "POST",

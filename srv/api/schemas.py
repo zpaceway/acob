@@ -168,14 +168,25 @@ class NextInstructionsQuery(ApiModel):
     limit: int = Field(default=1, ge=1, le=MAX_INSTRUCTION_CLAIM_LIMIT)
 
 
-class ExtensionReloadAcknowledgement(ApiModel):
+class ReinstallAcknowledgement(ApiModel):
     token: UUID
 
 
-class ExtensionReloadResponse(ApiModel):
+class ReinstallResponse(ApiModel):
     token: UUID
     status: Literal["pending"] = "pending"
     requested_at: datetime
+
+
+class ReinstallCommandPayload(ApiModel):
+    token: UUID
+
+
+# Delivered by the claim route in place of queued work, so it never collides
+# with a stored instruction action.
+class ReinstallCommand(ApiModel):
+    action: Literal["reinstall"] = "reinstall"
+    payload: ReinstallCommandPayload
 
 
 class InstructionResponse(ApiModel):

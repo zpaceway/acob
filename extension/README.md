@@ -56,13 +56,14 @@ JavaScript on the same tab execute in claim order.
 ## Extension Recovery
 
 The public `reinstall` operation calls
-`POST /api/browsers/<bid>/extension/reload/` independently of normal
-instructions. The service worker checks this command before claiming work,
-persists its token, stops active JavaScript, reloads affected tabs, and calls
-`chrome.runtime.reload()`. Its next instance acknowledges the token and resumes
-polling. Because the extension is unpacked, this restart also reads the latest
-files already built into `dist/`. The `reload` action targets one tab through
-the instruction queue.
+`POST /api/browsers/<bid>/reinstall/`. While the command is pending the
+server claims no queue work, so the next `instructions/next/` poll returns a
+`reinstall` command instead. The service worker persists its token, stops
+active JavaScript, reloads affected tabs, and calls `chrome.runtime.reload()`.
+Its next instance acknowledges the token and resumes polling. Because the
+extension is unpacked, this restart also reads the latest files already built
+into `dist/`. The service worker polls only the instruction route; the
+`reload` action targets one tab through the instruction queue.
 
 The service worker creates the offscreen polling document at startup, and that
 document schedules subsequent polls. A disabled extension or a terminated

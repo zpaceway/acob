@@ -136,8 +136,9 @@ Positive `scroll()` values move down and negative values move up, in CSS pixels.
 `screenshot()` returns PNG bytes. It immediately consumes the API's internal
 single-use download URL, so a failed transfer requires a new screenshot call.
 
-`reinstall()` sends an out-of-band extension-recovery request. `reload(tid)`
-sends a queued instruction for one tab:
+`reinstall()` requests an unpacked-extension reload that the server delivers
+as a `reinstall` command from the instruction queue. `reload(tid)` sends a
+queued instruction for one tab:
 
 ```python
 request = await client.reinstall()
@@ -145,7 +146,8 @@ print(request.status, request.token)
 ```
 
 For an unpacked extension, build `extension/dist/` first. The reinstall command
-then makes Chromium read those updated files. Active JavaScript executions are
+is then delivered through the polling queue, and Chromium restarts the
+extension to read those updated files. Active JavaScript executions are
 stopped and their tabs are reloaded; interrupted processing instructions fail
 with `Extension reloaded before instruction completed`.
 

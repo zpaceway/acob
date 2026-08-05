@@ -463,7 +463,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0].method, "POST")
         self.assertEqual(
             str(requests[0].url),
-            f"http://acob.test/api/browsers/{self.BID}/extension/reload/",
+            f"http://acob.test/api/browsers/{self.BID}/reinstall/",
         )
 
     async def test_timeout_retains_instruction_id_for_later_recovery(self):

@@ -23,14 +23,14 @@ register_converter(BrowserIdConverter, "bid")
 
 urlpatterns = [
     path(
-        "browsers/<bid:bid>/extension/reload/",
-        views.extension_reload,
-        name="extension-reload",
+        "browsers/<bid:bid>/reinstall/",
+        views.reinstall,
+        name="reinstall",
     ),
     path(
-        "browsers/<bid:bid>/extension/reload/acknowledge/",
-        views.acknowledge_extension_reload,
-        name="acknowledge-extension-reload",
+        "browsers/<bid:bid>/reinstall/acknowledge/",
+        views.acknowledge_reinstall,
+        name="acknowledge-reinstall",
     ),
     path(
         "browsers/<bid:bid>/instructions/",

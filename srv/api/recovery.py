@@ -1,20 +1,20 @@
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ExtensionReload, Instruction
+from .models import Instruction, Reinstall
 
-EXTENSION_RELOAD_ERROR = "Extension reloaded before instruction completed"
+EXTENSION_REINSTALL_ERROR = "Extension reinstalled before instruction completed"
 
 
-def request_extension_reload(bid: str) -> ExtensionReload:
+def request_reinstall(bid: str) -> Reinstall:
     with transaction.atomic():
-        reload_request, _ = ExtensionReload.objects.get_or_create(bid=bid)
+        reinstall_request, _ = Reinstall.objects.get_or_create(bid=bid)
         Instruction.objects.filter(
             bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             status=Instruction.Status.FAILED,
-            error=EXTENSION_RELOAD_ERROR,
+            error=EXTENSION_REINSTALL_ERROR,
             updated_at=timezone.now(),
         )
-    return reload_request
+    return reinstall_request

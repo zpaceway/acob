@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="ExtensionReload",
+            name="Reinstall",
             fields=[
                 (
                     "id",
