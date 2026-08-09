@@ -642,7 +642,7 @@ websites.
 | --- | --- |
 | Server | Hardened container and source-checkout workflow. |
 | Python client | Wheel and source distribution with typed metadata and clean-install tests. |
-| MCP adapter | Wheel and non-root container with authenticated HTTP defaults. |
+| MCP adapter | Source-run service and non-root container with authenticated HTTP defaults. |
 | Extension | Reproducible unpacked directory and deterministic archive with checksums. |
 | Protocol | Repository-owned schemas and fixtures, published when external implementers need them. |
 | Website | Static deployment without a package registry artifact. |

@@ -5,7 +5,6 @@ services:
     image: acob-srv:latest
     container_name: acob-srv
     build: .
-    command: make run
     environment:
       HOST: 0.0.0.0
       PORT: 58347

@@ -16,7 +16,7 @@ from acob import (
 from mcp import Client, MCPError
 from mcp.types import ImageContent, TextContent
 
-from acob_mcp.server import (
+from src.server import (
     DEFAULT_ACOB_ENDPOINT,
     SERVER_DESCRIPTION,
     SERVER_INSTRUCTIONS,

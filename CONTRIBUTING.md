@@ -49,8 +49,8 @@ The independently packaged Python client supports Python 3.10 and newer. Its
 commands use the project metadata in `client/pyproject.toml`. Install its
 development environment with `uv --directory client sync`.
 
-The standalone MCP adapter also supports Python 3.10 and newer and resolves the
-client from the sibling project during monorepo development:
+The standalone, non-installable MCP service also supports Python 3.10 and newer
+and resolves the client from the sibling project during monorepo development:
 
 ```bash
 uv --directory mcp sync
@@ -62,8 +62,7 @@ uv --directory mcp sync
 - `srv/api/` contains the instruction API, validation, persistence, and tests.
 - `client/` contains the separately packaged asynchronous Python client and its
   tests.
-- `mcp/` contains the separately packaged official-SDK MCP adapter and its
-  Docker workflow.
+- `mcp/` contains the official-SDK MCP service and its Docker workflow.
 - `extension/src/` contains the TypeScript extension and exported protocol
   types.
 - `extension/src/popup.css` is the Tailwind CSS entry point.
@@ -120,12 +119,11 @@ make -C client test
 make -C client build
 ```
 
-MCP adapter formatting, typing, tests, and package build:
+MCP service formatting, typing, and tests:
 
 ```bash
 make -C mcp check
 make -C mcp test
-make -C mcp build
 ```
 
 Extension typing, tests, and production build:

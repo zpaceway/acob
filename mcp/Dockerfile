@@ -3,6 +3,10 @@ FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 ENV ACOB_MCP_HOST=0.0.0.0 \
     ACOB_MCP_PORT=58349
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y make \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY client /client
@@ -11,6 +15,4 @@ RUN uv sync --locked --no-dev --no-editable
 
 USER 65532:65532
 
-EXPOSE 58349
-
-ENTRYPOINT ["/app/.venv/bin/acob-mcp"]
+CMD ["make", "run"]

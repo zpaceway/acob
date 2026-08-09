@@ -45,3 +45,7 @@ docker:
 logs:
 	@echo "Viewing Docker logs..."
 	docker compose logs -f acob-srv
+
+build-push:
+	docker build -t harbor.zpaceway.com/zpaceway/acob-srv:latest .
+	docker push harbor.zpaceway.com/zpaceway/acob-srv:latest

@@ -1,6 +1,4 @@
-MCP_DIST_DIR ?= dist
-
-.PHONY: format check test build run docker logs
+.PHONY: format check test run docker logs build-push
 
 format:
 	@echo "Formatting ACOB MCP code..."
@@ -16,13 +14,8 @@ check:
 test:
 	uv run python -m unittest discover -s tests -v
 
-build:
-	@echo "Building acob-mcp..."
-	uv build --out-dir "$(MCP_DIST_DIR)" --clear
-	uvx twine check "$(MCP_DIST_DIR)"/*
-
 run:
-	uv run acob-mcp
+	uv run --no-sync python src/server.py
 
 docker:
 	@echo "Building Docker image..."
@@ -31,3 +24,7 @@ docker:
 
 logs:
 	docker compose logs --follow acob-mcp
+
+build-push:
+	docker build -t harbor.zpaceway.com/zpaceway/acob-mcp:latest -f ./Dockerfile ..
+	docker push harbor.zpaceway.com/zpaceway/acob-mcp:latest

@@ -15,7 +15,7 @@ its source, dependencies, tooling, and documentation in its own directory.
 | --- | --- |
 | [`client/`](client/README.md) | Independently installable Python API client. |
 | [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
-| [`mcp/`](mcp/README.md) | Standalone Model Context Protocol adapter. |
+| [`mcp/`](mcp/README.md) | Standalone Model Context Protocol service. |
 | [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
 | [`web/`](web/README.md) | Buildless static marketing website. |
 
@@ -170,7 +170,7 @@ low-level queue access, timeout behavior, and error types.
 
 The standalone [`mcp/`](mcp/README.md) project uses the official `mcp` Python
 SDK and talks to Django through `acob-client`. It has its own dependencies,
-tests, package, process, and container.
+tests, process, and container, but is not an installable Python package.
 
 The MCP adapter runs as a Streamable HTTP server. Each connection selects its
 browser with the BID path segment. The optional `endpoint` query parameter
@@ -189,7 +189,7 @@ overrides the default Docker-reachable Django API origin:
 Run it as a separate service:
 
 ```bash
-uv --directory mcp run acob-mcp
+make -C mcp run
 ```
 
 The default endpoint is `http://host.docker.internal:58347`. Add

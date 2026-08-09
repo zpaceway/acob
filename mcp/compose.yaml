@@ -18,4 +18,4 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:${ACOB_MCP_PORT:-58349}:${ACOB_MCP_PORT:-58349}"
+      - "${ACOB_MCP_PORT:-58349}:${ACOB_MCP_PORT:-58349}"
