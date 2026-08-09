@@ -12,4 +12,5 @@ test:
 
 build:
 	@echo "Building browser extension..."
+	$(MAKE) install
 	npm run build

@@ -31,3 +31,8 @@ logs:
 build-push:
 	docker build -t harbor.zpaceway.com/zpaceway/acob-mcp:latest -f ./Dockerfile ..
 	docker push harbor.zpaceway.com/zpaceway/acob-mcp:latest
+
+deploy:
+	@echo "Deploying to Kubernetes..."
+	$(MAKE) build-push
+	kubectl rollout restart deployment/acob --namespace=acob
