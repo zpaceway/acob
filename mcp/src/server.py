@@ -62,18 +62,11 @@ SERVER_INSTRUCTIONS = (
     "repeat side-effecting work. reinstall reloads the unpacked extension from disk, "
     "interrupts active work, and is only for explicit recovery after rebuilding it."
 )
-DEFAULT_ACOB_ENDPOINT = "http://host.docker.internal:58347"
+DEFAULT_ACOB_ENDPOINT = os.getenv(
+    "DEFAULT_ACOB_ENDPOINT",
+    "http://host.docker.internal:58347",
+)
 DEFAULT_MCP_PORT = 58349
-DEFAULT_ALLOWED_HOSTS = (
-    "127.0.0.1:*",
-    "localhost:*",
-    "[::1]:*",
-)
-DEFAULT_ALLOWED_ORIGINS = (
-    "http://127.0.0.1:*",
-    "http://localhost:*",
-    "http://[::1]:*",
-)
 NAMED_KEYS = {
     "ArrowDown",
     "ArrowLeft",
@@ -130,36 +123,16 @@ class Settings:
     poll_interval: float = 0.5
     host: str = "127.0.0.1"
     port: int = DEFAULT_MCP_PORT
-    path: str = "/mcp"
-    allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS
-    allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         values = os.environ if environ is None else environ
-        path = values.get("ACOB_MCP_PATH", "/mcp").strip()
-        if not path.startswith("/"):
-            raise ValueError("ACOB_MCP_PATH must start with '/'")
-
         return cls(
             timeout=_positive_float(values, "ACOB_TIMEOUT", 60.0),
             poll_interval=_positive_float(values, "ACOB_POLL_INTERVAL", 0.5),
             host=values.get("ACOB_MCP_HOST", "127.0.0.1"),
             port=_port(values.get("ACOB_MCP_PORT", str(DEFAULT_MCP_PORT))),
-            path=path,
-            allowed_hosts=_csv(
-                values.get("ACOB_MCP_ALLOWED_HOSTS"),
-                DEFAULT_ALLOWED_HOSTS,
-            ),
-            allowed_origins=_csv(
-                values.get("ACOB_MCP_ALLOWED_ORIGINS"),
-                DEFAULT_ALLOWED_ORIGINS,
-            ),
         )
-
-    def route(self) -> str:
-        """Streamable HTTP route; the BID path segment selects the browser."""
-        return f"{self.path.rstrip('/')}/{{bid}}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,18 +381,16 @@ def main() -> None:
     except ValueError as error:
         raise SystemExit(f"Invalid ACOB MCP configuration: {error}") from error
 
-    security = TransportSecuritySettings(
-        allowed_hosts=list(settings.allowed_hosts),
-        allowed_origins=list(settings.allowed_origins),
-    )
     server.run(
         "streamable-http",
         host=settings.host,
         port=settings.port,
-        streamable_http_path=settings.route(),
+        streamable_http_path="/mcp/{bid}",
         json_response=True,
         stateless_http=True,
-        transport_security=security,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        ),
     )
 
 
@@ -524,15 +495,6 @@ def _port(raw: str) -> int:
     if not 1 <= port <= 65535:
         raise ValueError("ACOB_MCP_PORT must be an integer from 1 to 65535")
     return port
-
-
-def _csv(raw: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
-    if raw is None:
-        return default
-    values = tuple(value.strip() for value in raw.split(",") if value.strip())
-    if not values:
-        raise ValueError("MCP transport allowlists cannot be empty")
-    return values
 
 
 if __name__ == "__main__":

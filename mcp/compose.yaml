@@ -8,13 +8,11 @@ services:
       context: ..
       dockerfile: mcp/Dockerfile
     environment:
+      DEFAULT_ACOB_ENDPOINT: ${DEFAULT_ACOB_ENDPOINT:-http://host.docker.internal:58347}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
       ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}
       ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58349}
-      ACOB_MCP_PATH: ${ACOB_MCP_PATH:-/mcp}
-      ACOB_MCP_ALLOWED_HOSTS: "${ACOB_MCP_ALLOWED_HOSTS:-127.0.0.1:*,localhost:*,[::1]:*}"
-      ACOB_MCP_ALLOWED_ORIGINS: "${ACOB_MCP_ALLOWED_ORIGINS:-http://127.0.0.1:*,http://localhost:*,http://[::1]:*}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

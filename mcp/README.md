@@ -47,13 +47,11 @@ Without a query parameter, the API endpoint defaults to
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `DEFAULT_ACOB_ENDPOINT` | `http://host.docker.internal:58347` | Default ACOB API origin. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
 | `ACOB_MCP_PORT` | `58349` | HTTP listen port. |
-| `ACOB_MCP_PATH` | `/mcp` | HTTP path prefix; the browser ID is appended. |
-| `ACOB_MCP_ALLOWED_HOSTS` | localhost variants | Comma-separated HTTP Host allowlist. |
-| `ACOB_MCP_ALLOWED_ORIGINS` | localhost variants | Comma-separated HTTP Origin allowlist. |
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`.

@@ -35,9 +35,6 @@ class SettingsTests(unittest.TestCase):
                 "ACOB_POLL_INTERVAL": "0.1",
                 "ACOB_MCP_HOST": "0.0.0.0",
                 "ACOB_MCP_PORT": "9000",
-                "ACOB_MCP_PATH": "/browser",
-                "ACOB_MCP_ALLOWED_HOSTS": "localhost:*, acob.test",
-                "ACOB_MCP_ALLOWED_ORIGINS": "https://acob.test",
             }
         )
 
@@ -45,9 +42,6 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.poll_interval, 0.1)
         self.assertEqual(settings.host, "0.0.0.0")
         self.assertEqual(settings.port, 9000)
-        self.assertEqual(settings.path, "/browser")
-        self.assertEqual(settings.allowed_hosts, ("localhost:*", "acob.test"))
-        self.assertEqual(settings.allowed_origins, ("https://acob.test",))
 
     def test_defaults_apply_when_env_is_empty(self):
         settings = Settings.from_env({})
@@ -56,11 +50,6 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.poll_interval, 0.5)
         self.assertEqual(settings.host, "127.0.0.1")
         self.assertEqual(settings.port, 58349)
-        self.assertEqual(settings.path, "/mcp")
-
-    def test_builds_the_connection_route_with_a_bid_segment(self):
-        self.assertEqual(Settings().route(), "/mcp/{bid}")
-        self.assertEqual(Settings(path="/browser/").route(), "/browser/{bid}")
 
     def test_rejects_invalid_settings(self):
         invalid = (
@@ -71,10 +60,6 @@ class SettingsTests(unittest.TestCase):
             (
                 {"ACOB_MCP_PORT": "0"},
                 "ACOB_MCP_PORT must be an integer from 1 to 65535",
-            ),
-            (
-                {"ACOB_MCP_PATH": "mcp"},
-                "ACOB_MCP_PATH must start with '/'",
             ),
         )
 
