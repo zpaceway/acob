@@ -14,6 +14,4 @@ COPY client /client
 COPY mcp /app
 RUN uv sync --locked --no-dev --no-editable
 
-USER 65532:65532
-
 CMD ["make", "run"]
