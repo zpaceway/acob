@@ -1,7 +1,7 @@
 import base64
 import unittest
 from types import SimpleNamespace
-from unittest.mock import create_autospec
+from unittest.mock import create_autospec, patch
 
 from acob import (
     ACOBClient,
@@ -24,10 +24,21 @@ from src.server import (
     AppContext,
     Settings,
     create_server,
+    main,
 )
 
 
 class SettingsTests(unittest.TestCase):
+    @patch("src.server.create_server")
+    def test_main_accepts_all_hosts_and_origins(self, create_server_mock):
+        server = create_server_mock.return_value
+
+        with patch.object(Settings, "from_env", return_value=Settings()):
+            main()
+
+        security = server.run.call_args.kwargs["transport_security"]
+        self.assertFalse(security.enable_dns_rebinding_protection)
+
     def test_loads_settings_from_env(self):
         settings = Settings.from_env(
             {
