@@ -1,5 +1,5 @@
-HOST ?= 127.0.0.1
-PORT ?= 58347
+ACOB_SRV_HOST ?= 0.0.0.0
+ACOB_SRV_PORT ?= 58347
 
 .PHONY: format check test migrations migrate dev run docker logs
 
@@ -30,12 +30,12 @@ migrate:
 dev:
 	@echo "Starting development server..."
 	$(MAKE) migrate
-	uv run manage.py runserver $(HOST):$(PORT)
+	uv run manage.py runserver $(ACOB_SRV_HOST):$(ACOB_SRV_PORT)
 
 run:
 	@echo "Starting ASGI server..."
 	$(MAKE) migrate
-	uv run --no-sync uvicorn acob.asgi:application --host $(HOST) --port $(PORT)
+	uv run --no-sync uvicorn acob.asgi:application --host $(ACOB_SRV_HOST) --port $(ACOB_SRV_PORT)
 
 docker:
 	@echo "Building Docker image..."

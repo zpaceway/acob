@@ -33,7 +33,7 @@ connection supplies its browser ID in the URL path:
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58349/mcp/0123456789ab4def8123456789abcdef"
+      "url": "http://127.0.0.1:58348/mcp/0123456789ab4def8123456789abcdef"
     }
   }
 }
@@ -51,7 +51,10 @@ Without a query parameter, the API endpoint defaults to
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
-| `ACOB_MCP_PORT` | `58349` | HTTP listen port. |
+| `ACOB_MCP_PORT` | `58348` | HTTP listen port. |
+
+`make run` sets `ACOB_MCP_HOST` to `0.0.0.0`; override either value with Make
+variables when needed.
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`.

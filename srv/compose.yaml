@@ -6,7 +6,7 @@ services:
     container_name: acob-srv
     build: .
     environment:
-      HOST: 0.0.0.0
-      PORT: 58347
+      ACOB_SRV_HOST: ${ACOB_SRV_HOST:-0.0.0.0}
+      ACOB_SRV_PORT: ${ACOB_SRV_PORT:-58347}
     ports:
-      - "58347:58347"
+      - "${ACOB_SRV_PORT:-58347}:${ACOB_SRV_PORT:-58347}"

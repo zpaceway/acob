@@ -12,8 +12,8 @@ services:
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
       ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}
-      ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58349}
+      ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58348}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${ACOB_MCP_PORT:-58349}:${ACOB_MCP_PORT:-58349}"
+      - "${ACOB_MCP_PORT:-58348}:${ACOB_MCP_PORT:-58348}"

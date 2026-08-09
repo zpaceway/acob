@@ -20,11 +20,11 @@ uv sync
 make dev
 ```
 
-`make dev` applies migrations and starts Django at
-`http://127.0.0.1:58347`. Override the bind address with Make variables:
+`make dev` applies migrations and binds Django to `0.0.0.0:58347`. Override the
+bind address with Make variables:
 
 ```bash
-make dev HOST=0.0.0.0 PORT=8000
+make dev ACOB_SRV_HOST=0.0.0.0 ACOB_SRV_PORT=8000
 ```
 
 Use `make run` to apply migrations and serve `acob.asgi:application` with

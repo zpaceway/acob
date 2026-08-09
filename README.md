@@ -37,11 +37,12 @@ uv --directory srv sync
 make -C srv dev
 ```
 
-The server listens on `http://127.0.0.1:58347`. Override the address with Make
-variables, for example `make -C srv dev HOST=0.0.0.0 PORT=8000`. Use
-`make -C srv run` to serve the ASGI application with Uvicorn. These settings are
-intended for local development and do not provide API authentication or TLS;
-review [SECURITY.md](SECURITY.md) before exposing ACOB to a network.
+The server binds to `0.0.0.0:58347`. Override the address with Make
+variables, for example
+`make -C srv dev ACOB_SRV_HOST=0.0.0.0 ACOB_SRV_PORT=8000`. Use `make -C srv run`
+to serve the ASGI application with Uvicorn. These settings are intended for
+local development and do not provide API authentication or TLS; review
+[SECURITY.md](SECURITY.md) before exposing ACOB to a network.
 
 ## Docker
 
@@ -180,7 +181,7 @@ overrides the default Docker-reachable Django API origin:
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58349/mcp/0123456789ab4def8123456789abcdef"
+      "url": "http://127.0.0.1:58348/mcp/0123456789ab4def8123456789abcdef"
     }
   }
 }

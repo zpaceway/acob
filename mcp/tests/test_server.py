@@ -60,7 +60,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.timeout, 60.0)
         self.assertEqual(settings.poll_interval, 0.5)
         self.assertEqual(settings.host, "127.0.0.1")
-        self.assertEqual(settings.port, 58349)
+        self.assertEqual(settings.port, 58348)
 
     def test_rejects_invalid_settings(self):
         invalid = (

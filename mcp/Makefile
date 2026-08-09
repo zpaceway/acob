@@ -1,3 +1,6 @@
+ACOB_MCP_HOST ?= 0.0.0.0
+ACOB_MCP_PORT ?= 58348
+
 .PHONY: format check test run docker logs build-push
 
 format:
@@ -15,7 +18,7 @@ test:
 	uv run python -m unittest discover -s tests -v
 
 run:
-	uv run --no-sync python src/server.py
+	ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python src/server.py
 
 docker:
 	@echo "Building Docker image..."

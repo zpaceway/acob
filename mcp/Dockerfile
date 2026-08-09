@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 ENV DEFAULT_ACOB_ENDPOINT=http://host.docker.internal:58347 \
     ACOB_MCP_HOST=0.0.0.0 \
-    ACOB_MCP_PORT=58349
+    ACOB_MCP_PORT=58348
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y make \
