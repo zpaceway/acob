@@ -5,9 +5,11 @@ install:
 	npm ci
 
 typecheck:
+	@echo "Type checking browser extension code..."
 	npm run typecheck
 
 test:
+	@echo "Running browser extension tests..."
 	npm test
 
 build:

@@ -8,12 +8,14 @@ format:
 	uv run black acob tests
 
 check:
+	@echo "Checking Python code..."
 	uv run ruff check .
 	uv run black --check acob tests
 	uv run mypy --no-incremental acob tests
 	uv run pyright
 
 test:
+	@echo "Running tests..."
 	uv run python -m unittest discover -s tests -v
 
 build:

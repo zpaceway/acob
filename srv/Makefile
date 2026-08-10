@@ -9,6 +9,7 @@ format:
 	uv run black acob api manage.py
 
 check:
+	@echo "Checking Python code..."
 	uv run ruff check .
 	uv run black --check acob api manage.py
 	uv run mypy --no-incremental acob api manage.py
@@ -17,6 +18,7 @@ check:
 	uv run manage.py makemigrations --check --dry-run
 
 test:
+	@echo "Running tests..."
 	uv run manage.py test api
 
 migrations:
@@ -47,6 +49,7 @@ logs:
 	docker compose logs -f acob-srv
 
 build-push:
+	@echo "Building and pushing Docker image..."
 	docker build -t harbor.zpaceway.com/zpaceway/acob-srv:latest .
 	docker push harbor.zpaceway.com/zpaceway/acob-srv:latest
 
