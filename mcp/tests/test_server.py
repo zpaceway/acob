@@ -10,6 +10,7 @@ from acob import (
     KeyboardKeyResult,
     ListedTab,
     ReinstallResult,
+    ScreenshotUrl,
     ScrollResult,
     Tab,
 )
@@ -158,6 +159,8 @@ class AppContextTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MCPServerTests(unittest.IsolatedAsyncioTestCase):
+    BID = "0123456789ab4def8123456789abcdef"
+
     async def asyncSetUp(self):
         self.acob = create_autospec(ACOBClient, instance=True)
         self.server = create_server(Settings(), client=self.acob)
@@ -217,6 +220,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             set(tools["scroll"].input_schema["required"]),
             {"tid", "y"},
+        )
+        self.assertEqual(
+            set(tools["screenshot"].input_schema["properties"]),
+            {"tid", "as_url", "full_page", "timeout"},
+        )
+        self.assertEqual(
+            set(tools["screenshot"].input_schema["required"]),
+            {"tid", "as_url"},
         )
         self.assertNotIn("tabs", tools)
         self.assertNotIn("reload_extension", tools)
@@ -349,7 +360,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         async with Client(self.server, raise_exceptions=True) as client:
             result = await client.call_tool(
                 "screenshot",
-                {"tid": 12, "full_page": True},
+                {"tid": 12, "full_page": True, "as_url": False},
             )
 
         self.assertFalse(result.is_error)
@@ -360,7 +371,36 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(base64.b64decode(image.data), png)
         self.acob.screenshot.assert_awaited_once_with(
             12,
+            as_url=False,
             full_page=True,
+            timeout=None,
+        )
+
+    async def test_returns_screenshot_download_url_when_as_url(self):
+        screenshot_url = ScreenshotUrl(
+            url=f"http://acob.test/api/browsers/{self.BID}/screenshots/9/",
+            content_type="image/png",
+            full_page=False,
+            single_use=True,
+            tid=12,
+        )
+        self.acob.screenshot.return_value = screenshot_url
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            result = await client.call_tool(
+                "screenshot",
+                {"tid": 12, "as_url": True},
+            )
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(
+            result.structured_content,
+            screenshot_url.model_dump(),
+        )
+        self.acob.screenshot.assert_awaited_once_with(
+            12,
+            as_url=True,
+            full_page=False,
             timeout=None,
         )
 

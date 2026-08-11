@@ -37,7 +37,7 @@ async def main() -> None:
         await client.keyboard(tid, key="Enter")
         title = await client.javascript(tid, "document.title")
 
-        png = await client.screenshot(tid, full_page=True)
+        png = await client.screenshot(tid, full_page=True, as_url=False)
         Path("screenshot.png").write_bytes(png)
 
 
@@ -133,8 +133,17 @@ new-tab action raises `ACOBInstructionError` if the browser has reached its
 configured tab limit. Navigating an existing `tid` is unaffected by the limit.
 Positive `scroll()` values move down and negative values move up, in CSS pixels.
 
-`screenshot()` returns PNG bytes. It immediately consumes the API's internal
-single-use download URL, so a failed transfer requires a new screenshot call.
+`screenshot()` always requires the `as_url` flag to choose its result mode.
+With `as_url=False` it returns PNG bytes, immediately consuming the API's
+internal single-use download URL; a failed transfer requires a new screenshot
+call. With `as_url=True` it returns a `ScreenshotUrl` instead, without
+transferring the image, so the caller can download the single-use URL to a
+location of its choosing for later analysis:
+
+```python
+url = await client.screenshot(tid, as_url=True)
+print(url.url, url.content_type, url.tid)
+```
 
 `reinstall()` requests an unpacked-extension reload that the server delivers
 as a `reinstall` command from the instruction queue. `reload(tid)` sends a

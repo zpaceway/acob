@@ -82,6 +82,14 @@ class _ScreenshotMetadata(_ResultModel):
     tid: int
 
 
+class ScreenshotUrl(_ResultModel):
+    url: str = Field(min_length=1)
+    content_type: Literal["image/png"]
+    full_page: bool
+    single_use: Literal[True]
+    tid: int
+
+
 _LISTED_TABS_ADAPTER = TypeAdapter(list[ListedTab])
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 
@@ -413,14 +421,40 @@ class ACOBClient:
             return self._expect_model(result, KeyboardTextResult, "keyboard")
         return self._expect_model(result, KeyboardKeyResult, "keyboard")
 
+    @overload
     async def screenshot(
         self,
         tid: int,
         *,
+        as_url: Literal[False],
         full_page: bool = False,
         timeout: float | None = None,
-    ) -> bytes:
-        """Capture a tab and return its PNG bytes."""
+    ) -> bytes: ...
+
+    @overload
+    async def screenshot(
+        self,
+        tid: int,
+        *,
+        as_url: Literal[True],
+        full_page: bool = False,
+        timeout: float | None = None,
+    ) -> ScreenshotUrl: ...
+
+    async def screenshot(
+        self,
+        tid: int,
+        *,
+        as_url: bool,
+        full_page: bool = False,
+        timeout: float | None = None,
+    ) -> bytes | ScreenshotUrl:
+        """Capture a tab, returning PNG bytes or its single-use download URL.
+
+        When ``as_url`` is False the captured PNG bytes are downloaded and
+        returned. When it is True the single-use download URL is returned so
+        the caller can fetch the image to a location of its choosing.
+        """
         result = self._expect_model(
             await self.execute(
                 "screenshot",
@@ -443,6 +477,14 @@ class ACOBClient:
         if has_different_origin:
             raise ACOBProtocolError(
                 "Screenshot download URL points to a different server"
+            )
+        if as_url:
+            return ScreenshotUrl(
+                url=resolved_url,
+                content_type=result.content_type,
+                full_page=result.full_page,
+                single_use=result.single_use,
+                tid=result.tid,
             )
         return await self._request_bytes(
             "GET",

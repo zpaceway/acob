@@ -21,6 +21,7 @@ from acob import (
     KeyboardTextResult,
     ListedTab,
     ReinstallResult,
+    ScreenshotUrl,
     ScrollResult,
     Tab,
 )
@@ -37,7 +38,8 @@ if TYPE_CHECKING:
         _clicked: ClickResult = await client.click(1, "button")
         _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
         _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
-        _screenshot: bytes = await client.screenshot(1)
+        _screenshot: bytes = await client.screenshot(1, as_url=False)
+        _screenshot_url: ScreenshotUrl = await client.screenshot(1, as_url=True)
         _javascript: int = await client.javascript(1, "1")
         _reinstall: ReinstallResult = await client.reinstall()
 
@@ -367,7 +369,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        result = await client.screenshot(12, full_page=True)
+        result = await client.screenshot(12, full_page=True, as_url=False)
 
         self.assertEqual(result, image)
         self.assertFalse(hasattr(client, "download_screenshot"))
@@ -400,7 +402,63 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             patch.object(client, "execute", execute),
             self.assertRaises(ACOBProtocolError),
         ):
-            await client.screenshot(12)
+            await client.screenshot(12, as_url=False)
+
+    async def test_screenshot_with_as_url_returns_the_download_url(self):
+        download_url = f"/api/browsers/{self.BID}/screenshots/9/"
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 8, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 8,
+                        "status": "completed",
+                        "result": {
+                            "download_url": download_url,
+                            "content_type": "image/png",
+                            "full_page": True,
+                            "single_use": True,
+                            "tid": 12,
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.screenshot(12, full_page=True, as_url=True)
+
+        self.assertIsInstance(result, ScreenshotUrl)
+        self.assertEqual(result.url, f"http://acob.test{download_url}")
+        self.assertEqual(result.content_type, "image/png")
+        self.assertTrue(result.full_page)
+        self.assertTrue(result.single_use)
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "screenshot", "tid": 12, "full_page": True},
+        )
+
+    async def test_screenshot_with_as_url_rejects_another_origin(self):
+        client = self.make_client()
+        execute = AsyncMock(
+            return_value={
+                "download_url": "https://example.com/image.png",
+                "content_type": "image/png",
+                "full_page": False,
+                "single_use": True,
+                "tid": 12,
+            }
+        )
+
+        with (
+            patch.object(client, "execute", execute),
+            self.assertRaisesRegex(ACOBProtocolError, "different server"),
+        ):
+            await client.screenshot(12, as_url=True)
 
     async def test_action_methods_reject_malformed_browser_results(self):
         client = self.make_client()

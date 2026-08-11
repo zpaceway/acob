@@ -57,7 +57,9 @@ Without a query parameter, the API endpoint defaults to
 variables when needed.
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`.
+`click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`. The
+`screenshot` tool always requires `as_url`: `false` streams the PNG image,
+`true` returns the single-use download URL for later analysis.
 
 ## Docker
 

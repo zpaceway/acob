@@ -14,11 +14,12 @@ from .client import (
     KeyboardTextResult,
     ListedTab,
     ReinstallResult,
+    ScreenshotUrl,
     ScrollResult,
     Tab,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -36,6 +37,7 @@ __all__ = [
     "KeyboardTextResult",
     "ListedTab",
     "ReinstallResult",
+    "ScreenshotUrl",
     "ScrollResult",
     "Tab",
     "__version__",
