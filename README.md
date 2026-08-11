@@ -52,8 +52,9 @@ Build the image and start the server with Docker Compose:
 docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose service applies migrations through `make run` and publishes port
-`58347` on the host. To run it in the background and follow its logs:
+The Compose service applies migrations through `make run` and binds
+`0.0.0.0:58347` on the host network. To run it in the background and follow its
+logs:
 
 ```bash
 docker compose -f srv/compose.yaml up --build --detach
@@ -62,8 +63,8 @@ docker compose -f srv/compose.yaml logs --follow acob-srv
 
 Stop and remove it with `docker compose -f srv/compose.yaml down`. The SQLite
 database is stored inside the container, so its data is lost when the container
-is removed or replaced. Compose publishes the port on all host interfaces by
-default; do not run this configuration on an untrusted network.
+is removed or replaced. The service binds all host interfaces by default; do
+not run this configuration on an untrusted network.
 
 ## Browser extension
 
@@ -175,7 +176,7 @@ tests, process, and container, but is not an installable Python package.
 
 The MCP adapter runs as a Streamable HTTP server. Each connection selects its
 browser with the BID path segment. The optional `endpoint` query parameter
-overrides the default Docker-reachable Django API origin:
+overrides the default Django API origin:
 
 ```json
 {
@@ -193,8 +194,8 @@ Run it as a separate service:
 make -C mcp run
 ```
 
-The default endpoint is `http://host.docker.internal:58347`. Add
-`?endpoint=http://127.0.0.1:58347` to target another API origin. The BID and
+The default endpoint is `http://127.0.0.1:58347`. Add
+`?endpoint=http://127.0.0.1:8000` to target another API origin. The BID and
 endpoint value are routing configuration and are not authentication.
 The Compose workflow starts only the MCP adapter. Its image includes the adapter
 and `acob-client`; run `acob-srv` or another reachable ACOB API independently:
@@ -206,7 +207,8 @@ docker compose -f mcp/compose.yaml up --build
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `javascript`, and `reinstall`. Structured results use SDK-generated output
-schemas, while `screenshot` returns an MCP PNG image content block. See
+schemas, while `screenshot` returns an MCP PNG image content block unless
+`as_url` is true, in which case it returns the single-use download URL. See
 [`mcp/README.md`](mcp/README.md) for all environment, transport, Docker,
 security, and verification details.
 

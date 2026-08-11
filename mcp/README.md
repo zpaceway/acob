@@ -40,14 +40,13 @@ connection supplies its browser ID in the URL path:
 ```
 
 Without a query parameter, the API endpoint defaults to
-`http://host.docker.internal:58347`. Use
-`?endpoint=http://127.0.0.1:58347` for a locally running API.
+`http://127.0.0.1:58347`.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DEFAULT_ACOB_ENDPOINT` | `http://host.docker.internal:58347` | Default ACOB API origin. |
+| `DEFAULT_ACOB_ENDPOINT` | `http://127.0.0.1:58347` | Default ACOB API origin. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
@@ -69,6 +68,9 @@ monorepo root. Compose configures this automatically:
 ```bash
 docker compose -f mcp/compose.yaml up --build
 ```
+
+The Compose service uses the host network, so the container reaches the ACOB
+API at `127.0.0.1:58347` exactly as a locally running service would.
 
 The Dockerfile starts the service with `make run`. Build it without Compose:
 

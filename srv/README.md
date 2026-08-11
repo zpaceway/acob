@@ -58,10 +58,11 @@ From the monorepo root, run:
 docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose project, service, image, and container are named `acob-srv` and
-publish host port `58347`. The SQLite database lives inside the container
-because no volume is configured; removing or replacing the container removes
-queued instructions, screenshots, and other database state.
+The Compose project, service, image, and container are named `acob-srv`. The
+service uses the host network, binding `0.0.0.0:58347` directly. The SQLite
+database lives inside the container because no volume is configured; removing
+or replacing the container removes queued instructions, screenshots, and other
+database state.
 
 ## API
 

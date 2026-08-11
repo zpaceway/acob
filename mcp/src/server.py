@@ -72,7 +72,7 @@ SERVER_INSTRUCTIONS = (
 )
 DEFAULT_ACOB_ENDPOINT = os.getenv(
     "DEFAULT_ACOB_ENDPOINT",
-    "http://host.docker.internal:58347",
+    "http://127.0.0.1:58347",
 )
 DEFAULT_MCP_PORT = 58348
 NAMED_KEYS = {
