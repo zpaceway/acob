@@ -262,14 +262,16 @@ def complete_instruction(
             logger.warning("record_stop base64 rejected")
             return error_response("Invalid recording data")
         try:
-            url = _host_recording(recording, instruction.payload)
+            url = _host_recording(
+                recording, instruction.payload, captured_recording.content_type
+            )
         except StorageError as error:
             result = None
             instruction_error = f"Could not host the recording: {error}"
         else:
             result = {
                 "url": url,
-                "content_type": "video/webm",
+                "content_type": captured_recording.content_type,
                 "duration": captured_recording.duration,
                 "stopped_reason": captured_recording.stopped_reason,
                 "message": captured_recording.message,
@@ -327,7 +329,7 @@ def _host_screenshot(image: bytes, payload: dict) -> str:
     return backend.upload_file(image, filename, "image/png")
 
 
-def _host_recording(recording: bytes, payload: dict) -> str:
+def _host_recording(recording: bytes, payload: dict, content_type: str) -> str:
     """Upload recording bytes to the configured storage service."""
     backend = create_storage_backend(
         settings.STORAGE_PROVIDER,
@@ -338,13 +340,14 @@ def _host_recording(recording: bytes, payload: dict) -> str:
             "no storage service is configured; set CHIPF_ENDPOINT and "
             "CHIPF_API_KEY (or another provider's credentials)"
         )
+    extension = ".mp4" if content_type == "video/mp4" else ".webm"
     recording_id = payload.get("recording_id")
     filename = (
-        f"recording-{recording_id}.webm"
+        f"recording-{recording_id}{extension}"
         if isinstance(recording_id, int)
-        else "recording.webm"
+        else f"recording{extension}"
     )
-    return backend.upload_file(recording, filename, "video/webm")
+    return backend.upload_file(recording, filename, content_type)
 
 
 @csrf_exempt

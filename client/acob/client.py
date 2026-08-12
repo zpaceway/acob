@@ -92,7 +92,7 @@ class _RecordingStartMetadata(_ResultModel):
 
 class RecordingStop(_ResultModel):
     url: str = Field(min_length=1)
-    content_type: Literal["video/webm"]
+    content_type: Literal["video/mp4", "video/webm"]
     duration: float
     stopped_reason: Literal["user", "max_duration"]
     message: str
@@ -107,7 +107,7 @@ class _ScreenshotMetadata(_ResultModel):
 
 class _RecordingStopMetadata(_ResultModel):
     url: str = Field(min_length=1)
-    content_type: Literal["video/webm"]
+    content_type: Literal["video/mp4", "video/webm"]
     duration: float
     stopped_reason: Literal["user", "max_duration"]
     message: str = Field(min_length=1)

@@ -71,7 +71,8 @@ chrome.runtime.onMessage.addListener(
     }
     if (message.type === "finalizeRecording") {
       handleFinalizeRecording(message).then(
-        (data) => sendResponse({ ok: true, data }),
+        ({ data, contentType }) =>
+          sendResponse({ ok: true, data, contentType }),
         (error: unknown) => sendResponse({ error: errorMessage(error) }),
       );
       return true;

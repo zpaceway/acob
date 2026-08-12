@@ -64,7 +64,8 @@ measures the content size up front and re-measures it each frame so growing
 pages stay covered, and the sink sizes its canvas and bitrate accordingly. A
 late `record_stop` delivers the maximum-duration video with
 `stopped_reason: "max_duration"` and a message instead of failing. Recordings
-are encoded in the offscreen document (WebM/VP9, ~1 Mbps scaled up for
+are encoded in the offscreen document (MP4/H.264 when `MediaRecorder` supports
+it, falling back to WebM/VP9, ~1 Mbps scaled up for
 full-page frames, ~2-5 fps) from `Page.captureScreenshot` frames relayed by
 the service worker, so the tab's window should be focused: an unfocused or
 hidden tab fails the first capture with a focus hint. The worker shares one

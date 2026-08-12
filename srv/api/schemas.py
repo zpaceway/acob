@@ -178,6 +178,7 @@ class RecordStopUploadResult(ApiModel):
             max_length=MAX_RECORDING_BASE64_LENGTH,
         ),
     ]
+    content_type: Literal["video/mp4", "video/webm"]
     duration: Annotated[
         float,
         Field(gt=0, le=MAX_RECORDING_DURATION_SECONDS, allow_inf_nan=False),

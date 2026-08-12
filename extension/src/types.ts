@@ -399,8 +399,11 @@ export interface RecordStartResult {
 
 export type RecordingStopReason = "user" | "max_duration";
 
+export type RecordingContentType = "video/mp4" | "video/webm";
+
 export interface RecordStopUploadResult {
   data: string;
+  content_type: RecordingContentType;
   duration: number;
   stopped_reason: RecordingStopReason;
   message: string;
@@ -414,7 +417,7 @@ export interface ScreenshotResult {
 
 export interface RecordStopResult {
   url: string;
-  content_type: "video/webm";
+  content_type: RecordingContentType;
   duration: number;
   stopped_reason: RecordingStopReason;
   message: string;
@@ -566,5 +569,6 @@ export type StartRecordingResponse =
 export interface FinalizeRecordingSuccess {
   ok: true;
   data: string;
+  contentType: RecordingContentType;
 }
 export type FinalizeRecordingResponse = FinalizeRecordingSuccess | ErrorResponse;

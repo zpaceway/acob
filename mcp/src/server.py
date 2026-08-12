@@ -44,7 +44,7 @@ from pydantic import (
     StringConstraints,
 )
 
-SERVER_VERSION = "0.7.0"
+SERVER_VERSION = "0.8.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "

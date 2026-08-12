@@ -1,6 +1,7 @@
 import { ACOBSettings } from "./settings.js";
 import type {
   FinalizeRecordingMessage,
+  RecordingContentType,
   RecordingFrameMessage,
   StartRecordingMessage,
 } from "./types.js";
@@ -27,6 +28,8 @@ const sinks = new Map<number, RecordingSink>();
 
 function chooseMimeType(): string {
   const candidates = [
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=avc1",
     "video/webm;codecs=vp9",
     "video/webm;codecs=vp8",
     "video/webm",
@@ -35,9 +38,13 @@ function chooseMimeType(): string {
     MediaRecorder.isTypeSupported(candidate),
   );
   if (mimeType === undefined) {
-    throw new Error("This Chromium cannot encode WebM recordings");
+    throw new Error("This Chromium cannot encode MP4 or WebM recordings");
   }
   return mimeType;
+}
+
+function containerTypeForMime(mimeType: string): RecordingContentType {
+  return mimeType.startsWith("video/mp4") ? "video/mp4" : "video/webm";
 }
 
 function base64FromBytes(bytes: Uint8Array): string {
@@ -163,7 +170,7 @@ export async function handleRecordingFrame(
 
 export async function handleFinalizeRecording(
   message: FinalizeRecordingMessage,
-): Promise<string> {
+): Promise<{ data: string; contentType: RecordingContentType }> {
   const sink = sinks.get(message.recordingId);
   if (sink === undefined) {
     throw new Error(`No active recording with id ${message.recordingId}`);
@@ -203,7 +210,7 @@ export async function handleFinalizeRecording(
         `Recording exceeds the ${message.maxRecordingSizeMiB} MiB encoded size limit`,
       );
     }
-    return data;
+    return { data, contentType: containerTypeForMime(sink.mimeType) };
   } finally {
     sinks.delete(message.recordingId);
   }

@@ -90,8 +90,9 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
   - `offscreen.ts` — the offscreen document: schedules polls and hosts the
     recording media sink. **The offscreen document can only use the
     `chrome.runtime` API** — no `chrome.debugger`, no `chrome.tabs`.
-  - `recording.ts` — offscreen-side canvas + MediaRecorder sink (WebM),
-    receives frames via runtime messages from the worker.
+  - `recording.ts` — offscreen-side canvas + MediaRecorder sink (MP4/H.264
+    when supported, WebM/VP9 otherwise), receives frames via runtime messages
+    from the worker.
   - `actions.ts` — per-action execution (CDP via `cdp.ts`), including the
     worker-side recording pipeline (debugger + `Page.captureScreenshot`
     polling, per-tab serialized).
@@ -251,7 +252,8 @@ instructions form the lifecycle:
   (JPEG, viewport or full-content clip) every ~200 ms, relaying each capture
   to the offscreen via a `recordingFrame` runtime message; the offscreen
   (`recording.ts`) draws to a canvas (resizing it when frame dimensions
-  change) and records WebM with `MediaRecorder`, scaling the bitrate up to
+  change) and records MP4 with `MediaRecorder` (H.264 when supported,
+  WebM/VP9 otherwise), scaling the bitrate up to
   2 Mbps for full-page frames. Captures and frame sends are deadline-bounded
   (3 s for the first capture so an unfocused/hidden tab fails fast with a
   focus hint, 10 s afterwards); the first capture timing out produces
@@ -266,9 +268,9 @@ instructions form the lifecycle:
   that tab; external detaches (e.g. opened DevTools) stop the recording and
   let later actions attach a fresh session.
 - Recordings are video-only, ~2-5 fps, ~1 Mbps (up to 2 Mbps for full-page
-  frames) WebM/VP9 at the tab's viewport or full-page resolution, and do not
-  survive extension reloads (a later `record_stop` then fails with "No
-  active recording").
+  frames) MP4/H.264 or WebM/VP9 at the tab's viewport or full-page
+  resolution, and do not survive extension reloads (a later `record_stop`
+  then fails with "No active recording").
 - The bounds chain is intentional: extension `maxRecordingSizeMiB` (60) ==
   server `MAX_RECORDING_BASE64_LENGTH` (60 MiB) <
   `DATA_UPLOAD_MAX_MEMORY_SIZE` (96 MiB) < the ~64 MiB
@@ -316,8 +318,65 @@ The deployed environment is Kubernetes (`namespace: acob`, deployment
 - Deploy a component with `make -C srv deploy` and `make -C mcp deploy`
   (build + push + `kubectl rollout restart deployment/acob -n acob`).
   Wait for rollout: `kubectl rollout status deployment/acob -n acob`.
-- After deploying the MCP, reconnect/restart the MCP client so the new tool
-  list is visible.
+
+### Deploying a change (workflow)
+
+1. Run the component's checks and tests, and build the extension
+   (`npm --prefix extension run build`) before deploying anything.
+2. Bump versions per the Version bumping rules when the protocol changed.
+3. Deploy the changed server components with `make -C srv deploy` and/or
+   `make -C mcp deploy`; wait for
+   `kubectl rollout status deployment/acob -n acob` before testing.
+4. Deploy the extension changes with the `reinstall` flow below (never
+   commit `extension/dist/`; the deployed extension reads it from disk).
+5. **After deploying the MCP, restart/reconnect the MCP client** (e.g. the
+   opencode session that called it). Tool input/output schemas are captured
+   at connection time; a stale client rejects responses that no longer match
+   (e.g. `Structured content does not match the tool's output schema` after
+   a schema change) even though the deployed server is correct. Verify the
+   deployed schema directly with a `tools/list` request to the MCP URL.
+6. Verify end-to-end against a live browser (steps below) before considering
+   the deploy done.
+
+### Reinstall flow (extension reload)
+
+1. Rebuild the unpacked extension: `npm --prefix extension run build`.
+2. Trigger a reload with the MCP `reinstall` tool or
+   `POST /api/browsers/<bid>/reinstall/`; the extension stops active work,
+   reads the latest files from `extension/dist/`, and acknowledges.
+3. Confirm the worker is back by reading the heartbeat:
+   `GET /api/browsers/<bid>/settings/` returns fresh `updated_at` after the
+   reinstall.
+
+### Debugging the deployed stack
+
+- Find the browser ID in the MCP connection URL
+  (`https://acob.zpaceway.com/mcp/<bid>`) or in the MCP client's config
+  (`~/.config/opencode/opencode.json`); each ID targets one browser
+  installation and its queue.
+- Server logs: `kubectl logs deployment/acob -n acob -c container-0`
+  (srv) and `-c container-1` (mcp); add `--since=10m` and grep for the
+  action or error of interest. Validation failures log the full rejected
+  input — for `record_stop`/`screenshot` that includes the entire base64
+  payload, so the log lines are huge; grep around the error type
+  (`'type': 'missing'`, `extra_forbidden`, ...) instead of dumping them.
+- Inspect queue state through the API (read-only observation):
+  `GET /api/browsers/<bid>/instructions/<id>/` shows status/result/error;
+  a terminal instruction is consumed (deleted) on first read, so only fetch
+  the detail when you want the result. **Never poll
+  `/instructions/next/` yourself** — that is the extension's claim channel;
+  stealing from it breaks the extension's queue.
+- When an MCP call times out (e.g. `record_stop` while the video uploads):
+  the instruction usually still completes server-side. Fetch the instruction
+  detail to check `status`; do not resubmit a `record_stop` for the same
+  recording — the video is delivered once.
+- A stuck `processing` instruction with a fresh server usually means the
+  deployed server rejected the extension's result (old schema, missing
+  field, size cap). Check the srv logs for the rejection reason before
+  touching the extension.
+- Extension heartbeats are throttled (every 30 s), so after a reinstall or a
+  settings change allow up to ~30 s before the settings endpoint reflects
+  the worker's new state.
 
 End-to-end browser testing against the deployed stack:
 
@@ -327,7 +386,10 @@ End-to-end browser testing against the deployed stack:
    work and reads the latest files from `extension/dist/`.
 3. Use the MCP/client tool surface (e.g. `settings`, `record_start`,
    `record_stop`, `screenshot`) against a live tab; downloads are public
-   media URLs that the storage service hosts.
+   media URLs that the storage service hosts. Recordings should come back
+   as `video/mp4` (H.264) on Chromium 126+; verify the returned file with
+   `ffprobe` (`Duration:` must be present) — the old WebM fallback lacks a
+   duration element and tools that probe duration (e.g. vsense) reject it.
 4. Browser IDs appear in the MCP connection URLs
    (`https://acob.zpaceway.com/mcp/<bid>`); each ID targets one browser
    installation and its queue.

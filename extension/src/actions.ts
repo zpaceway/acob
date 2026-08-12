@@ -497,6 +497,7 @@ function startRecordingPipeline(
           : "user";
         return {
           data: response.data,
+          contentType: response.contentType,
           durationMs: stoppedByTimer
             ? configuration.maxRecordingDurationMs
             : Date.now() - startedAt,
@@ -617,6 +618,7 @@ export async function executeRecordStop(
   }
   return {
     data: outcome.data,
+    content_type: outcome.contentType,
     duration: outcome.durationMs / 1000,
     stopped_reason: outcome.stoppedReason,
     message: outcome.message,

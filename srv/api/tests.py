@@ -753,6 +753,7 @@ class InstructionApiTests(TestCase):
                 {
                     "result": {
                         "data": encoded,
+                        "content_type": "video/webm",
                         "duration": 5.0,
                         "stopped_reason": "max_duration",
                         "message": (
@@ -801,6 +802,7 @@ class InstructionApiTests(TestCase):
                 {
                     "result": {
                         "data": base64.b64encode(b"video").decode(),
+                        "content_type": "video/webm",
                         "duration": 1.0,
                         "stopped_reason": "user",
                         "message": "Recording stopped by user request",
@@ -829,6 +831,7 @@ class InstructionApiTests(TestCase):
                 {
                     "result": {
                         "data": base64.b64encode(b"video").decode(),
+                        "content_type": "video/webm",
                         "duration": 1.0,
                         "stopped_reason": "user",
                         "message": "Recording stopped by user request",
@@ -855,6 +858,7 @@ class InstructionApiTests(TestCase):
             {
                 "result": {
                     "data": "not base64!",
+                    "content_type": "video/webm",
                     "duration": 1.0,
                     "stopped_reason": "user",
                     "message": "Recording stopped by user request",
@@ -875,6 +879,7 @@ class InstructionApiTests(TestCase):
             {
                 "result": {
                     "data": base64.b64encode(b"video").decode(),
+                    "content_type": "video/webm",
                     "duration": 1.0,
                     "stopped_reason": "unscheduled",
                     "message": "Recording stopped by user request",
@@ -882,6 +887,75 @@ class InstructionApiTests(TestCase):
             },
         )
         self.assertEqual(bad_reason.status_code, 400)
+
+    def test_record_stop_result_accepts_mp4_content_type(self):
+        recording = b"0\x9awMP4ACOB"
+        encoded = base64.b64encode(recording).decode()
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            patch("api.views.create_storage_backend") as create_backend,
+            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
+            patch.object(
+                settings,
+                "STORAGE_CONFIG",
+                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+            ),
+        ):
+            backend = create_backend.return_value
+            backend.upload_file.return_value = (
+                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+            )
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": encoded,
+                        "content_type": "video/mp4",
+                        "duration": 5.0,
+                        "stopped_reason": "user",
+                        "message": "Recording stopped by user request",
+                    }
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        result = completed.json()["result"]
+        self.assertEqual(result["content_type"], "video/mp4")
+        self.assertEqual(result["duration"], 5.0)
+        self.assertEqual(result["stopped_reason"], "user")
+        backend.upload_file.assert_called_once_with(
+            recording,
+            "recording-42.mp4",
+            "video/mp4",
+        )
+
+    def test_rejects_unknown_record_stop_content_type(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        bad_type = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "data": base64.b64encode(b"video").decode(),
+                    "content_type": "video/avi",
+                    "duration": 1.0,
+                    "stopped_reason": "user",
+                    "message": "Recording stopped by user request",
+                }
+            },
+        )
+        self.assertEqual(bad_type.status_code, 400)
 
     def test_heartbeat_stores_and_returns_browser_settings(self):
         settings_url = f"/api/browsers/{self.BID}/settings/"

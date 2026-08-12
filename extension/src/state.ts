@@ -1,4 +1,4 @@
-import type { RecordingStopReason } from "./types.js";
+import type { RecordingContentType, RecordingStopReason } from "./types.js";
 
 export interface ActiveJavaScriptExecution {
   tid: number;
@@ -8,6 +8,7 @@ export interface ActiveJavaScriptExecution {
 
 export interface RecordingOutcome {
   data: string;
+  contentType: RecordingContentType;
   durationMs: number;
   stoppedReason: RecordingStopReason;
   message: string;

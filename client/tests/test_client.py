@@ -496,6 +496,37 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             {"action": "record_stop", "recording_id": 9},
         )
 
+    async def test_record_stop_accepts_an_mp4_recording(self):
+        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 11, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 11,
+                        "status": "completed",
+                        "result": {
+                            "url": media_url,
+                            "content_type": "video/mp4",
+                            "duration": 12.0,
+                            "stopped_reason": "user",
+                            "message": "Recording stopped by user request",
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.record_stop(11)
+
+        self.assertIsInstance(result, RecordingStop)
+        self.assertEqual(result.content_type, "video/mp4")
+        self.assertEqual(result.duration, 12.0)
+        self.assertEqual(len(requests), 2)
+
     async def test_record_stop_rejects_invalid_recording_id(self):
         client = self.make_client()
         invalid_ids: list[object] = [0, -1, True, "9"]

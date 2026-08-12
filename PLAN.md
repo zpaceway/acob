@@ -67,8 +67,9 @@ Python client or MCP host
 - New-tab creation is serialized and bounded by the configured tab limit.
 - Click and keyboard actions use CDP input commands.
 - Screenshots use `Page.captureScreenshot`.
-- Recordings poll `Page.captureScreenshot` into a canvas and encode WebM in
-  the offscreen document, bounded by duration and size settings.
+- Recordings poll `Page.captureScreenshot` into a canvas and encode MP4
+  (falling back to WebM) in the offscreen document, bounded by duration and
+  size settings.
 - JavaScript evaluation awaits promises and returns JSON-compatible values or
   explicit representations for Chromium unserializable values.
 - jQuery and Turndown are bundled for page extraction under

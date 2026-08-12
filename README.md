@@ -328,12 +328,13 @@ viewport:
 
 `record_stop` requires the positive `recording_id` returned by `record_start`
 and delivers the finalized video through the same storage pipeline as
-screenshots, as a WebM file:
+screenshots. Recordings are encoded as MP4 (H.264) when the browser's
+`MediaRecorder` supports it, otherwise as WebM (VP9):
 
 ```json
 {
   "url": "https://media.example/api/files/<file-id>",
-  "content_type": "video/webm",
+  "content_type": "video/mp4",
   "duration": 300.0,
   "stopped_reason": "max_duration",
   "message": "Recording stopped because the maximum duration was reached"
