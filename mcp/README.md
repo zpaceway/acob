@@ -68,11 +68,13 @@ The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `javascript`, and `reinstall`. The `screenshot` tool always returns the
 public download URL for the capture; it never streams the image, so the agent
 downloads the capture itself when it needs the pixels. `record_start` starts
-a bounded video recording and returns its tracking ID; `record_stop` delivers
-the recording's public download URL with a `stopped_reason` and message when
-the extension's maximum duration was reached first. `settings` returns the
-browser's reported configuration (including `maxRecordingDurationMs` and
-`maxRecordingSizeMiB`) so agents can plan recordings and other bounded work.
+a bounded video recording and returns its tracking ID; set `full_page` to
+record the whole scrollable page instead of the visible viewport.
+`record_stop` delivers the recording's public download URL with a
+`stopped_reason` and message when the extension's maximum duration was
+reached first. `settings` returns the browser's reported configuration
+(including `maxRecordingDurationMs` and `maxRecordingSizeMiB`) so agents can
+plan recordings and other bounded work.
 
 ## Docker
 

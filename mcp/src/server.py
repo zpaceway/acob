@@ -44,7 +44,7 @@ from pydantic import (
     StringConstraints,
 )
 
-SERVER_VERSION = "0.6.0"
+SERVER_VERSION = "0.7.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
@@ -105,7 +105,7 @@ TOOL_ARGUMENT_NAMES = {
     "click": frozenset({"tid", "selector", "timeout"}),
     "keyboard": frozenset({"tid", "text", "key", "modifiers", "timeout"}),
     "screenshot": frozenset({"tid", "full_page", "timeout"}),
-    "record_start": frozenset({"tid", "timeout"}),
+    "record_start": frozenset({"tid", "full_page", "timeout"}),
     "record_stop": frozenset({"recording_id", "timeout"}),
     "settings": frozenset({"timeout"}),
     "javascript": frozenset({"tid", "script", "timeout"}),
@@ -370,14 +370,18 @@ def create_server(
     async def record_start(
         tid: PositiveTid,
         ctx: Context[AppContext],
+        full_page: StrictBool = False,
         timeout: ToolTimeout | None = None,
     ) -> RecordingStart:
         """Start recording a Chromium tab and return its tracking ID.
 
         The recording continues in the background until record_stop is
-        called or the browser's maximum recording duration is reached."""
+        called or the browser's maximum recording duration is reached.
+        Set full_page to record the whole scrollable page instead of only
+        the visible viewport."""
         return await _client(ctx).record_start(
             tid,
+            full_page=full_page,
             timeout=timeout,
         )
 

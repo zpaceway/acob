@@ -213,6 +213,7 @@ export interface ScreenshotPayload {
 
 export interface RecordStartPayload {
   tid: number;
+  full_page?: boolean;
 }
 
 export interface RecordStopPayload {
@@ -326,6 +327,7 @@ export interface ScreenshotInstructionRequest {
 export interface RecordStartInstructionRequest {
   action: "record_start";
   tid: number;
+  full_page?: boolean;
 }
 
 export interface RecordStopInstructionRequest {
@@ -482,6 +484,12 @@ export interface StartRecordingMessage {
   type: "startRecording";
   recordingId: number;
   tid: number;
+  fullPage: boolean;
+  // Full-page recordings carry the measured content size so the sink can
+  // size its canvas and bitrate before the first frame; viewport
+  // recordings pass zero and derive both from the first frame.
+  width: number;
+  height: number;
   maxRecordingDurationMs: number;
   maxRecordingSizeMiB: number;
 }
@@ -526,6 +534,9 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     return (
       typeof message.recordingId === "number" &&
       typeof message.tid === "number" &&
+      typeof message.fullPage === "boolean" &&
+      typeof message.width === "number" &&
+      typeof message.height === "number" &&
       typeof message.maxRecordingDurationMs === "number" &&
       typeof message.maxRecordingSizeMiB === "number"
     );

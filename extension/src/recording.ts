@@ -6,6 +6,8 @@ import type {
 } from "./types.js";
 
 const RECORDING_BITRATE = 1_000_000;
+const RECORDING_BITRATE_CAP = 2_000_000;
+const RECORDING_REFERENCE_PIXELS = 1920 * 1080;
 const RECORDING_FRAMERATE = 30;
 const RECORDING_DISCARD_GRACE_MS = 30_000;
 interface RecordingSink {
@@ -58,7 +60,10 @@ async function drawFrame(
   const bitmap = await createImageBitmap(
     new Blob([bytes], { type: "image/jpeg" }),
   );
-  if (sink.canvas.width === 0 || sink.canvas.height === 0) {
+  if (
+    sink.canvas.width !== bitmap.width ||
+    sink.canvas.height !== bitmap.height
+  ) {
     sink.canvas.width = bitmap.width;
     sink.canvas.height = bitmap.height;
   }
@@ -88,16 +93,29 @@ export async function startRecordingSink(
     throw new Error(`A recording with id ${message.recordingId} already exists`);
   }
   const canvas = document.createElement("canvas");
-  canvas.width = 0;
-  canvas.height = 0;
+  canvas.width = message.width > 0 ? message.width : 0;
+  canvas.height = message.height > 0 ? message.height : 0;
   const context = canvas.getContext("2d");
   if (context === null) {
     throw new Error("Could not create the recording canvas");
   }
   const mimeType = chooseMimeType();
+  const pixels = canvas.width * canvas.height;
+  const videoBitsPerSecond =
+    pixels > 0
+      ? Math.min(
+          RECORDING_BITRATE_CAP,
+          Math.max(
+            RECORDING_BITRATE,
+            Math.round(
+              (RECORDING_BITRATE * pixels) / RECORDING_REFERENCE_PIXELS,
+            ),
+          ),
+        )
+      : RECORDING_BITRATE;
   const recorder = new MediaRecorder(canvas.captureStream(RECORDING_FRAMERATE), {
     mimeType,
-    videoBitsPerSecond: RECORDING_BITRATE,
+    videoBitsPerSecond,
   });
   const sink: RecordingSink = {
     canvas,

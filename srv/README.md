@@ -98,7 +98,8 @@ Screenshots and recordings are never stored by this server. When the
 extension reports a capture, the server immediately uploads the bytes to the
 configured media storage service and stores only the resulting public
 download URL in the instruction result. Recordings use the same pipeline:
-`record_start` and `record_stop` are instructions whose results carry the
+`record_start` (with an optional `full_page` flag to record the whole
+scrollable page) and `record_stop` are instructions whose results carry the
 final video URL, and the extension-side session is not tracked by the server.
 
 While a reinstall is pending, `instructions/next/` claims no queue work and

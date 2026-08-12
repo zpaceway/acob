@@ -426,7 +426,32 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(requests), 2)
         self.assertEqual(
             json.loads(requests[0].content),
-            {"action": "record_start", "tid": 12},
+            {"action": "record_start", "tid": 12, "full_page": False},
+        )
+
+    async def test_record_start_sends_the_full_page_flag(self):
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 9, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 9,
+                        "status": "completed",
+                        "result": {"recording_id": 9, "started": True},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.record_start(12, full_page=True)
+
+        self.assertIsInstance(result, RecordingStart)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "record_start", "tid": 12, "full_page": True},
         )
 
     async def test_record_stop_returns_the_media_url(self):

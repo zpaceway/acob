@@ -55,16 +55,22 @@ JavaScript on the same tab execute in claim order.
 
 ## Recordings And Browser Settings
 
-`record_start` (`{tid}`) starts a video recording of the tab's viewport and
-completes immediately with `{recording_id, started}`; the recording continues
-in the background until `record_stop` (`{recording_id}`) or
-`maxRecordingDurationMs` (default 300000 ms, 5 minutes). A late `record_stop`
-delivers the maximum-duration video with `stopped_reason: "max_duration"` and
-a message instead of failing. Recordings are encoded in the offscreen document
-(WebM/VP9, ~1 Mbps, ~2-5 fps) from `Page.captureScreenshot` frames relayed by
+`record_start` (`{tid}`, optional `full_page`) starts a video recording of the
+tab and completes immediately with `{recording_id, started}`; the recording
+continues in the background until `record_stop` (`{recording_id}`) or
+`maxRecordingDurationMs` (default 300000 ms, 5 minutes). `full_page: true`
+records the whole scrollable content instead of the viewport: the worker
+measures the content size up front and re-measures it each frame so growing
+pages stay covered, and the sink sizes its canvas and bitrate accordingly. A
+late `record_stop` delivers the maximum-duration video with
+`stopped_reason: "max_duration"` and a message instead of failing. Recordings
+are encoded in the offscreen document (WebM/VP9, ~1 Mbps scaled up for
+full-page frames, ~2-5 fps) from `Page.captureScreenshot` frames relayed by
 the service worker, so the tab's window should be focused: an unfocused or
-hidden tab fails the first capture with a focus hint. A recording holds the
-tab's debugger for its whole lifetime and does not survive extension reloads.
+hidden tab fails the first capture with a focus hint. The worker shares one
+refcounted debugger session per tab (`src/cdp.ts`), so a recording holding
+its tab's debugger does not block `click`, `keyboard`, `screenshot`, `scroll`,
+or `javascript` on that tab. Recordings do not survive extension reloads.
 
 The extension reports its normalized configuration to the server's heartbeat
 route from the poll loop (throttled to 30 s, immediate on setting changes) so

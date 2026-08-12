@@ -349,6 +349,7 @@ interface RecordingPipeline {
 function startRecordingPipeline(
   recordingId: number,
   tid: number,
+  fullPage: boolean,
   configuration: Configuration,
 ): RecordingPipeline {
   let requestStop: () => void = () => undefined;
@@ -420,12 +421,29 @@ function startRecordingPipeline(
           const firstCapture = captures === 0;
           try {
             const capture = await withTimeout(
-              sendCdpCommand(target, "Page.captureScreenshot", {
-                format: "jpeg",
-                quality: RECORDING_JPEG_QUALITY,
-                fromSurface: true,
-                captureBeyondViewport: false,
-              }),
+              (async () => {
+                let clip: Protocol.Page.Viewport | undefined;
+                if (fullPage) {
+                  const { cssContentSize } = await sendCdpCommand(
+                    target,
+                    "Page.getLayoutMetrics",
+                  );
+                  clip = {
+                    x: 0,
+                    y: 0,
+                    width: Math.max(1, Math.round(cssContentSize.width)),
+                    height: Math.max(1, Math.round(cssContentSize.height)),
+                    scale: 1,
+                  };
+                }
+                return sendCdpCommand(target, "Page.captureScreenshot", {
+                  format: "jpeg",
+                  quality: RECORDING_JPEG_QUALITY,
+                  fromSurface: true,
+                  captureBeyondViewport: fullPage,
+                  ...(clip === undefined ? {} : { clip }),
+                });
+              })(),
               firstCapture
                 ? RECORDING_FIRST_CAPTURE_TIMEOUT_MS
                 : RECORDING_CAPTURE_TIMEOUT_MS,
@@ -505,16 +523,42 @@ function startRecordingPipeline(
   return { ready, finished, requestStop };
 }
 
+async function measurePageSize(
+  tid: number,
+  configuration: Configuration,
+): Promise<{ width: number; height: number }> {
+  return withDebugger(
+    tid,
+    configuration.debuggerProtocolVersion,
+    async (target) => {
+      const { cssContentSize } = await withTimeout(
+        sendCdpCommand(target, "Page.getLayoutMetrics"),
+        RECORDING_FIRST_CAPTURE_TIMEOUT_MS,
+        "Recording could not measure the page; focus its window and try again",
+      );
+      return {
+        width: Math.max(1, Math.round(cssContentSize.width)),
+        height: Math.max(1, Math.round(cssContentSize.height)),
+      };
+    },
+  );
+}
+
 export async function executeRecordStart(
   tid: number,
   recordingId: number,
+  fullPage: boolean,
   configuration: Configuration,
 ): Promise<RecordStartResult> {
   await ensureOffscreenDocument();
+  const size = fullPage ? await measurePageSize(tid, configuration) : null;
   const message: StartRecordingMessage = {
     type: "startRecording",
     recordingId,
     tid,
+    fullPage,
+    width: size?.width ?? 0,
+    height: size?.height ?? 0,
     maxRecordingDurationMs: configuration.maxRecordingDurationMs,
     maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
   };
@@ -529,7 +573,12 @@ export async function executeRecordStart(
     throw new Error(response.error);
   }
 
-  const pipeline = startRecordingPipeline(recordingId, tid, configuration);
+  const pipeline = startRecordingPipeline(
+    recordingId,
+    tid,
+    fullPage,
+    configuration,
+  );
   const session = {
     tid,
     requestStop: pipeline.requestStop,

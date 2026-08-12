@@ -94,7 +94,11 @@ export function isSupportedInstruction(
     );
   }
   if (value.action === "record_start") {
-    return isPositiveInteger(payload.tid);
+    return (
+      isPositiveInteger(payload.tid) &&
+      (payload.full_page === undefined ||
+        typeof payload.full_page === "boolean")
+    );
   }
   if (value.action === "record_stop") {
     return isPositiveInteger(payload.recording_id);

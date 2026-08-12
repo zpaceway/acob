@@ -149,20 +149,24 @@ print(screenshot.url, screenshot.content_type, screenshot.tid)
 `record_start()` starts a video recording of a tab and returns a
 `RecordingStart` model with its tracking ID; the recording runs in the
 background until `record_stop()` or the extension's maximum recording
-duration. `record_stop()` returns a `RecordingStop` model with the public
-download URL, duration, and `stopped_reason` (`"user"` or `"max_duration"` —
-a late stop delivers the maximum-duration video with an explanatory message
-instead of failing):
+duration. Pass `full_page=True` to record the tab's whole scrollable content
+instead of only the visible viewport. `record_stop()` returns a
+`RecordingStop` model with the public download URL, duration, and
+`stopped_reason` (`"user"` or `"max_duration"` — a late stop delivers the
+maximum-duration video with an explanatory message instead of failing):
 
 ```python
-recording = await client.record_start(tid)
+recording = await client.record_start(tid, full_page=True)
 await asyncio.sleep(10)
 video = await client.record_stop(recording.recording_id)
 print(video.url, video.duration, video.stopped_reason)
 ```
 
 Recordings need a timeout that covers the intended recording time, and the
-tab's window should be focused for reliable captures.
+tab's window should be focused for reliable captures. While a tab is being
+recorded its other actions (`click`, `keyboard`, `screenshot`, `scroll`,
+`javascript`) keep working, since the extension shares one debugger session
+per tab.
 
 `screenshot()` and `record_stop()` return the same public media URL pattern.
 `settings()` returns the browser's reported configuration (limits such as

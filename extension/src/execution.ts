@@ -135,7 +135,12 @@ async function runInstructionAction(
 
   if (action === "record_start") {
     await chrome.tabs.get(payload.tid);
-    return executeRecordStart(payload.tid, instruction.id, configuration);
+    return executeRecordStart(
+      payload.tid,
+      instruction.id,
+      payload.full_page ?? false,
+      configuration,
+    );
   }
 
   if (action === "record_stop") {

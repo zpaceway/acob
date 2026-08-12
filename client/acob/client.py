@@ -487,15 +487,23 @@ class ACOBClient:
         self,
         tid: int,
         *,
+        full_page: bool = False,
         timeout: float | None = None,
     ) -> RecordingStart:
         """Start recording a tab and return its tracking ID.
 
         The recording continues in the background until ``record_stop`` is
         called or the extension's maximum recording duration is reached.
+        ``full_page`` records the tab's whole scrollable content instead of
+        only the visible viewport.
         """
         result = self._expect_model(
-            await self.execute("record_start", tid=tid, timeout=timeout),
+            await self.execute(
+                "record_start",
+                tid=tid,
+                full_page=full_page,
+                timeout=timeout,
+            ),
             _RecordingStartMetadata,
             "record_start",
         )

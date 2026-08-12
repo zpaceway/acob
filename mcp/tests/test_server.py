@@ -256,7 +256,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["record_start"].input_schema["properties"]),
-            {"tid", "timeout"},
+            {"tid", "full_page", "timeout"},
         )
         self.assertEqual(
             set(tools["record_start"].input_schema["required"]),
@@ -445,7 +445,10 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async with Client(self.server, raise_exceptions=True) as client:
-            started = await client.call_tool("record_start", {"tid": 12})
+            started = await client.call_tool(
+                "record_start",
+                {"tid": 12, "full_page": True},
+            )
             stopped = await client.call_tool("record_stop", {"recording_id": 42})
 
         self.assertFalse(started.is_error)
@@ -467,7 +470,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "recording_id": 42,
             },
         )
-        self.acob.record_start.assert_awaited_once_with(12, timeout=None)
+        self.acob.record_start.assert_awaited_once_with(
+            12,
+            full_page=True,
+            timeout=None,
+        )
         self.acob.record_stop.assert_awaited_once_with(42, timeout=None)
 
     async def test_returns_reported_browser_settings_from_the_client(self):

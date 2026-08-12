@@ -96,6 +96,7 @@ class ScreenshotInstruction(ApiModel):
 class RecordStartInstruction(ApiModel):
     action: Literal["record_start"]
     tid: Tid
+    full_page: bool = False
 
 
 class RecordStopInstruction(ApiModel):

@@ -206,8 +206,10 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
   == server `MAX_RECORDING_DURATION_SECONDS` 300).
 - Everything that targets a known tab runs through `runInTabExecutionQueue`
   so same-tab work stays ordered while other tabs run concurrently.
-- The debugger is always used inside `withDebugger` (attach/detach in
-  `finally`); debugger access is per-tab and exclusive.
+- All debugger work runs through `withDebugger` in `cdp.ts`, which acquires
+  and releases one shared refcounted session per tab (attaching when the tab
+  has none, reusing the session while a recording holds it); debugger access
+  is per-tab and shared, not exclusive.
 - Long-running work is deadline-bounded with `withTimeout`/
   `withTerminationOnTimeout` from `timeouts.ts`; service worker work keeps a
   keep-alive timer.
@@ -229,11 +231,14 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
 Recordings are **stateful in the extension, not on the server**. Two
 instructions form the lifecycle:
 
-- `record_start` (`{tid}`) completes almost immediately with
-  `{recording_id, started}` — `recording_id` is the `record_start`
-  instruction id — while the recording continues in the background. The
-  session lives in the service worker's `state.recordings` map and only
-  survives as long as the worker.
+- `record_start` (`{tid}`, optional `full_page`) completes almost
+  immediately with `{recording_id, started}` — `recording_id` is the
+  `record_start` instruction id — while the recording continues in the
+  background. The session lives in the service worker's `state.recordings`
+  map and only survives as long as the worker. `full_page: true` records the
+  whole scrollable content: the worker measures the content size up front
+  (to size the offscreen canvas and bitrate) and re-measures it each frame
+  so growing pages stay covered.
 - `record_stop` (`{recording_id}`) stops the session and delivers the video
   through the normal result path (base64 -> server upload -> public URL).
 - Auto-stop: the worker timer at `maxRecordingDurationMs` (default
@@ -243,22 +248,27 @@ instructions form the lifecycle:
   until the first `record_stop` delivers it (single delivery).
 - The pipeline is split because offscreen documents cannot use
   `chrome.debugger`: the worker attaches and polls `Page.captureScreenshot`
-  (JPEG) every ~200 ms, relaying each capture to the offscreen via a
-  `recordingFrame` runtime message; the offscreen (`recording.ts`) draws to a
-  canvas and records WebM with `MediaRecorder`. Captures and frame sends are
-  deadline-bounded (3 s for the first capture so an unfocused/hidden tab
-  fails fast with a focus hint, 10 s afterwards); the first capture timing
-  out produces `Recording could not capture the tab; focus its window and
-  try again`. The offscreen fails recordings that drew zero frames instead
-  of delivering blank videos, and caps the encoded size at
-  `maxRecordingSizeMiB`.
+  (JPEG, viewport or full-content clip) every ~200 ms, relaying each capture
+  to the offscreen via a `recordingFrame` runtime message; the offscreen
+  (`recording.ts`) draws to a canvas (resizing it when frame dimensions
+  change) and records WebM with `MediaRecorder`, scaling the bitrate up to
+  2 Mbps for full-page frames. Captures and frame sends are deadline-bounded
+  (3 s for the first capture so an unfocused/hidden tab fails fast with a
+  focus hint, 10 s afterwards); the first capture timing out produces
+  `Recording could not capture the tab; focus its window and try again`. The
+  offscreen fails recordings that drew zero frames instead of delivering
+  blank videos, and caps the encoded size at `maxRecordingSizeMiB`.
 - During a recording the worker holds a keep-alive interval timer; the
   offscreen sink discards itself at `maxRecordingDurationMs + 30 s` as a
-  dead-worker safety net. Recordings hold the tab's debugger: no other
-  debugger action can run on that tab until the recording stops.
-- Recordings are video-only, ~2-5 fps, ~1 Mbps WebM/VP9 at the tab's
-  viewport resolution, and do not survive extension reloads (a later
-  `record_stop` then fails with "No active recording").
+  dead-worker safety net. The worker keeps one shared refcounted debugger
+  session per tab (`cdp.ts`), so a recording holding its tab's debugger does
+  not block `click`, `keyboard`, `screenshot`, `scroll`, or `javascript` on
+  that tab; external detaches (e.g. opened DevTools) stop the recording and
+  let later actions attach a fresh session.
+- Recordings are video-only, ~2-5 fps, ~1 Mbps (up to 2 Mbps for full-page
+  frames) WebM/VP9 at the tab's viewport or full-page resolution, and do not
+  survive extension reloads (a later `record_stop` then fails with "No
+  active recording").
 - The bounds chain is intentional: extension `maxRecordingSizeMiB` (60) ==
   server `MAX_RECORDING_BASE64_LENGTH` (60 MiB) <
   `DATA_UPLOAD_MAX_MEMORY_SIZE` (96 MiB) < the ~64 MiB
@@ -364,10 +374,11 @@ in the live extension after changes.
   instruction id (`recording_id`); they do not survive extension reloads and
   are not tracked by the server — stopping is delivered through a
   `record_stop` instruction.
-- A recording holds the tab's debugger for its whole lifetime; the per-tab
-  execution queue serializes other work on that tab, but work that needs the
-  debugger must wait for `record_stop`. `record_start` completing does not
-  release the debugger.
+- A recording holds its tab's shared debugger session for its whole lifetime;
+  the per-tab execution queue serializes same-tab work, but other
+  debugger-backed actions (`click`, `keyboard`, `screenshot`, `scroll`,
+  `javascript`) share the open session and keep working. `record_start`
+  completing does not release the debugger.
 - The service worker can be suspended; recording and other long-running
   worker work must keep a pending timer (keep-alive) or it will be killed
   mid-flight.

@@ -643,9 +643,30 @@ class InstructionApiTests(TestCase):
         )
 
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.json()["payload"], {"tid": 12})
+        self.assertEqual(
+            started.json()["payload"],
+            {"tid": 12, "full_page": False},
+        )
         self.assertEqual(stopped.status_code, 201)
         self.assertEqual(stopped.json()["payload"], {"recording_id": 42})
+
+    def test_record_start_accepts_full_page_flag(self):
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start", "tid": 12, "full_page": True},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["payload"],
+            {"tid": 12, "full_page": True},
+        )
+
+        invalid = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start", "tid": 12, "full_page": "yes"},
+        )
+        self.assertEqual(invalid.status_code, 400)
 
     def test_record_instructions_require_valid_arguments(self):
         missing_tid = self.post_json(
