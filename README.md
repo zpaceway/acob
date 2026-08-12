@@ -208,9 +208,8 @@ MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `javascript`, and `reinstall`. Structured results use SDK-generated output
 schemas, while `screenshot` returns an MCP PNG image content block unless
-`as_url` is true, in which case it uploads the capture to the CHIPF media
-service and returns the public download URL (requires `CHIPF_ENDPOINT` and
-`CHIPF_API_KEY`). See
+`as_url` is true, in which case it returns the public download URL produced by
+the ACOB server's configured media storage service. See
 [`mcp/README.md`](mcp/README.md) for all environment, transport, Docker,
 security, and verification details.
 
@@ -280,19 +279,23 @@ include unique `alt`, `ctrl`, `meta`, and `shift` modifiers. The extension
 leaves tab and window focus unchanged, so the agent must focus the intended page
 control first, usually with `click`.
 
-`screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains a relative, browser-scoped `download_url`, not image data:
+`screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains the public download URL hosted by the configured media storage service, not image data:
 
 ```json
 {
-  "download_url": "/api/browsers/<bid>/screenshots/7/",
+  "url": "https://media.example/api/files/<file-id>",
   "content_type": "image/png",
-  "full_page": false,
-  "single_use": true,
-  "tid": 123
+  "full_page": false
 }
 ```
 
-The screenshot is stored base64-encoded in SQLite until the first `GET` to that URL. That request returns the decoded PNG and deletes the screenshot row. A second request returns 404, and an interrupted first download cannot be retried. Do not probe the URL; save or process its first response directly. Encoded screenshots are limited to 30 MiB; larger captures complete as failed instructions rather than being retained.
+The server never stores the image: the extension submits the capture as base64,
+the server uploads the bytes to the storage service (`STORAGE_ENDPOINT` and
+`STORAGE_API_KEY`) and stores only the resulting URL in the instruction result.
+The storage service controls the lifetime of the URL. Without a configured
+storage service, or when the upload fails, the instruction completes as failed
+with a clear error. Encoded captures are limited to 30 MiB; larger captures
+complete as failed instructions rather than being submitted.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab.
 Values available by value are returned as JSON-compatible results; Chromium

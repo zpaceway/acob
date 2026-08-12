@@ -134,11 +134,10 @@ configured tab limit. Navigating an existing `tid` is unaffected by the limit.
 Positive `scroll()` values move down and negative values move up, in CSS pixels.
 
 `screenshot()` always requires the `as_url` flag to choose its result mode.
-With `as_url=False` it returns PNG bytes, immediately consuming the API's
-internal single-use download URL; a failed transfer requires a new screenshot
-call. With `as_url=True` it returns a `ScreenshotUrl` instead, without
-transferring the image, so the caller can download the single-use URL to a
-location of its choosing for later analysis:
+With `as_url=False` it returns PNG bytes downloaded from the media storage
+service that hosts the capture. With `as_url=True` it returns a `ScreenshotUrl`
+instead, without transferring the image, so the caller can keep the public
+download URL for later analysis:
 
 ```python
 url = await client.screenshot(tid, as_url=True)

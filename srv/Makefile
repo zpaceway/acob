@@ -1,5 +1,9 @@
 ACOB_SRV_HOST ?= 0.0.0.0
 ACOB_SRV_PORT ?= 58347
+STORAGE_ENDPOINT ?=
+STORAGE_API_KEY ?=
+
+export STORAGE_ENDPOINT STORAGE_API_KEY
 
 .PHONY: format check test migrations migrate dev run docker logs
 

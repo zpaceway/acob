@@ -44,17 +44,6 @@ class Instruction(models.Model):
         ordering: ClassVar[list[str]] = ["created_at"]
 
 
-class Screenshot(models.Model):
-    id: int
-
-    bid = models.CharField(max_length=32, db_index=True, validators=[validate_bid])
-    tid = models.PositiveBigIntegerField()
-    data = models.TextField()
-    content_type = models.CharField(max_length=32, default="image/png")
-    full_page = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
 class Reinstall(models.Model):
     bid = models.CharField(
         max_length=32,

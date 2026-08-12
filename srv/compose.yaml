@@ -9,3 +9,5 @@ services:
     environment:
       ACOB_SRV_HOST: ${ACOB_SRV_HOST:-0.0.0.0}
       ACOB_SRV_PORT: ${ACOB_SRV_PORT:-58347}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
+      STORAGE_API_KEY: ${STORAGE_API_KEY:-}

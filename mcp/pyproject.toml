@@ -5,8 +5,7 @@ description = "MCP server for controlling a user's existing Chromium session wit
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "acob-client>=0.5.1",
-    "httpx>=0.28.1",
+    "acob-client>=0.6.0",
     "mcp==2.0.0",
 ]
 

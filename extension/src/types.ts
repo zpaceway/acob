@@ -365,11 +365,9 @@ export interface ScreenshotUploadResult {
 }
 
 export interface ScreenshotResult {
-  download_url: string;
+  url: string;
   content_type: "image/png";
   full_page: boolean;
-  single_use: true;
-  tid: number;
 }
 
 export interface UnserializableJavaScriptResult {

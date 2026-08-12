@@ -10,8 +10,6 @@ services:
     network_mode: host
     environment:
       ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://127.0.0.1:58347}
-      CHIPF_ENDPOINT: ${CHIPF_ENDPOINT:-}
-      CHIPF_API_KEY: ${CHIPF_API_KEY:-}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
       ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}

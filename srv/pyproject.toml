@@ -1,11 +1,12 @@
 [project]
 name = "acob"
-version = "0.2.0"
+version = "0.3.0"
 description = "Control browser tabs through a Django API"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "django>=6.0.7",
+    "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "uvicorn>=0.51.0",
 ]

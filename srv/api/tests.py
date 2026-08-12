@@ -1,11 +1,16 @@
 import base64
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import httpx
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Instruction, Reinstall, Screenshot
+from .models import Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR
+from .storage import StorageConnectionError
 
 
 class InstructionApiTests(TestCase):
@@ -514,7 +519,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "screenshot.tid")
 
-    def test_screenshot_result_and_download_are_single_use(self):
+    def test_screenshot_result_is_uploaded_to_the_storage_service(self):
         image = b"\x89PNG\r\n\x1a\nACOB"
         encoded = base64.b64encode(image).decode()
         created = self.post_json(
@@ -524,51 +529,85 @@ class InstructionApiTests(TestCase):
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
 
-        completed = self.post_result(
-            instruction_id,
-            {"result": {"data": encoded}},
-        )
+        with (
+            patch("api.views.create_storage_backend") as create_backend,
+            patch.object(settings, "STORAGE_ENDPOINT", "https://chipf.test"),
+            patch.object(settings, "STORAGE_API_KEY", "secret"),
+        ):
+            backend = create_backend.return_value
+            backend.upload_file.return_value = (
+                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+            )
+            completed = self.post_result(
+                instruction_id,
+                {"result": {"data": encoded}},
+            )
 
         self.assertEqual(completed.status_code, 200)
         result = completed.json()["result"]
-        self.assertTrue(result["single_use"])
-        self.assertTrue(result["full_page"])
-        screenshot = Screenshot.objects.get()
-        self.assertEqual(screenshot.data, encoded)
+        self.assertEqual(
+            result,
+            {
+                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "content_type": "image/png",
+                "full_page": True,
+            },
+        )
+        create_backend.assert_called_once_with("https://chipf.test", "secret")
+        backend.upload_file.assert_called_once_with(
+            image,
+            "screenshot-12.png",
+            "image/png",
+        )
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
-        self.assertTrue(Screenshot.objects.filter(id=screenshot.id).exists())
 
-        download = self.client.get(result["download_url"])
-        self.assertEqual(download.status_code, 200)
-        self.assertEqual(download.content, image)
-        self.assertEqual(download.headers["Content-Type"], "image/png")
-        self.assertEqual(download.headers["Cache-Control"], "no-store")
-        self.assertEqual(
-            download.headers["Content-Disposition"],
-            f'attachment; filename="acob-screenshot-{screenshot.id}.png"',
+    def test_screenshot_fails_when_no_storage_service_is_configured(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot", "tid": 12},
         )
-        self.assertFalse(Screenshot.objects.filter(id=screenshot.id).exists())
-        self.assertEqual(
-            self.client.get(result["download_url"]).status_code,
-            404,
-        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
 
-    def test_screenshot_download_is_scoped_to_browser(self):
-        screenshot = Screenshot.objects.create(
-            bid=self.BID,
-            tid=12,
-            data=base64.b64encode(b"image").decode(),
-        )
-        other_bid = "fedcba9876544210a9876543210fedcb"
-        other_url = f"/api/browsers/{other_bid}/screenshots/{screenshot.id}/"
-        download_url = f"/api/browsers/{self.BID}/screenshots/{screenshot.id}/"
+        with patch("api.views.create_storage_backend", return_value=None):
+            completed = self.post_result(
+                instruction_id,
+                {"result": {"data": base64.b64encode(b"image").decode()}},
+            )
 
-        self.assertEqual(self.client.get(other_url).status_code, 404)
-        self.assertTrue(Screenshot.objects.filter(id=screenshot.id).exists())
-        self.assertEqual(self.client.get(download_url).status_code, 200)
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "failed")
+        self.assertIn("no storage service is configured", response["error"])
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["error"], response["error"])
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+
+    def test_screenshot_fails_when_the_storage_service_is_unavailable(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "screenshot", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with patch("api.views.create_storage_backend") as create_backend:
+            backend = create_backend.return_value
+            backend.upload_file.side_effect = StorageConnectionError("storage is down")
+            completed = self.post_result(
+                instruction_id,
+                {"result": {"data": base64.b64encode(b"image").decode()}},
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "failed")
+        self.assertIn("Could not host the screenshot", response["error"])
+        self.assertIn("storage is down", response["error"])
 
     def test_rejects_invalid_screenshot_result(self):
         created = self.post_json(
@@ -585,7 +624,6 @@ class InstructionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid screenshot data")
-        self.assertFalse(Screenshot.objects.exists())
 
     def test_reinstall_is_idempotent_until_acknowledged(self):
         first = self.client.post(self.reinstall_path())
@@ -656,3 +694,78 @@ class InstructionApiTests(TestCase):
             {"token": token},
         )
         self.assertEqual(repeated.status_code, 204)
+
+
+class StorageBackendTests(TestCase):
+    def test_unconfigured_backend_is_none(self):
+        from .storage import create_storage_backend
+
+        self.assertIsNone(create_storage_backend("", ""))
+        self.assertIsNone(create_storage_backend("https://chipf.test", ""))
+        self.assertIsNone(create_storage_backend("", "secret"))
+
+    def test_upload_file_returns_the_resolved_url(self):
+        from .storage import ChipfStorageBackend
+
+        backend = ChipfStorageBackend("https://chipf.test", "secret")
+        response = SimpleNamespace(
+            status_code=201,
+            content=(
+                b'{"files":[{"file_id":"abc","url":"/api/files/abc",'
+                b'"content_type":"image/png"}]}'
+            ),
+        )
+
+        with patch("api.storage.httpx.post", return_value=response) as post:
+            url = backend.upload_file(b"png", "screenshot-12.png", "image/png")
+
+        self.assertEqual(url, "https://chipf.test/api/files/abc")
+        post.assert_called_once_with(
+            "https://chipf.test/api/files/upload",
+            files={
+                "file": ("screenshot-12.png", b"png", "image/png"),
+            },
+            headers={"X-API-Key": "secret"},
+            timeout=30.0,
+        )
+
+    def test_upload_file_rejects_a_non_201_response(self):
+        from .storage import ChipfStorageBackend, StorageHTTPError
+
+        backend = ChipfStorageBackend("https://chipf.test", "secret")
+        response = SimpleNamespace(
+            status_code=401,
+            content=b'{"error":"unauthorized"}',
+        )
+
+        with (
+            patch("api.storage.httpx.post", return_value=response),
+            self.assertRaisesRegex(StorageHTTPError, "unauthorized"),
+        ):
+            backend.upload_file(b"png", "screenshot-12.png", "image/png")
+
+    def test_upload_file_wraps_connection_failures(self):
+        from .storage import ChipfStorageBackend, StorageConnectionError
+
+        backend = ChipfStorageBackend("https://chipf.test", "secret")
+
+        with (
+            patch(
+                "api.storage.httpx.post",
+                side_effect=httpx.ConnectError("refused"),
+            ),
+            self.assertRaisesRegex(StorageConnectionError, "refused"),
+        ):
+            backend.upload_file(b"png", "screenshot-12.png", "image/png")
+
+    def test_upload_file_rejects_invalid_responses(self):
+        from .storage import ChipfStorageBackend, StorageProtocolError
+
+        backend = ChipfStorageBackend("https://chipf.test", "secret")
+        response = SimpleNamespace(status_code=201, content=b"not json")
+
+        with (
+            patch("api.storage.httpx.post", return_value=response),
+            self.assertRaises(StorageProtocolError),
+        ):
+            backend.upload_file(b"png", "screenshot-12.png", "image/png")

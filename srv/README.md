@@ -30,6 +30,10 @@ make dev ACOB_SRV_HOST=0.0.0.0 ACOB_SRV_PORT=8000
 Use `make run` to apply migrations and serve `acob.asgi:application` with
 Uvicorn. Both commands use the development settings in `acob/settings.py`.
 
+Screenshot results require a media storage service. Set `STORAGE_ENDPOINT` and
+`STORAGE_API_KEY` (empty by default); without them, screenshot instructions
+fail with a clear error instead of storing anything locally.
+
 Create and apply migrations separately with `make migrations` and
 `make migrate`.
 
@@ -61,13 +65,13 @@ docker compose -f srv/compose.yaml up --build
 The Compose project, service, image, and container are named `acob-srv`. The
 service uses the host network, binding `0.0.0.0:58347` directly. The SQLite
 database lives inside the container because no volume is configured; removing
-or replacing the container removes queued instructions, screenshots, and other
-database state.
+or replacing the container removes queued instructions and other database
+state.
 
 ## API
 
-All queue and screenshot routes are scoped by a lowercase dashless UUIDv4
-browser ID under `/api/browsers/<bid>/`.
+All routes are scoped by a lowercase dashless UUIDv4 browser ID under
+`/api/browsers/<bid>/`.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -75,7 +79,6 @@ browser ID under `/api/browsers/<bid>/`.
 | `GET` | `instructions/next/?limit=1` | Claim 1 to 20 pending instructions for the extension. |
 | `GET` | `instructions/<id>/` | Read status or consume a terminal response. |
 | `POST` | `instructions/<id>/result/` | Complete a claimed instruction. |
-| `GET` | `screenshots/<id>/` | Download and consume a captured PNG. |
 | `POST` | `reinstall/` | Queue an unpacked-extension reinstall. |
 | `GET` | `reinstall/` | Read the pending reinstall command for manual inspection. |
 | `POST` | `reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
@@ -86,9 +89,12 @@ Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 
 Instructions are transport state, not history. Pending and processing reads are
 non-destructive. The first successful detail request for a completed or failed
-instruction returns its terminal response and deletes the row. Screenshot
-downloads likewise delete stored image data after decoding it, so callers must
-preserve the first response and must not probe the URL.
+instruction returns its terminal response and deletes the row.
+
+Screenshots are never stored by this server. When the extension reports a
+capture, the server immediately uploads the bytes to the configured media
+storage service and stores only the resulting public download URL in the
+instruction result.
 
 While a reinstall is pending, `instructions/next/` claims no queue work and
 instead returns the `reinstall` command directly to the extension; the

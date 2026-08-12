@@ -1,10 +1,6 @@
 ACOB_MCP_HOST ?= 0.0.0.0
 ACOB_MCP_PORT ?= 58348
 ACOB_ENDPOINT ?= http://127.0.0.1:58347
-CHIPF_ENDPOINT ?=
-CHIPF_API_KEY ?=
-
-export ACOB_ENDPOINT CHIPF_ENDPOINT CHIPF_API_KEY
 
 .PHONY: format check test run docker logs build-push
 

@@ -1,16 +1,16 @@
 import base64
 import binascii
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Exists
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
-from .models import Instruction, Reinstall, Screenshot
+from .models import Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR, request_reinstall
 from .schemas import (
     ApiModel,
@@ -28,6 +28,7 @@ from .schemas import (
     ValidationIssue,
     instruction_adapter,
 )
+from .storage import StorageError, create_storage_backend
 
 
 def model_response(model: ApiModel, status: int = 200) -> JsonResponse:
@@ -206,18 +207,29 @@ def complete_instruction(
         return error_response("Instruction is not processing", status=409)
 
     result = result_request.result
-    captured_screenshot = None
+    instruction_error = result_request.error
     if (
         instruction.action == Instruction.Action.SCREENSHOT
         and result_request.error is None
     ):
         try:
-            captured_screenshot = ScreenshotResult.model_validate(result)
-            base64.b64decode(captured_screenshot.data, validate=True)
+            captured = ScreenshotResult.model_validate(result)
+            image = base64.b64decode(captured.data, validate=True)
         except ValidationError as error:
             return validation_error_response(error)
         except binascii.Error, ValueError:
             return error_response("Invalid screenshot data")
+        try:
+            url = _host_screenshot(image, instruction.payload)
+        except StorageError as error:
+            result = None
+            instruction_error = f"Could not host the screenshot: {error}"
+        else:
+            result = {
+                "url": url,
+                "content_type": "image/png",
+                "full_page": instruction.payload.get("full_page", False),
+            }
     elif (
         instruction.action == Instruction.Action.SCROLL and result_request.error is None
     ):
@@ -227,43 +239,20 @@ def complete_instruction(
             return validation_error_response(error)
 
     final_status = (
-        Instruction.Status.FAILED
-        if result_request.error
-        else Instruction.Status.COMPLETED
+        Instruction.Status.FAILED if instruction_error else Instruction.Status.COMPLETED
     )
     completed_at = timezone.now()
-    screenshot = None
     with transaction.atomic():
-        if captured_screenshot is not None:
-            screenshot = Screenshot.objects.create(
-                bid=bid,
-                tid=instruction.payload["tid"],
-                data=captured_screenshot.data,
-                full_page=instruction.payload.get("full_page", False),
-            )
-            result = {
-                "download_url": reverse(
-                    "download-screenshot",
-                    kwargs={"bid": bid, "screenshot_id": screenshot.id},
-                ),
-                "content_type": screenshot.content_type,
-                "full_page": screenshot.full_page,
-                "single_use": True,
-                "tid": screenshot.tid,
-            }
-
         completed = Instruction.objects.filter(
             id=instruction_id,
             bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             result=result,
-            error=result_request.error or "",
+            error=instruction_error or "",
             status=final_status,
             updated_at=completed_at,
         )
-        if not completed and screenshot is not None:
-            screenshot.delete()
 
     if not completed:
         current = Instruction.objects.filter(id=instruction_id, bid=bid).first()
@@ -272,37 +261,26 @@ def complete_instruction(
         return instruction_response(current)
 
     instruction.result = result
-    instruction.error = result_request.error or ""
+    instruction.error = instruction_error or ""
     instruction.status = final_status
     instruction.updated_at = completed_at
     return instruction_response(instruction)
 
 
-@require_http_methods(["GET"])
-def download_screenshot(
-    _request: HttpRequest,
-    bid: str,
-    screenshot_id: int,
-) -> HttpResponse:
-    screenshot = Screenshot.objects.filter(id=screenshot_id, bid=bid).first()
-    if screenshot is None:
-        return error_response("Screenshot not found", status=404)
-
-    try:
-        image = base64.b64decode(screenshot.data, validate=True)
-    except binascii.Error, ValueError:
-        screenshot.delete()
-        return error_response("Screenshot data is invalid", status=500)
-
-    screenshot.delete()
-
-    response = HttpResponse(image, content_type=screenshot.content_type)
-    response["Content-Disposition"] = (
-        f'attachment; filename="acob-screenshot-{screenshot_id}.png"'
+def _host_screenshot(image: bytes, payload: dict) -> str:
+    """Upload screenshot bytes to the configured storage service."""
+    backend = create_storage_backend(
+        settings.STORAGE_ENDPOINT,
+        settings.STORAGE_API_KEY,
     )
-    response["Cache-Control"] = "no-store"
-    response["X-Content-Type-Options"] = "nosniff"
-    return response
+    if backend is None:
+        raise StorageError(
+            "no storage service is configured; set STORAGE_ENDPOINT and "
+            "STORAGE_API_KEY"
+        )
+    tid = payload.get("tid")
+    filename = f"screenshot-{tid}.png" if isinstance(tid, int) else "screenshot.png"
+    return backend.upload_file(image, filename, "image/png")
 
 
 @csrf_exempt

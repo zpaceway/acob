@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from types import TracebackType
 from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast, overload
-from urllib.parse import SplitResult, urljoin, urlsplit
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -75,11 +75,9 @@ class ReinstallResult(_ResultModel):
 
 
 class _ScreenshotMetadata(_ResultModel):
-    download_url: str = Field(min_length=1)
+    url: str = Field(min_length=1)
     content_type: Literal["image/png"]
     full_page: bool
-    single_use: Literal[True]
-    tid: int
 
 
 class ScreenshotUrl(_ResultModel):
@@ -448,11 +446,11 @@ class ACOBClient:
         full_page: bool = False,
         timeout: float | None = None,
     ) -> bytes | ScreenshotUrl:
-        """Capture a tab, returning PNG bytes or its single-use download URL.
+        """Capture a tab, returning PNG bytes or the public download URL.
 
-        When ``as_url`` is False the captured PNG bytes are downloaded and
-        returned. When it is True the single-use download URL is returned so
-        the caller can fetch the image to a location of its choosing.
+        The URL is hosted by the configured media storage service, not by the
+        ACOB server. When ``as_url`` is False the PNG bytes are downloaded and
+        returned. When it is True the public download URL is returned instead.
         """
         result = self._expect_model(
             await self.execute(
@@ -464,29 +462,29 @@ class ACOBClient:
             _ScreenshotMetadata,
             "screenshot",
         )
-        resolved_url = urljoin(f"{self.endpoint}/", result.download_url)
         try:
-            has_different_origin = self._origin(urlsplit(resolved_url)) != self._origin(
-                urlsplit(self.endpoint)
-            )
+            parsed = urlsplit(result.url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or parsed.hostname is None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("invalid URL")
         except ValueError as error:
             raise ACOBProtocolError(
                 "Screenshot returned an invalid download URL"
             ) from error
-        if has_different_origin:
-            raise ACOBProtocolError(
-                "Screenshot download URL points to a different server"
-            )
         if as_url:
             return ScreenshotUrl(
-                url=resolved_url,
+                url=result.url,
                 content_type=result.content_type,
                 full_page=result.full_page,
-                tid=result.tid,
+                tid=tid,
             )
         return await self._request_bytes(
             "GET",
-            resolved_url,
+            result.url,
             timeout=min(self._REQUEST_TIMEOUT, self.timeout),
             accept="image/png",
         )
@@ -656,11 +654,6 @@ class ACOBClient:
         ):
             raise ValueError("endpoint must be a valid HTTP or HTTPS URL")
         return normalized
-
-    @staticmethod
-    def _origin(url: SplitResult) -> tuple[str, str | None, int | None]:
-        default_port = 443 if url.scheme == "https" else 80
-        return url.scheme.lower(), url.hostname, url.port or default_port
 
     @staticmethod
     def _positive_float(value: float, name: str) -> float:
