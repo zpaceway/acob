@@ -142,7 +142,8 @@ async def main() -> None:
         tab = await client.navigate("https://example.com")
         await client.scroll(tab.tid, 500)
         title = await client.javascript(tab.tid, "document.title")
-        png = await client.screenshot(tab.tid, full_page=True)
+        screenshot = await client.screenshot(tab.tid, full_page=True)
+        print(screenshot.url)
 
 
 asyncio.run(main())
@@ -207,11 +208,11 @@ docker compose -f mcp/compose.yaml up --build
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `javascript`, and `reinstall`. Structured results use SDK-generated output
-schemas, while `screenshot` returns an MCP PNG image content block unless
-`as_url` is true, in which case it returns the public download URL produced by
-the ACOB server's configured media storage service. See
-[`mcp/README.md`](mcp/README.md) for all environment, transport, Docker,
-security, and verification details.
+schemas. `screenshot` always returns the public download URL produced by the
+ACOB server's configured media storage service; neither the client nor the MCP
+server downloads the image, so the agent fetches the capture itself when it
+needs the pixels. See [`mcp/README.md`](mcp/README.md) for all environment,
+transport, Docker, security, and verification details.
 
 ## Website
 
@@ -292,7 +293,9 @@ control first, usually with `click`.
 The server never stores the image: the extension submits the capture as base64,
 the server uploads the bytes to the configured storage provider (`STORAGE_PROVIDER`,
 default `chipf`, configured via `CHIPF_ENDPOINT` and `CHIPF_API_KEY`) and stores
-only the resulting URL in the instruction result.
+only the resulting URL in the instruction result. Clients and the MCP server
+relay that URL without downloading it; fetching the image from the media
+storage service is left to the user or agent.
 The storage service controls the lifetime of the URL. Without a configured
 storage service, or when the upload fails, the instruction completes as failed
 with a clear error. Encoded captures are limited to 30 MiB; larger captures

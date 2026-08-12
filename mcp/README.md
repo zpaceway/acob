@@ -44,10 +44,10 @@ Nothing is configurable per connection: the browser ID is baked into the URL
 path, and the ACOB API origin always comes from the `ACOB_ENDPOINT`
 environment variable.
 
-Screenshot URLs returned with `as_url=true` are not served by ACOB: the ACOB
-server uploads each capture to the configured media storage service and reports
-the public download URL in the instruction result. This adapter only relays
-that URL; it never receives or stores the image bytes.
+Screenshot URLs are not served by ACOB: the ACOB server uploads each capture
+to the configured media storage service and reports the public download URL in
+the instruction result. This adapter only relays that URL; it never receives
+or stores the image bytes, and it never downloads the image itself.
 
 ## Configuration
 
@@ -65,8 +65,9 @@ sets `ACOB_MCP_HOST` to `0.0.0.0` and provides a development default for
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`. The
-`screenshot` tool always requires `as_url`: `false` streams the PNG image,
-`true` returns the public download URL for later analysis.
+`screenshot` tool always returns the public download URL for the capture; it
+never streams the image, so the agent downloads the capture itself when it
+needs the pixels.
 
 ## Docker
 

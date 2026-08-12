@@ -84,7 +84,7 @@ Python client or MCP host
 - Connection, HTTP, protocol, instruction, and timeout failures have dedicated
   exception types.
 - Independent operations and waits can run concurrently in one event loop.
-- Screenshot downloads are constrained to the configured server origin.
+- Screenshots return public media URLs without transferring image bytes.
 - Extension reinstall is delivered through the instruction queue.
 
 ### MCP Adapter
@@ -93,7 +93,7 @@ Python client or MCP host
 - Stateless Streamable HTTP uses the connection URL for browser and API routing.
 - Tool schemas are derived from typed functions and reject unknown arguments.
 - The tool set mirrors the high-level Python client action set.
-- Screenshots are returned as MCP PNG image content.
+- Screenshots are returned to MCP as public download URLs.
 - Server instructions emphasize tab discovery, untrusted page content,
   side-effect awareness, and preservation of unrelated browser state.
 - HTTP transport applies Host and Origin allowlists.

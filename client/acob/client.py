@@ -80,7 +80,7 @@ class _ScreenshotMetadata(_ResultModel):
     full_page: bool
 
 
-class ScreenshotUrl(_ResultModel):
+class Screenshot(_ResultModel):
     url: str = Field(min_length=1)
     content_type: Literal["image/png"]
     full_page: bool
@@ -418,39 +418,18 @@ class ACOBClient:
             return self._expect_model(result, KeyboardTextResult, "keyboard")
         return self._expect_model(result, KeyboardKeyResult, "keyboard")
 
-    @overload
     async def screenshot(
         self,
         tid: int,
         *,
-        as_url: Literal[False],
         full_page: bool = False,
         timeout: float | None = None,
-    ) -> bytes: ...
-
-    @overload
-    async def screenshot(
-        self,
-        tid: int,
-        *,
-        as_url: Literal[True],
-        full_page: bool = False,
-        timeout: float | None = None,
-    ) -> ScreenshotUrl: ...
-
-    async def screenshot(
-        self,
-        tid: int,
-        *,
-        as_url: bool,
-        full_page: bool = False,
-        timeout: float | None = None,
-    ) -> bytes | ScreenshotUrl:
-        """Capture a tab, returning PNG bytes or the public download URL.
+    ) -> Screenshot:
+        """Capture a tab and return its public download URL.
 
         The URL is hosted by the configured media storage service, not by the
-        ACOB server. When ``as_url`` is False the PNG bytes are downloaded and
-        returned. When it is True the public download URL is returned instead.
+        ACOB server. The client never transfers the image bytes; the caller
+        decides whether and how to download the capture.
         """
         result = self._expect_model(
             await self.execute(
@@ -475,18 +454,11 @@ class ACOBClient:
             raise ACOBProtocolError(
                 "Screenshot returned an invalid download URL"
             ) from error
-        if as_url:
-            return ScreenshotUrl(
-                url=result.url,
-                content_type=result.content_type,
-                full_page=result.full_page,
-                tid=tid,
-            )
-        return await self._request_bytes(
-            "GET",
-            result.url,
-            timeout=min(self._REQUEST_TIMEOUT, self.timeout),
-            accept="image/png",
+        return Screenshot(
+            url=result.url,
+            content_type=result.content_type,
+            full_page=result.full_page,
+            tid=tid,
         )
 
     async def javascript(
@@ -542,9 +514,8 @@ class ACOBClient:
         body: JsonObject | None = None,
         *,
         timeout: float,
-        accept: str = "application/json",
     ) -> bytes:
-        headers = {"Accept": accept}
+        headers = {"Accept": "application/json"}
         data = None
         if body is not None:
             headers["Content-Type"] = "application/json"

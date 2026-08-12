@@ -1,4 +1,3 @@
-import base64
 import unittest
 from types import SimpleNamespace
 from unittest.mock import create_autospec, patch
@@ -10,12 +9,12 @@ from acob import (
     KeyboardKeyResult,
     ListedTab,
     ReinstallResult,
-    ScreenshotUrl,
+    Screenshot,
     ScrollResult,
     Tab,
 )
 from mcp import Client, MCPError
-from mcp.types import ImageContent, TextContent
+from mcp.types import TextContent
 
 from src.server import (
     SERVER_DESCRIPTION,
@@ -243,11 +242,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["screenshot"].input_schema["properties"]),
-            {"tid", "as_url", "full_page", "timeout"},
+            {"tid", "full_page", "timeout"},
         )
         self.assertEqual(
             set(tools["screenshot"].input_schema["required"]),
-            {"tid", "as_url"},
+            {"tid"},
         )
         self.assertNotIn("tabs", tools)
         self.assertNotIn("reload_extension", tools)
@@ -373,32 +372,9 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             timeout=None,
         )
 
-    async def test_returns_screenshot_as_png_image_content(self):
-        png = b"\x89PNG\r\n\x1a\nACOB"
-        self.acob.screenshot.return_value = png
-
-        async with Client(self.server, raise_exceptions=True) as client:
-            result = await client.call_tool(
-                "screenshot",
-                {"tid": 12, "full_page": True, "as_url": False},
-            )
-
-        self.assertFalse(result.is_error)
-        self.assertIsNone(result.structured_content)
-        image = result.content[0]
-        assert isinstance(image, ImageContent)
-        self.assertEqual(image.mime_type, "image/png")
-        self.assertEqual(base64.b64decode(image.data), png)
-        self.acob.screenshot.assert_awaited_once_with(
-            12,
-            as_url=False,
-            full_page=True,
-            timeout=None,
-        )
-
     async def test_returns_screenshot_download_url_from_the_client(self):
         media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-        self.acob.screenshot.return_value = ScreenshotUrl(
+        self.acob.screenshot.return_value = Screenshot(
             url=media_url,
             content_type="image/png",
             full_page=True,
@@ -408,7 +384,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         async with Client(self.server, raise_exceptions=True) as client:
             result = await client.call_tool(
                 "screenshot",
-                {"tid": 12, "full_page": True, "as_url": True},
+                {"tid": 12, "full_page": True},
             )
 
         self.assertFalse(result.is_error)
@@ -423,7 +399,6 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.acob.screenshot.assert_awaited_once_with(
             12,
-            as_url=True,
             full_page=True,
             timeout=None,
         )

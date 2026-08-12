@@ -20,7 +20,6 @@ the browser ID shown in the extension popup and close it with `async with`:
 
 ```python
 import asyncio
-from pathlib import Path
 
 from acob import ACOBClient
 
@@ -37,8 +36,8 @@ async def main() -> None:
         await client.keyboard(tid, key="Enter")
         title = await client.javascript(tid, "document.title")
 
-        png = await client.screenshot(tid, full_page=True, as_url=False)
-        Path("screenshot.png").write_bytes(png)
+        screenshot = await client.screenshot(tid, full_page=True)
+        print(screenshot.url)
 
 
 asyncio.run(main())
@@ -133,15 +132,13 @@ new-tab action raises `ACOBInstructionError` if the browser has reached its
 configured tab limit. Navigating an existing `tid` is unaffected by the limit.
 Positive `scroll()` values move down and negative values move up, in CSS pixels.
 
-`screenshot()` always requires the `as_url` flag to choose its result mode.
-With `as_url=False` it returns PNG bytes downloaded from the media storage
-service that hosts the capture. With `as_url=True` it returns a `ScreenshotUrl`
-instead, without transferring the image, so the caller can keep the public
-download URL for later analysis:
+`screenshot()` returns a `Screenshot` model carrying the public download URL
+hosted by the media storage service. The client never transfers the image
+bytes; the caller decides whether and how to fetch the capture:
 
 ```python
-url = await client.screenshot(tid, as_url=True)
-print(url.url, url.content_type, url.tid)
+screenshot = await client.screenshot(tid, full_page=True)
+print(screenshot.url, screenshot.content_type, screenshot.tid)
 ```
 
 `reinstall()` requests an unpacked-extension reload that the server delivers
