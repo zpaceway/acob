@@ -118,13 +118,14 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# Full-page screenshots are posted as base64 JSON by the extension.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 32 * 1024 * 1024
+# Screenshots and recordings are posted as base64 JSON by the extension.
+# The 96 MiB limit covers a full-size 60 MiB encoded recording.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 96 * 1024 * 1024
 
-# Media storage service: screenshots are uploaded there and never stored
-# locally. STORAGE_PROVIDER selects the backend (default "chipf"); each
-# provider reads its own environment variables. Unset credentials mean
-# screenshot results fail until a provider is configured.
+# Media storage service: screenshots and recordings are uploaded there and
+# never stored locally. STORAGE_PROVIDER selects the backend (default
+# "chipf"); each provider reads its own environment variables. Unset
+# credentials mean capture results fail until a provider is configured.
 STORAGE_PROVIDER = os.getenv("STORAGE_PROVIDER", "chipf").strip().lower()
 CHIPF_ENDPOINT = os.getenv("CHIPF_ENDPOINT", "").rstrip("/")
 CHIPF_API_KEY = os.getenv("CHIPF_API_KEY", "")

@@ -15,11 +15,14 @@ from acob import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
+    BrowserSettings,
     ClickResult,
     ClosedTab,
     KeyboardKeyResult,
     KeyboardTextResult,
     ListedTab,
+    RecordingStart,
+    RecordingStop,
     ReinstallResult,
     Screenshot,
     ScrollResult,
@@ -39,6 +42,9 @@ if TYPE_CHECKING:
         _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
         _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
         _screenshot: Screenshot = await client.screenshot(1)
+        _record_start: RecordingStart = await client.record_start(1)
+        _record_stop: RecordingStop = await client.record_stop(1)
+        _settings: BrowserSettings = await client.settings()
         _javascript: int = await client.javascript(1, "1")
         _reinstall: ReinstallResult = await client.reinstall()
 
@@ -393,6 +399,146 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertRaisesRegex(ACOBProtocolError, "invalid download URL"),
         ):
             await client.screenshot(12)
+
+    async def test_record_start_returns_the_tracking_id(self):
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 9, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 9,
+                        "status": "completed",
+                        "result": {"recording_id": 9, "started": True},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.record_start(12)
+
+        self.assertIsInstance(result, RecordingStart)
+        self.assertEqual(result.recording_id, 9)
+        self.assertTrue(result.started)
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "record_start", "tid": 12},
+        )
+
+    async def test_record_stop_returns_the_media_url(self):
+        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 10, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 10,
+                        "status": "completed",
+                        "result": {
+                            "url": media_url,
+                            "content_type": "video/webm",
+                            "duration": 300.0,
+                            "stopped_reason": "max_duration",
+                            "message": (
+                                "Recording stopped because the maximum "
+                                "duration was reached"
+                            ),
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.record_stop(9)
+
+        self.assertIsInstance(result, RecordingStop)
+        self.assertEqual(result.url, media_url)
+        self.assertEqual(result.content_type, "video/webm")
+        self.assertEqual(result.duration, 300.0)
+        self.assertEqual(result.stopped_reason, "max_duration")
+        self.assertIn("maximum duration", result.message)
+        self.assertEqual(result.recording_id, 9)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "record_stop", "recording_id": 9},
+        )
+
+    async def test_record_stop_rejects_invalid_recording_id(self):
+        client = self.make_client()
+        invalid_ids: list[object] = [0, -1, True, "9"]
+
+        for invalid in invalid_ids:
+            with self.subTest(recording_id=invalid), self.assertRaises(ValueError):
+                await client.record_stop(invalid)  # type: ignore[arg-type]
+
+    async def test_record_stop_rejects_an_invalid_media_url(self):
+        client = self.make_client()
+        execute = AsyncMock(
+            return_value={
+                "url": "file:///etc/passwd",
+                "content_type": "video/webm",
+                "duration": 5.0,
+                "stopped_reason": "user",
+                "message": "Recording stopped by user request",
+            }
+        )
+
+        with (
+            patch.object(client, "execute", execute),
+            self.assertRaisesRegex(ACOBProtocolError, "invalid download URL"),
+        ):
+            await client.record_stop(9)
+
+    async def test_settings_returns_the_reported_browser_settings(self):
+        client = self.make_client()
+        reported = {
+            "settings": {
+                "pollIntervalMs": 1000,
+                "maxRecordingDurationMs": 300000,
+                "maxRecordingSizeMiB": 60,
+            },
+            "updated_at": "2026-08-12T00:00:00Z",
+        }
+        requests = self.add_responses(client, [(200, reported)])
+
+        result = await client.settings()
+
+        self.assertIsInstance(result, BrowserSettings)
+        self.assertEqual(result.settings["maxRecordingDurationMs"], 300000)
+        self.assertEqual(result.updated_at, "2026-08-12T00:00:00Z")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].method, "GET")
+        self.assertIn("/settings/", str(requests[0].url))
+
+    async def test_settings_surfaces_an_unreported_browser(self):
+        client = self.make_client()
+        self.add_responses(
+            client,
+            [
+                (
+                    404,
+                    {
+                        "error": (
+                            "Browser settings not found; the extension has "
+                            "not reported yet"
+                        )
+                    },
+                )
+            ],
+        )
+
+        with self.assertRaises(ACOBHTTPError) as raised:
+            await client.settings()
+
+        self.assertEqual(raised.exception.status_code, 404)
 
     async def test_action_methods_reject_malformed_browser_results(self):
         client = self.make_client()

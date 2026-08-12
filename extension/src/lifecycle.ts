@@ -27,6 +27,25 @@ export function instructionApiUrl(configuration: Configuration): string {
   return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
 }
 
+export async function reportSettings(
+  configuration: Configuration,
+): Promise<void> {
+  const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
+  const { bid: _bid, ...settings } = configuration;
+  const response = await fetch(
+    `${baseUrl}/api/browsers/${configuration.bid}/heartbeat/`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings }),
+      signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Could not report browser settings: HTTP ${response.status}`);
+  }
+}
+
 function reinstallUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
   return `${baseUrl}/api/browsers/${configuration.bid}/reinstall`;
@@ -128,8 +147,9 @@ async function configureOffscreenDocument(recreate: boolean): Promise<void> {
   if (recreate || contexts.length === 0) {
     await chrome.offscreen.createDocument({
       url: "offscreen.html",
-      reasons: ["WORKERS"],
-      justification: "Poll the ACOB server for browser instructions",
+      reasons: ["WORKERS", "USER_MEDIA"],
+      justification:
+        "Poll the ACOB server for browser instructions and encode tab recordings",
     });
   }
 }

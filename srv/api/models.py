@@ -17,6 +17,8 @@ class Instruction(models.Model):
         KEYBOARD = "keyboard"
         LIST = "list"
         NAVIGATE = "navigate"
+        RECORD_START = "record_start"
+        RECORD_STOP = "record_stop"
         RELOAD = "reload"
         SCREENSHOT = "screenshot"
         SCROLL = "scroll"
@@ -52,3 +54,15 @@ class Reinstall(models.Model):
     )
     token = models.UUIDField(default=uuid4, editable=False, unique=True)
     requested_at = models.DateTimeField(auto_now_add=True)
+
+
+class BrowserHeartbeat(models.Model):
+    """Most recently reported extension settings for one browser."""
+
+    bid = models.CharField(
+        max_length=32,
+        unique=True,
+        validators=[validate_bid],
+    )
+    settings = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)

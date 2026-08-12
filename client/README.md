@@ -39,6 +39,11 @@ async def main() -> None:
         screenshot = await client.screenshot(tid, full_page=True)
         print(screenshot.url)
 
+        recording = await client.record_start(tid)
+        await asyncio.sleep(10)
+        video = await client.record_stop(recording.recording_id)
+        print(video.url, video.stopped_reason)
+
 
 asyncio.run(main())
 ```
@@ -140,6 +145,36 @@ bytes; the caller decides whether and how to fetch the capture:
 screenshot = await client.screenshot(tid, full_page=True)
 print(screenshot.url, screenshot.content_type, screenshot.tid)
 ```
+
+`record_start()` starts a video recording of a tab and returns a
+`RecordingStart` model with its tracking ID; the recording runs in the
+background until `record_stop()` or the extension's maximum recording
+duration. `record_stop()` returns a `RecordingStop` model with the public
+download URL, duration, and `stopped_reason` (`"user"` or `"max_duration"` —
+a late stop delivers the maximum-duration video with an explanatory message
+instead of failing):
+
+```python
+recording = await client.record_start(tid)
+await asyncio.sleep(10)
+video = await client.record_stop(recording.recording_id)
+print(video.url, video.duration, video.stopped_reason)
+```
+
+Recordings need a timeout that covers the intended recording time, and the
+tab's window should be focused for reliable captures.
+
+`screenshot()` and `record_stop()` return the same public media URL pattern.
+`settings()` returns the browser's reported configuration (limits such as
+`maxRecordingDurationMs`, polling, timeouts) so callers can plan bounded work:
+
+```python
+browser = await client.settings()
+print(browser.settings["maxRecordingDurationMs"])
+```
+
+The extension reports settings periodically and on change; `settings()`
+raises `ACOBHTTPError` with status 404 until the first report arrives.
 
 `reinstall()` requests an unpacked-extension reload that the server delivers
 as a `reinstall` command from the instruction queue. `reload(tid)` sends a

@@ -74,10 +74,43 @@ class ReinstallResult(_ResultModel):
     requested_at: str = Field(min_length=1)
 
 
+class BrowserSettings(_ResultModel):
+    settings: dict[str, JsonValue]
+    updated_at: str = Field(min_length=1)
+
+
+class RecordingStart(_ResultModel):
+    recording_id: int = Field(gt=0)
+    started: Literal[True]
+    tid: int
+
+
+class _RecordingStartMetadata(_ResultModel):
+    recording_id: int = Field(gt=0)
+    started: Literal[True]
+
+
+class RecordingStop(_ResultModel):
+    url: str = Field(min_length=1)
+    content_type: Literal["video/webm"]
+    duration: float
+    stopped_reason: Literal["user", "max_duration"]
+    message: str
+    recording_id: int
+
+
 class _ScreenshotMetadata(_ResultModel):
     url: str = Field(min_length=1)
     content_type: Literal["image/png"]
     full_page: bool
+
+
+class _RecordingStopMetadata(_ResultModel):
+    url: str = Field(min_length=1)
+    content_type: Literal["video/webm"]
+    duration: float
+    stopped_reason: Literal["user", "max_duration"]
+    message: str = Field(min_length=1)
 
 
 class Screenshot(_ResultModel):
@@ -164,6 +197,7 @@ class ACOBClient:
         )
         self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
         self._reinstall_url = f"{self.endpoint}/api/browsers/{self.bid}/reinstall/"
+        self._settings_url = f"{self.endpoint}/api/browsers/{self.bid}/settings/"
         self._http_client: httpx.AsyncClient | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -441,24 +475,91 @@ class ACOBClient:
             _ScreenshotMetadata,
             "screenshot",
         )
-        try:
-            parsed = urlsplit(result.url)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or parsed.hostname is None
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValueError("invalid URL")
-        except ValueError as error:
-            raise ACOBProtocolError(
-                "Screenshot returned an invalid download URL"
-            ) from error
+        self._validate_media_url(result.url, "Screenshot")
         return Screenshot(
             url=result.url,
             content_type=result.content_type,
             full_page=result.full_page,
             tid=tid,
+        )
+
+    async def record_start(
+        self,
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> RecordingStart:
+        """Start recording a tab and return its tracking ID.
+
+        The recording continues in the background until ``record_stop`` is
+        called or the extension's maximum recording duration is reached.
+        """
+        result = self._expect_model(
+            await self.execute("record_start", tid=tid, timeout=timeout),
+            _RecordingStartMetadata,
+            "record_start",
+        )
+        return RecordingStart(
+            recording_id=result.recording_id,
+            started=result.started,
+            tid=tid,
+        )
+
+    async def record_stop(
+        self,
+        recording_id: int,
+        *,
+        timeout: float | None = None,
+    ) -> RecordingStop:
+        """Stop a recording and return its public download URL.
+
+        When the extension's maximum duration was reached before this call,
+        the returned capture covers the maximum duration and ``stopped_reason``
+        is ``"max_duration"`` instead of ``"user"``.
+        """
+        if (
+            isinstance(recording_id, bool)
+            or not isinstance(recording_id, int)
+            or recording_id <= 0
+        ):
+            raise ValueError("recording_id must be a positive integer")
+        result = self._expect_model(
+            await self.execute(
+                "record_stop",
+                recording_id=recording_id,
+                timeout=timeout,
+            ),
+            _RecordingStopMetadata,
+            "record_stop",
+        )
+        self._validate_media_url(result.url, "Recording")
+        return RecordingStop(
+            url=result.url,
+            content_type=result.content_type,
+            duration=result.duration,
+            stopped_reason=result.stopped_reason,
+            message=result.message,
+            recording_id=recording_id,
+        )
+
+    async def settings(
+        self,
+        *,
+        timeout: float | None = None,
+    ) -> BrowserSettings:
+        """Return the settings most recently reported by the extension.
+
+        The extension reports its settings periodically and whenever they
+        change, so a fresh installation may return 404 until the first report.
+        """
+        return self._expect_model(
+            await self._request_json(
+                "GET",
+                self._settings_url,
+                timeout=min(timeout or self.timeout, self.timeout),
+            ),
+            BrowserSettings,
+            "settings",
         )
 
     async def javascript(
@@ -565,6 +666,22 @@ class ACOBClient:
             return model.model_validate(result)
         except ValidationError as error:
             raise ACOBProtocolError(f"{action} returned an invalid result") from error
+
+    @staticmethod
+    def _validate_media_url(url: str, action: str) -> None:
+        try:
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or parsed.hostname is None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("invalid URL")
+        except ValueError as error:
+            raise ACOBProtocolError(
+                f"{action} returned an invalid download URL"
+            ) from error
 
     @staticmethod
     def _try_parse_object(body: bytes) -> JsonObject | None:

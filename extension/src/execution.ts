@@ -2,6 +2,8 @@ import {
   executeClick,
   executeJavaScript,
   executeKeyboard,
+  executeRecordStart,
+  executeRecordStop,
   executeScreenshot,
   executeScroll,
 } from "./actions.js";
@@ -129,6 +131,15 @@ async function runInstructionAction(
       payload.full_page ?? false,
       configuration,
     );
+  }
+
+  if (action === "record_start") {
+    await chrome.tabs.get(payload.tid);
+    return executeRecordStart(payload.tid, instruction.id, configuration);
+  }
+
+  if (action === "record_stop") {
+    return executeRecordStop(payload.recording_id, configuration);
   }
 
   throw new Error(`Unknown action: ${action}`);

@@ -632,6 +632,282 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid screenshot data")
 
+    def test_accepts_record_start_and_record_stop_instructions(self):
+        started = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start", "tid": 12},
+        )
+        stopped = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(started.json()["payload"], {"tid": 12})
+        self.assertEqual(stopped.status_code, 201)
+        self.assertEqual(stopped.json()["payload"], {"recording_id": 42})
+
+    def test_record_instructions_require_valid_arguments(self):
+        missing_tid = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start"},
+        )
+        missing_recording_id = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop"},
+        )
+        invalid_recording_id = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 0},
+        )
+
+        self.assertEqual(missing_tid.status_code, 400)
+        self.assertEqual(
+            missing_tid.json()["details"][0]["field"],
+            "record_start.tid",
+        )
+        self.assertEqual(missing_recording_id.status_code, 400)
+        self.assertEqual(
+            missing_recording_id.json()["details"][0]["field"],
+            "record_stop.recording_id",
+        )
+        self.assertEqual(invalid_recording_id.status_code, 400)
+
+    def test_record_start_result_is_validated(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"recording_id": 42, "started": True}},
+        )
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(
+            completed.json()["result"],
+            {"recording_id": 42, "started": True},
+        )
+
+        invalid = self.post_json(
+            self.instruction_path(),
+            {"action": "record_start", "tid": 12},
+        )
+        invalid_id = invalid.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        rejected = self.post_result(
+            invalid_id,
+            {"result": {"recording_id": 0, "started": True}},
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+    def test_record_stop_result_is_uploaded_to_the_storage_service(self):
+        recording = b"0\x9awEBMACOB"
+        encoded = base64.b64encode(recording).decode()
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            patch("api.views.create_storage_backend") as create_backend,
+            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
+            patch.object(
+                settings,
+                "STORAGE_CONFIG",
+                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+            ),
+        ):
+            backend = create_backend.return_value
+            backend.upload_file.return_value = (
+                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+            )
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": encoded,
+                        "duration": 5.0,
+                        "stopped_reason": "max_duration",
+                        "message": (
+                            "Recording stopped because the maximum duration "
+                            "was reached"
+                        ),
+                    }
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        result = completed.json()["result"]
+        self.assertEqual(
+            result,
+            {
+                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "content_type": "video/webm",
+                "duration": 5.0,
+                "stopped_reason": "max_duration",
+                "message": (
+                    "Recording stopped because the maximum duration was reached"
+                ),
+            },
+        )
+        backend.upload_file.assert_called_once_with(
+            recording,
+            "recording-42.webm",
+            "video/webm",
+        )
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["result"], result)
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+
+    def test_record_stop_fails_when_no_storage_service_is_configured(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with patch("api.views.create_storage_backend", return_value=None):
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": base64.b64encode(b"video").decode(),
+                        "duration": 1.0,
+                        "stopped_reason": "user",
+                        "message": "Recording stopped by user request",
+                    }
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "failed")
+        self.assertIn("no storage service is configured", response["error"])
+
+    def test_record_stop_fails_when_the_storage_service_is_unavailable(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with patch("api.views.create_storage_backend") as create_backend:
+            backend = create_backend.return_value
+            backend.upload_file.side_effect = StorageConnectionError("storage is down")
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": base64.b64encode(b"video").decode(),
+                        "duration": 1.0,
+                        "stopped_reason": "user",
+                        "message": "Recording stopped by user request",
+                    }
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "failed")
+        self.assertIn("Could not host the recording", response["error"])
+        self.assertIn("storage is down", response["error"])
+
+    def test_rejects_invalid_record_stop_result(self):
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        bad_base64 = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "data": "not base64!",
+                    "duration": 1.0,
+                    "stopped_reason": "user",
+                    "message": "Recording stopped by user request",
+                }
+            },
+        )
+        self.assertEqual(bad_base64.status_code, 400)
+        self.assertEqual(bad_base64.json()["error"], "Invalid recording data")
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "record_stop", "recording_id": 42},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        bad_reason = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "data": base64.b64encode(b"video").decode(),
+                    "duration": 1.0,
+                    "stopped_reason": "unscheduled",
+                    "message": "Recording stopped by user request",
+                }
+            },
+        )
+        self.assertEqual(bad_reason.status_code, 400)
+
+    def test_heartbeat_stores_and_returns_browser_settings(self):
+        settings_url = f"/api/browsers/{self.BID}/settings/"
+        not_reported = self.client.get(settings_url)
+        self.assertEqual(not_reported.status_code, 404)
+
+        heartbeat = self.post_json(
+            f"/api/browsers/{self.BID}/heartbeat/",
+            {
+                "settings": {
+                    "pollIntervalMs": 1000,
+                    "maxRecordingDurationMs": 300000,
+                    "maxRecordingSizeMiB": 60,
+                }
+            },
+        )
+        self.assertEqual(heartbeat.status_code, 204)
+
+        reported = self.client.get(settings_url)
+        self.assertEqual(reported.status_code, 200)
+        self.assertEqual(
+            reported.json()["settings"],
+            {
+                "pollIntervalMs": 1000,
+                "maxRecordingDurationMs": 300000,
+                "maxRecordingSizeMiB": 60,
+            },
+        )
+        self.assertTrue(reported.json()["updated_at"])
+
+        updated = self.post_json(
+            f"/api/browsers/{self.BID}/heartbeat/",
+            {"settings": {"pollIntervalMs": 2500}},
+        )
+        self.assertEqual(updated.status_code, 204)
+        self.assertEqual(
+            self.client.get(settings_url).json()["settings"],
+            {"pollIntervalMs": 2500},
+        )
+
+    def test_heartbeat_requires_a_settings_object(self):
+        response = self.post_json(
+            f"/api/browsers/{self.BID}/heartbeat/",
+            {"settings": []},
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_reinstall_is_idempotent_until_acknowledged(self):
         first = self.client.post(self.reinstall_path())
         second = self.client.post(self.reinstall_path())

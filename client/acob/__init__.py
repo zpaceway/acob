@@ -7,19 +7,22 @@ from .client import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
+    BrowserSettings,
     ClickResult,
     ClosedTab,
     KeyboardKeyResult,
     KeyboardModifier,
     KeyboardTextResult,
     ListedTab,
+    RecordingStart,
+    RecordingStop,
     ReinstallResult,
     Screenshot,
     ScrollResult,
     Tab,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -30,12 +33,15 @@ __all__ = [
     "ACOBInstructionError",
     "ACOBProtocolError",
     "ACOBTimeoutError",
+    "BrowserSettings",
     "ClickResult",
     "ClosedTab",
     "KeyboardKeyResult",
     "KeyboardModifier",
     "KeyboardTextResult",
     "ListedTab",
+    "RecordingStart",
+    "RecordingStop",
     "ReinstallResult",
     "Screenshot",
     "ScrollResult",

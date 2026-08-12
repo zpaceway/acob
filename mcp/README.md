@@ -64,10 +64,15 @@ sets `ACOB_MCP_HOST` to `0.0.0.0` and provides a development default for
 `ACOB_ENDPOINT`; override any value with Make variables when needed.
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`. The
-`screenshot` tool always returns the public download URL for the capture; it
-never streams the image, so the agent downloads the capture itself when it
-needs the pixels.
+`click`, `keyboard`, `screenshot`, `record_start`, `record_stop`, `settings`,
+`javascript`, and `reinstall`. The `screenshot` tool always returns the
+public download URL for the capture; it never streams the image, so the agent
+downloads the capture itself when it needs the pixels. `record_start` starts
+a bounded video recording and returns its tracking ID; `record_stop` delivers
+the recording's public download URL with a `stopped_reason` and message when
+the extension's maximum duration was reached first. `settings` returns the
+browser's reported configuration (including `maxRecordingDurationMs` and
+`maxRecordingSizeMiB`) so agents can plan recordings and other bounded work.
 
 ## Docker
 

@@ -15,6 +15,8 @@ export interface SettingValues {
   httpRequestTimeoutMs: number;
   javascriptTimeoutMs: number;
   maxScreenshotSizeMiB: number;
+  maxRecordingDurationMs: number;
+  maxRecordingSizeMiB: number;
   resultRetryAttempts: number;
   resultRetryDelayMs: number;
   popupStatusDurationMs: number;
@@ -104,6 +106,8 @@ export type InstructionAction =
   | "keyboard"
   | "list"
   | "navigate"
+  | "record_start"
+  | "record_stop"
   | "reload"
   | "screenshot"
   | "scroll";
@@ -207,6 +211,14 @@ export interface ScreenshotPayload {
   full_page?: boolean;
 }
 
+export interface RecordStartPayload {
+  tid: number;
+}
+
+export interface RecordStopPayload {
+  recording_id: number;
+}
+
 export interface InstructionPayloadMap {
   click: ClickPayload;
   close: CloseTabPayload;
@@ -215,6 +227,8 @@ export interface InstructionPayloadMap {
   keyboard: KeyboardPayload;
   list: ListTabsPayload;
   navigate: NavigateTabPayload;
+  record_start: RecordStartPayload;
+  record_stop: RecordStopPayload;
   reload: ReloadTabPayload;
   screenshot: ScreenshotPayload;
   scroll: ScrollPayload;
@@ -309,6 +323,16 @@ export interface ScreenshotInstructionRequest {
   full_page?: boolean;
 }
 
+export interface RecordStartInstructionRequest {
+  action: "record_start";
+  tid: number;
+}
+
+export interface RecordStopInstructionRequest {
+  action: "record_stop";
+  recording_id: number;
+}
+
 export type InstructionRequest =
   | ClickInstructionRequest
   | CloseTabInstructionRequest
@@ -317,6 +341,8 @@ export type InstructionRequest =
   | KeyboardInstructionRequest
   | ListTabsInstructionRequest
   | NavigateTabInstructionRequest
+  | RecordStartInstructionRequest
+  | RecordStopInstructionRequest
   | ReloadTabInstructionRequest
   | ScreenshotInstructionRequest
   | ScrollInstructionRequest;
@@ -364,10 +390,32 @@ export interface ScreenshotUploadResult {
   data: string;
 }
 
+export interface RecordStartResult {
+  recording_id: number;
+  started: true;
+}
+
+export type RecordingStopReason = "user" | "max_duration";
+
+export interface RecordStopUploadResult {
+  data: string;
+  duration: number;
+  stopped_reason: RecordingStopReason;
+  message: string;
+}
+
 export interface ScreenshotResult {
   url: string;
   content_type: "image/png";
   full_page: boolean;
+}
+
+export interface RecordStopResult {
+  url: string;
+  content_type: "video/webm";
+  duration: number;
+  stopped_reason: RecordingStopReason;
+  message: string;
 }
 
 export interface UnserializableJavaScriptResult {
@@ -388,7 +436,11 @@ export type InstructionResultFor<Request extends InstructionRequest> =
           ? KeyboardKeyResult
           : Request extends { action: "screenshot" }
             ? ScreenshotResult
-            : Request extends { action: "list" }
+            : Request extends { action: "record_start" }
+              ? RecordStartResult
+              : Request extends { action: "record_stop" }
+                ? RecordStopResult
+                : Request extends { action: "list" }
               ? ListedTab[]
               : Request extends { action: "close" }
                 ? ClosedTab
@@ -410,6 +462,8 @@ export type ExtensionInstructionResult =
   | KeyboardTextResult
   | KeyboardKeyResult
   | ScreenshotUploadResult
+  | RecordStartResult
+  | RecordStopUploadResult
   | UnserializableJavaScriptResult;
 
 export type InstructionResultRequest =
@@ -424,6 +478,26 @@ export interface PollMessage {
   type: "poll";
 }
 
+export interface StartRecordingMessage {
+  type: "startRecording";
+  recordingId: number;
+  tid: number;
+  maxRecordingDurationMs: number;
+  maxRecordingSizeMiB: number;
+}
+
+export interface RecordingFrameMessage {
+  type: "recordingFrame";
+  recordingId: number;
+  data: string;
+}
+
+export interface FinalizeRecordingMessage {
+  type: "finalizeRecording";
+  recordingId: number;
+  maxRecordingSizeMiB: number;
+}
+
 export interface SettingsUpdatedMessage {
   type: "settingsUpdated";
   pollIntervalMs: number;
@@ -432,6 +506,9 @@ export interface SettingsUpdatedMessage {
 export type RuntimeMessage =
   | GetConfigurationMessage
   | PollMessage
+  | StartRecordingMessage
+  | RecordingFrameMessage
+  | FinalizeRecordingMessage
   | SettingsUpdatedMessage;
 
 export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
@@ -442,9 +519,27 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   if (message.type === "getConfiguration" || message.type === "poll") {
     return true;
   }
+  if (message.type === "settingsUpdated") {
+    return typeof message.pollIntervalMs === "number";
+  }
+  if (message.type === "startRecording") {
+    return (
+      typeof message.recordingId === "number" &&
+      typeof message.tid === "number" &&
+      typeof message.maxRecordingDurationMs === "number" &&
+      typeof message.maxRecordingSizeMiB === "number"
+    );
+  }
+  if (message.type === "recordingFrame") {
+    return (
+      typeof message.recordingId === "number" &&
+      typeof message.data === "string"
+    );
+  }
   return (
-    message.type === "settingsUpdated" &&
-    typeof message.pollIntervalMs === "number"
+    message.type === "finalizeRecording" &&
+    typeof message.recordingId === "number" &&
+    typeof message.maxRecordingSizeMiB === "number"
   );
 }
 
@@ -454,3 +549,11 @@ export interface ErrorResponse {
 
 export type GetConfigurationResponse = Configuration | ErrorResponse;
 export type PollResponse = { ok: true } | ErrorResponse;
+export type StartRecordingResponse =
+  | { ok: true; started: true }
+  | ErrorResponse;
+export interface FinalizeRecordingSuccess {
+  ok: true;
+  data: string;
+}
+export type FinalizeRecordingResponse = FinalizeRecordingSuccess | ErrorResponse;

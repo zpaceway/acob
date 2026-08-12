@@ -1,5 +1,6 @@
 import base64
 import binascii
+import logging
 
 from django.conf import settings
 from django.db import transaction
@@ -10,14 +11,20 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
-from .models import Instruction, Reinstall
+logger = logging.getLogger(__name__)
+
+from .models import BrowserHeartbeat, Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR, request_reinstall
 from .schemas import (
     ApiModel,
+    BrowserSettingsResponse,
     ErrorResponse,
+    HeartbeatRequest,
     InstructionResponse,
     InstructionResultRequest,
     NextInstructionsQuery,
+    RecordStartResult,
+    RecordStopUploadResult,
     ReinstallAcknowledgement,
     ReinstallCommand,
     ReinstallCommandPayload,
@@ -231,6 +238,43 @@ def complete_instruction(
                 "full_page": instruction.payload.get("full_page", False),
             }
     elif (
+        instruction.action == Instruction.Action.RECORD_START
+        and result_request.error is None
+    ):
+        try:
+            result = RecordStartResult.model_validate(result).model_dump(mode="json")
+        except ValidationError as error:
+            return validation_error_response(error)
+    elif (
+        instruction.action == Instruction.Action.RECORD_STOP
+        and result_request.error is None
+    ):
+        try:
+            captured_recording = RecordStopUploadResult.model_validate(result)
+            recording = base64.b64decode(captured_recording.data, validate=True)
+        except ValidationError as error:
+            logger.warning(
+                "record_stop result rejected: %s",
+                error.errors(include_url=False, include_context=False),
+            )
+            return validation_error_response(error)
+        except binascii.Error, ValueError:
+            logger.warning("record_stop base64 rejected")
+            return error_response("Invalid recording data")
+        try:
+            url = _host_recording(recording, instruction.payload)
+        except StorageError as error:
+            result = None
+            instruction_error = f"Could not host the recording: {error}"
+        else:
+            result = {
+                "url": url,
+                "content_type": "video/webm",
+                "duration": captured_recording.duration,
+                "stopped_reason": captured_recording.stopped_reason,
+                "message": captured_recording.message,
+            }
+    elif (
         instruction.action == Instruction.Action.SCROLL and result_request.error is None
     ):
         try:
@@ -281,6 +325,26 @@ def _host_screenshot(image: bytes, payload: dict) -> str:
     tid = payload.get("tid")
     filename = f"screenshot-{tid}.png" if isinstance(tid, int) else "screenshot.png"
     return backend.upload_file(image, filename, "image/png")
+
+
+def _host_recording(recording: bytes, payload: dict) -> str:
+    """Upload recording bytes to the configured storage service."""
+    backend = create_storage_backend(
+        settings.STORAGE_PROVIDER,
+        settings.STORAGE_CONFIG,
+    )
+    if backend is None:
+        raise StorageError(
+            "no storage service is configured; set CHIPF_ENDPOINT and "
+            "CHIPF_API_KEY (or another provider's credentials)"
+        )
+    recording_id = payload.get("recording_id")
+    filename = (
+        f"recording-{recording_id}.webm"
+        if isinstance(recording_id, int)
+        else "recording.webm"
+    )
+    return backend.upload_file(recording, filename, "video/webm")
 
 
 @csrf_exempt
@@ -340,3 +404,36 @@ def acknowledge_reinstall(request: HttpRequest, bid: str) -> HttpResponse:
         )
         reinstall_request.delete()
     return HttpResponse(status=204)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def report_heartbeat(request: HttpRequest, bid: str) -> HttpResponse:
+    """Store the extension's reported settings for one browser."""
+    try:
+        heartbeat = HeartbeatRequest.model_validate_json(request.body)
+    except ValidationError as error:
+        return validation_error_response(error)
+
+    BrowserHeartbeat.objects.update_or_create(
+        bid=bid,
+        defaults={"settings": heartbeat.settings},
+    )
+    return HttpResponse(status=204)
+
+
+@require_http_methods(["GET"])
+def browser_settings(_request: HttpRequest, bid: str) -> JsonResponse:
+    """Return the settings most recently reported by the extension."""
+    stored = BrowserHeartbeat.objects.filter(bid=bid).first()
+    if stored is None:
+        return error_response(
+            "Browser settings not found; the extension has not reported yet",
+            status=404,
+        )
+    return model_response(
+        BrowserSettingsResponse(
+            settings=stored.settings,
+            updated_at=stored.updated_at,
+        )
+    )

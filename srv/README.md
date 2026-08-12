@@ -83,19 +83,23 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 | `POST` | `reinstall/` | Queue an unpacked-extension reinstall. |
 | `GET` | `reinstall/` | Read the pending reinstall command for manual inspection. |
 | `POST` | `reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
+| `POST` | `heartbeat/` | Store the extension's reported settings. |
+| `GET` | `settings/` | Return the settings most recently reported by the extension. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, and `javascript`. See the root
-[API guide](../README.md#api) for payload examples.
+`click`, `keyboard`, `screenshot`, `record_start`, `record_stop`, and
+`javascript`. See the root [API guide](../README.md#api) for payload examples.
 
 Instructions are transport state, not history. Pending and processing reads are
 non-destructive. The first successful detail request for a completed or failed
 instruction returns its terminal response and deletes the row.
 
-Screenshots are never stored by this server. When the extension reports a
-capture, the server immediately uploads the bytes to the configured media
-storage service and stores only the resulting public download URL in the
-instruction result.
+Screenshots and recordings are never stored by this server. When the
+extension reports a capture, the server immediately uploads the bytes to the
+configured media storage service and stores only the resulting public
+download URL in the instruction result. Recordings use the same pipeline:
+`record_start` and `record_stop` are instructions whose results carry the
+final video URL, and the extension-side session is not tracked by the server.
 
 While a reinstall is pending, `instructions/next/` claims no queue work and
 instead returns the `reinstall` command directly to the extension; the

@@ -53,6 +53,23 @@ Instructions with a known target tab run in a per-tab queue. Work on different
 tabs can still overlap, while reloads, navigation, input, screenshots, and
 JavaScript on the same tab execute in claim order.
 
+## Recordings And Browser Settings
+
+`record_start` (`{tid}`) starts a video recording of the tab's viewport and
+completes immediately with `{recording_id, started}`; the recording continues
+in the background until `record_stop` (`{recording_id}`) or
+`maxRecordingDurationMs` (default 300000 ms, 5 minutes). A late `record_stop`
+delivers the maximum-duration video with `stopped_reason: "max_duration"` and
+a message instead of failing. Recordings are encoded in the offscreen document
+(WebM/VP9, ~1 Mbps, ~2-5 fps) from `Page.captureScreenshot` frames relayed by
+the service worker, so the tab's window should be focused: an unfocused or
+hidden tab fails the first capture with a focus hint. A recording holds the
+tab's debugger for its whole lifetime and does not survive extension reloads.
+
+The extension reports its normalized configuration to the server's heartbeat
+route from the poll loop (throttled to 30 s, immediate on setting changes) so
+controllers can read the browser's configured limits before acting.
+
 ## Extension Recovery
 
 The public `reinstall` operation calls

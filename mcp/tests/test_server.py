@@ -4,10 +4,13 @@ from unittest.mock import create_autospec, patch
 
 from acob import (
     ACOBClient,
+    BrowserSettings,
     ClickResult,
     ClosedTab,
     KeyboardKeyResult,
     ListedTab,
+    RecordingStart,
+    RecordingStop,
     ReinstallResult,
     Screenshot,
     ScrollResult,
@@ -219,10 +222,13 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "keyboard",
                 "list",
                 "navigate",
+                "record_start",
+                "record_stop",
                 "reinstall",
                 "reload",
                 "screenshot",
                 "scroll",
+                "settings",
             },
         )
         tools = {tool.name: tool for tool in result.tools}
@@ -247,6 +253,26 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             set(tools["screenshot"].input_schema["required"]),
             {"tid"},
+        )
+        self.assertEqual(
+            set(tools["record_start"].input_schema["properties"]),
+            {"tid", "timeout"},
+        )
+        self.assertEqual(
+            set(tools["record_start"].input_schema["required"]),
+            {"tid"},
+        )
+        self.assertEqual(
+            set(tools["record_stop"].input_schema["properties"]),
+            {"recording_id", "timeout"},
+        )
+        self.assertEqual(
+            set(tools["record_stop"].input_schema["required"]),
+            {"recording_id"},
+        )
+        self.assertEqual(
+            set(tools["settings"].input_schema["properties"]),
+            {"timeout"},
         )
         self.assertNotIn("tabs", tools)
         self.assertNotIn("reload_extension", tools)
@@ -402,6 +428,74 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             full_page=True,
             timeout=None,
         )
+
+    async def test_starts_and_stops_recordings_through_the_client(self):
+        self.acob.record_start.return_value = RecordingStart(
+            recording_id=42,
+            started=True,
+            tid=12,
+        )
+        self.acob.record_stop.return_value = RecordingStop(
+            url="https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+            content_type="video/webm",
+            duration=300.0,
+            stopped_reason="max_duration",
+            message="Recording stopped because the maximum duration was reached",
+            recording_id=42,
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            started = await client.call_tool("record_start", {"tid": 12})
+            stopped = await client.call_tool("record_stop", {"recording_id": 42})
+
+        self.assertFalse(started.is_error)
+        self.assertEqual(
+            started.structured_content,
+            {"recording_id": 42, "started": True, "tid": 12},
+        )
+        self.assertFalse(stopped.is_error)
+        self.assertEqual(
+            stopped.structured_content,
+            {
+                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "content_type": "video/webm",
+                "duration": 300.0,
+                "stopped_reason": "max_duration",
+                "message": (
+                    "Recording stopped because the maximum duration was reached"
+                ),
+                "recording_id": 42,
+            },
+        )
+        self.acob.record_start.assert_awaited_once_with(12, timeout=None)
+        self.acob.record_stop.assert_awaited_once_with(42, timeout=None)
+
+    async def test_returns_reported_browser_settings_from_the_client(self):
+        self.acob.settings.return_value = BrowserSettings(
+            settings={
+                "pollIntervalMs": 1000,
+                "maxRecordingDurationMs": 300000,
+                "maxRecordingSizeMiB": 60,
+            },
+            updated_at="2026-08-12T00:00:00Z",
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            result = await client.call_tool("settings", {})
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(
+            result.structured_content,
+            {
+                "settings": {
+                    "pollIntervalMs": 1000,
+                    "maxRecordingDurationMs": 300000,
+                    "maxRecordingSizeMiB": 60,
+                },
+                "updated_at": "2026-08-12T00:00:00Z",
+            },
+        )
+        self.acob.settings.assert_awaited_once_with(timeout=None)
 
     async def test_returns_javascript_json_values(self):
         self.acob.javascript.return_value = {"title": "Example", "count": 2}

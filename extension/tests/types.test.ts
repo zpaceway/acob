@@ -6,6 +6,8 @@ import type {
   InstructionRequest,
   InstructionResultFor,
   ListedTab,
+  RecordStartResult,
+  RecordStopResult,
   ScrollResult,
   SettingName,
   SupportedInstruction,
@@ -40,6 +42,21 @@ type ScrollResultIsTyped = Expect<
   Equal<
     InstructionResultFor<{ action: "scroll"; tid: number; y: number }>,
     ScrollResult
+  >
+>;
+type RecordStartResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{ action: "record_start"; tid: number }>,
+    RecordStartResult
+  >
+>;
+type RecordStopResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{
+      action: "record_stop";
+      recording_id: number;
+    }>,
+    RecordStopResult
   >
 >;
 
@@ -115,3 +132,7 @@ const reloadTabResultIsTyped: ReloadTabResultIsTyped = true;
 void reloadTabResultIsTyped;
 const scrollResultIsTyped: ScrollResultIsTyped = true;
 void scrollResultIsTyped;
+const recordStartResultIsTyped: RecordStartResultIsTyped = true;
+void recordStartResultIsTyped;
+const recordStopResultIsTyped: RecordStopResultIsTyped = true;
+void recordStopResultIsTyped;

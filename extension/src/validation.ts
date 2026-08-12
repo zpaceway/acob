@@ -93,6 +93,12 @@ export function isSupportedInstruction(
         typeof payload.full_page === "boolean")
     );
   }
+  if (value.action === "record_start") {
+    return isPositiveInteger(payload.tid);
+  }
+  if (value.action === "record_stop") {
+    return isPositiveInteger(payload.recording_id);
+  }
   if (value.action === "list") {
     return true;
   }

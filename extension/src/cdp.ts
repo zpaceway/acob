@@ -1,6 +1,5 @@
 import type { Protocol } from "devtools-protocol";
 import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js";
-import type { Configuration } from "./types.js";
 
 export function throwEvaluationException(
   evaluation: Protocol.Runtime.EvaluateResponse,
@@ -16,17 +15,14 @@ export function throwEvaluationException(
 
 export async function withDebugger<Result>(
   tid: number,
-  configuration: Configuration,
+  debuggerProtocolVersion: string,
   callback: (target: chrome.debugger.DebuggerSession) => Promise<Result>,
 ): Promise<Result> {
   const target: chrome.debugger.DebuggerSession = { tabId: tid };
   let attached = false;
 
   try {
-    await chrome.debugger.attach(
-      target,
-      configuration.debuggerProtocolVersion,
-    );
+    await chrome.debugger.attach(target, debuggerProtocolVersion);
     attached = true;
 
     return await callback(target);

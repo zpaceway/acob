@@ -33,6 +33,16 @@ urlpatterns = [
         name="acknowledge-reinstall",
     ),
     path(
+        "browsers/<bid:bid>/heartbeat/",
+        views.report_heartbeat,
+        name="report-heartbeat",
+    ),
+    path(
+        "browsers/<bid:bid>/settings/",
+        views.browser_settings,
+        name="browser-settings",
+    ),
+    path(
         "browsers/<bid:bid>/instructions/",
         views.create_instruction,
         name="create-instruction",

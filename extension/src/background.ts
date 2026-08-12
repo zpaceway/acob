@@ -8,6 +8,7 @@ import {
   executeReinstallCommand,
   getConfiguration,
   instructionApiUrl,
+  reportSettings,
 } from "./lifecycle.js";
 import { state } from "./state.js";
 import { isRuntimeMessage } from "./types.js";
@@ -16,6 +17,8 @@ import {
   isReinstallCommand,
   reportError,
 } from "./validation.js";
+
+const SETTINGS_REPORT_INTERVAL_MS = 30_000;
 
 async function poll(): Promise<void> {
   if (state.pollInProgress || state.reinstallScheduled) {
@@ -27,6 +30,10 @@ async function poll(): Promise<void> {
   try {
     const configuration = await getConfiguration();
     await acknowledgePendingReinstall(configuration);
+    if (Date.now() - state.lastSettingsReportAt >= SETTINGS_REPORT_INTERVAL_MS) {
+      state.lastSettingsReportAt = Date.now();
+      reportSettings(configuration).catch(console.error);
+    }
     if (state.activeExecutions >= configuration.maxConcurrentExecutions) {
       return;
     }
@@ -129,5 +136,10 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureOffscreenDocument().catch(console.error);
+});
+chrome.storage.onChanged.addListener((_changes, areaName) => {
+  if (areaName === "local") {
+    state.lastSettingsReportAt = 0;
+  }
 });
 ensureOffscreenDocument(true).catch(console.error);

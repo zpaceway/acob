@@ -37,7 +37,7 @@ Python client or MCP host
     -> browser-scoped SQLite queue
     -> polling Manifest V3 extension
     -> Chrome tabs APIs and Chromium DevTools Protocol
-    -> structured result or transient screenshot
+    -> structured result or transient screenshot or recording
 ```
 
 ### Server
@@ -60,12 +60,15 @@ Python client or MCP host
 - Configuration, browser identity, and recovery state use local extension
   storage.
 - Supported actions are `list`, `navigate`, `focus`, `close`, `reload`,
-  `scroll`, `click`, `keyboard`, `screenshot`, and `javascript`.
+  `scroll`, `click`, `keyboard`, `screenshot`, `record_start`, `record_stop`,
+  and `javascript`.
 - Targeted operations are serialized per tab while different tabs can run
   concurrently.
 - New-tab creation is serialized and bounded by the configured tab limit.
 - Click and keyboard actions use CDP input commands.
 - Screenshots use `Page.captureScreenshot`.
+- Recordings poll `Page.captureScreenshot` into a canvas and encode WebM in
+  the offscreen document, bounded by duration and size settings.
 - JavaScript evaluation awaits promises and returns JSON-compatible values or
   explicit representations for Chromium unserializable values.
 - jQuery and Turndown are bundled for page extraction under
@@ -85,6 +88,7 @@ Python client or MCP host
   exception types.
 - Independent operations and waits can run concurrently in one event loop.
 - Screenshots return public media URLs without transferring image bytes.
+- Recordings return public media URLs through a start/stop instruction pair.
 - Extension reinstall is delivered through the instruction queue.
 
 ### MCP Adapter
@@ -93,7 +97,7 @@ Python client or MCP host
 - Stateless Streamable HTTP uses the connection URL for browser and API routing.
 - Tool schemas are derived from typed functions and reject unknown arguments.
 - The tool set mirrors the high-level Python client action set.
-- Screenshots are returned to MCP as public download URLs.
+- Screenshots and recordings are returned to MCP as public download URLs.
 - Server instructions emphasize tab discovery, untrusted page content,
   side-effect awareness, and preservation of unrelated browser state.
 - HTTP transport applies Host and Origin allowlists.

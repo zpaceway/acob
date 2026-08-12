@@ -20,8 +20,11 @@ NonEmptyString = Annotated[
 ]
 NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
+RecordingId = Annotated[int, Field(gt=0)]
 ScrollY = Annotated[float, Field(allow_inf_nan=False)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
+MAX_RECORDING_BASE64_LENGTH = 60 * 1024 * 1024
+MAX_RECORDING_DURATION_SECONDS = 300
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 
 KEYBOARD_KEYS = {
@@ -90,6 +93,16 @@ class ScreenshotInstruction(ApiModel):
     full_page: bool = False
 
 
+class RecordStartInstruction(ApiModel):
+    action: Literal["record_start"]
+    tid: Tid
+
+
+class RecordStopInstruction(ApiModel):
+    action: Literal["record_stop"]
+    recording_id: RecordingId
+
+
 class ListInstruction(ApiModel):
     action: Literal["list"]
 
@@ -129,6 +142,8 @@ InstructionRequest = Annotated[
     | KeyboardInstruction
     | ListInstruction
     | NavigateInstruction
+    | RecordStartInstruction
+    | RecordStopInstruction
     | ReloadInstruction
     | ScreenshotInstruction
     | ScrollInstruction,
@@ -146,6 +161,28 @@ class ScreenshotResult(ApiModel):
             max_length=MAX_SCREENSHOT_BASE64_LENGTH,
         ),
     ]
+
+
+class RecordStartResult(ApiModel):
+    recording_id: RecordingId
+    started: Literal[True]
+
+
+class RecordStopUploadResult(ApiModel):
+    data: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=MAX_RECORDING_BASE64_LENGTH,
+        ),
+    ]
+    duration: Annotated[
+        float,
+        Field(gt=0, le=MAX_RECORDING_DURATION_SECONDS, allow_inf_nan=False),
+    ]
+    stopped_reason: Literal["user", "max_duration"]
+    message: NonEmptyString
 
 
 class ScrollResult(ApiModel):
@@ -220,6 +257,15 @@ class InstructionResponse(ApiModel):
 
 class ErrorResponse(ApiModel):
     error: str
+
+
+class HeartbeatRequest(ApiModel):
+    settings: dict[str, JsonValue]
+
+
+class BrowserSettingsResponse(ApiModel):
+    settings: dict[str, JsonValue]
+    updated_at: datetime
 
 
 class ValidationIssue(ApiModel):

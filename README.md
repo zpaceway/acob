@@ -207,12 +207,13 @@ docker compose -f mcp/compose.yaml up --build
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
-`javascript`, and `reinstall`. Structured results use SDK-generated output
-schemas. `screenshot` always returns the public download URL produced by the
-ACOB server's configured media storage service; neither the client nor the MCP
-server downloads the image, so the agent fetches the capture itself when it
-needs the pixels. See [`mcp/README.md`](mcp/README.md) for all environment,
-transport, Docker, security, and verification details.
+`record_start`, `record_stop`, `settings`, `javascript`, and `reinstall`.
+Structured results use SDK-generated output schemas. `screenshot` always
+returns the public download URL produced by the ACOB server's configured
+media storage service; neither the client nor the MCP server downloads the
+image, so the agent fetches the capture itself when it needs the pixels. See
+[`mcp/README.md`](mcp/README.md) for all environment, transport, Docker,
+security, and verification details.
 
 ## Website
 
@@ -251,6 +252,8 @@ Supported instructions:
 {"action":"keyboard","tid":123,"text":"ACOB"}
 {"action":"keyboard","tid":123,"key":"Enter","modifiers":[]}
 {"action":"screenshot","tid":123,"full_page":false}
+{"action":"record_start","tid":123}
+{"action":"record_stop","recording_id":45}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
@@ -300,6 +303,61 @@ The storage service controls the lifetime of the URL. Without a configured
 storage service, or when the upload fails, the instruction completes as failed
 with a clear error. Encoded captures are limited to 30 MiB; larger captures
 complete as failed instructions rather than being submitted.
+
+`record_start` requires a positive `tid` and starts a video recording of that
+tab's viewport. It completes almost immediately with a tracking ID; the
+recording continues in the background until `record_stop` or the extension's
+maximum recording duration (default 5 minutes) is reached:
+
+```json
+{
+  "recording_id": 45,
+  "started": true
+}
+```
+
+`record_stop` requires the positive `recording_id` returned by `record_start`
+and delivers the finalized video through the same storage pipeline as
+screenshots, as a WebM file:
+
+```json
+{
+  "url": "https://media.example/api/files/<file-id>",
+  "content_type": "video/webm",
+  "duration": 300.0,
+  "stopped_reason": "max_duration",
+  "message": "Recording stopped because the maximum duration was reached"
+}
+```
+
+`stopped_reason` is `"user"` when `record_stop` stopped an active recording and
+`"max_duration"` when the recording reached the extension's limit first; a late
+`record_stop` then delivers the maximum-duration video instead of failing.
+Recordings are video-only, roughly 2-5 fps at about 1 Mbps, and work best when
+the tab's window is focused (an unfocused or hidden tab can fail the first
+capture with a focus hint). The recording holds the tab's debugger, so other
+actions that need the debugger on that tab wait until `record_stop`. Recordings
+do not survive extension reloads, and each `record_stop` delivers its video
+once.
+
+The browser's configured limits and other settings are not an instruction:
+the extension reports them periodically to
+`POST /api/browsers/<bid>/heartbeat/`, and agents read them with
+`GET /api/browsers/<bid>/settings/` before acting:
+
+```json
+{
+  "settings": {
+    "pollIntervalMs": 1000,
+    "maxRecordingDurationMs": 300000,
+    "maxRecordingSizeMiB": 60
+  },
+  "updated_at": "2026-08-12T00:00:00Z"
+}
+```
+
+The settings endpoint returns 404 until the extension has reported at least
+once.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab.
 Values available by value are returned as JSON-compatible results; Chromium

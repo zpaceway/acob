@@ -1,3 +1,8 @@
+import {
+  handleFinalizeRecording,
+  handleRecordingFrame,
+  startRecordingSink,
+} from "./recording.js";
 import { ACOBSettings } from "./settings.js";
 import { isRuntimeMessage } from "./types.js";
 import type {
@@ -36,17 +41,46 @@ async function requestInstructions(): Promise<void> {
   schedulePoll();
 }
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
-  if (!isRuntimeMessage(message)) {
-    return;
-  }
-  if (message.type === "settingsUpdated") {
-    pollIntervalMs = ACOBSettings.normalizeSetting(
-      "pollIntervalMs",
-      message.pollIntervalMs,
-    );
-    schedulePoll();
-  }
-});
+chrome.runtime.onMessage.addListener(
+  (message: unknown, _sender, sendResponse) => {
+    if (!isRuntimeMessage(message)) {
+      return;
+    }
+    if (message.type === "settingsUpdated") {
+      pollIntervalMs = ACOBSettings.normalizeSetting(
+        "pollIntervalMs",
+        message.pollIntervalMs,
+      );
+      schedulePoll();
+      return;
+    }
+    if (message.type === "startRecording") {
+      startRecordingSink(message)
+        .then(
+          () => sendResponse({ ok: true, started: true }),
+          (error: unknown) => sendResponse({ error: errorMessage(error) }),
+        );
+      return true;
+    }
+    if (message.type === "recordingFrame") {
+      handleRecordingFrame(message).then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: true }),
+      );
+      return true;
+    }
+    if (message.type === "finalizeRecording") {
+      handleFinalizeRecording(message).then(
+        (data) => sendResponse({ ok: true, data }),
+        (error: unknown) => sendResponse({ error: errorMessage(error) }),
+      );
+      return true;
+    }
+  },
+);
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 requestInstructions();

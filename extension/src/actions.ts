@@ -3,19 +3,29 @@ import type { Protocol } from "devtools-protocol";
 import { sendCdpCommand, throwEvaluationException, withDebugger } from "./cdp.js";
 import { describeKey, MODIFIER_BITS } from "./keys.js";
 import { loadPageLibrariesScript } from "./libraries.js";
+import { ensureOffscreenDocument } from "./lifecycle.js";
 import { ACOBSettings } from "./settings.js";
 import { state } from "./state.js";
+import type { RecordingOutcome } from "./state.js";
 import { reloadTab } from "./tabs.js";
 import { withTerminationOnTimeout, withTimeout } from "./timeouts.js";
 import type {
   ClickResult,
   Configuration,
+  FinalizeRecordingMessage,
+  FinalizeRecordingResponse,
   JsonValue,
   KeyboardKeyResult,
   KeyboardPayload,
   KeyboardTextResult,
+  RecordStartResult,
+  RecordStopUploadResult,
+  RecordingFrameMessage,
+  RecordingStopReason,
   ScreenshotUploadResult,
   ScrollResult,
+  StartRecordingMessage,
+  StartRecordingResponse,
   UnserializableJavaScriptResult,
 } from "./types.js";
 
@@ -31,7 +41,7 @@ export async function executeJavaScript(
   if (state.reinstallScheduled) {
     throw new Error("Extension reinstall is in progress");
   }
-  return withDebugger(tid, configuration, async (target) => {
+  return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
     let stopPromise: Promise<void> | null = null;
     const stopExecution = (): Promise<void> => {
       stopPromise ??= withTimeout(
@@ -123,7 +133,7 @@ export async function executeClick(
   selector: string,
   configuration: Configuration,
 ): Promise<ClickResult> {
-  return withDebugger(tid, configuration, async (target) => {
+  return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
     const { root } = await sendCdpCommand(
       target,
       "DOM.getDocument",
@@ -197,7 +207,7 @@ export async function executeScreenshot(
   fullPage: boolean,
   configuration: Configuration,
 ): Promise<ScreenshotUploadResult> {
-  return withDebugger(tid, configuration, async (target) => {
+  return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
     const { data } = await sendCdpCommand(
       target,
       "Page.captureScreenshot",
@@ -224,7 +234,7 @@ export async function executeScroll(
   y: number,
   configuration: Configuration,
 ): Promise<ScrollResult> {
-  return withDebugger(tid, configuration, async (target) => {
+  return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
     const evaluation = await sendCdpCommand(target, "Runtime.evaluate", {
       expression: `
         (() => {
@@ -272,7 +282,7 @@ export async function executeKeyboard(
   payload: KeyboardPayload,
   configuration: Configuration,
 ): Promise<KeyboardTextResult | KeyboardKeyResult> {
-  return withDebugger(tid, configuration, async (target) => {
+  return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
     if ("text" in payload) {
       await sendCdpCommand(target, "Input.insertText", {
         text: payload.text,
@@ -319,4 +329,247 @@ export async function executeKeyboard(
     });
     return { key: payload.key, modifiers: payloadModifiers };
   });
+}
+
+const RECORDING_JPEG_QUALITY = 70;
+const RECORDING_CAPTURE_INTERVAL_MS = 200;
+const RECORDING_CAPTURE_TIMEOUT_MS = 10_000;
+const RECORDING_FIRST_CAPTURE_TIMEOUT_MS = 3_000;
+const RECORDING_KEEPALIVE_MS = 20_000;
+const USER_STOP_MESSAGE = "Recording stopped by user request";
+const MAX_DURATION_MESSAGE =
+  "Recording stopped because the maximum duration was reached";
+
+interface RecordingPipeline {
+  ready: Promise<void>;
+  finished: Promise<RecordingOutcome>;
+  requestStop: () => void;
+}
+
+function startRecordingPipeline(
+  recordingId: number,
+  tid: number,
+  configuration: Configuration,
+): RecordingPipeline {
+  let requestStop: () => void = () => undefined;
+  const stopRequested = new Promise<void>((resolve) => {
+    requestStop = resolve;
+  });
+  let markReady: () => void = () => undefined;
+  let failReady: (error: unknown) => void = () => undefined;
+  let readyConfirmed = false;
+  const ready = new Promise<void>((resolve, reject) => {
+    markReady = resolve;
+    failReady = reject;
+  });
+  let markFinished: (outcome: RecordingOutcome) => void = () => undefined;
+  let failFinished: (error: unknown) => void = () => undefined;
+  const finished = new Promise<RecordingOutcome>((resolve, reject) => {
+    markFinished = resolve;
+    failFinished = reject;
+  });
+
+  const pipeline = withDebugger(
+    tid,
+    configuration.debuggerProtocolVersion,
+    async (target) => {
+      const startedAt = Date.now();
+      let stoppedByTimer = false;
+      let detached = false;
+      let stopped = false;
+      let captures = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const keepAlive = setInterval(() => undefined, RECORDING_KEEPALIVE_MS);
+      const stopPromise = stopRequested.then(() => {
+        stopped = true;
+      });
+      const onDetach = (source: chrome.debugger.Debuggee): void => {
+        if (source.tabId !== tid) {
+          return;
+        }
+        detached = true;
+        requestStop();
+      };
+
+      const sendFrame = async (data: string): Promise<void> => {
+        const message: RecordingFrameMessage = {
+          type: "recordingFrame",
+          recordingId,
+          data,
+        };
+        await withTimeout(
+          chrome.runtime
+            .sendMessage<RecordingFrameMessage, void>(message)
+            .catch(() => undefined),
+          RECORDING_CAPTURE_TIMEOUT_MS,
+          "Recording was interrupted: the media sink stopped responding",
+        );
+      };
+
+      try {
+        chrome.debugger.onDetach.addListener(onDetach);
+        readyConfirmed = true;
+        markReady();
+        timer = setTimeout(() => {
+          stoppedByTimer = true;
+          requestStop();
+        }, configuration.maxRecordingDurationMs);
+
+        while (!stopped && !detached) {
+          let data: string;
+          const firstCapture = captures === 0;
+          try {
+            const capture = await withTimeout(
+              sendCdpCommand(target, "Page.captureScreenshot", {
+                format: "jpeg",
+                quality: RECORDING_JPEG_QUALITY,
+                fromSurface: true,
+                captureBeyondViewport: false,
+              }),
+              firstCapture
+                ? RECORDING_FIRST_CAPTURE_TIMEOUT_MS
+                : RECORDING_CAPTURE_TIMEOUT_MS,
+              firstCapture
+                ? "Recording could not capture the tab; focus its window and try again"
+                : "Recording was interrupted: could not capture the tab",
+            );
+            data = capture.data;
+          } catch (error) {
+            if (detached) {
+              throw new Error(
+                "Recording was interrupted: the tab or debugger was closed",
+              );
+            }
+            throw error;
+          }
+          captures += 1;
+          await sendFrame(data);
+          await Promise.race([
+            stopPromise,
+            new Promise<void>((resolve) =>
+              setTimeout(resolve, RECORDING_CAPTURE_INTERVAL_MS),
+            ),
+          ]);
+        }
+        if (detached) {
+          throw new Error(
+            "Recording was interrupted: the tab or debugger was closed",
+          );
+        }
+        const message: FinalizeRecordingMessage = {
+          type: "finalizeRecording",
+          recordingId,
+          maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
+        };
+        const response = await withTimeout(
+          chrome.runtime.sendMessage<
+            FinalizeRecordingMessage,
+            FinalizeRecordingResponse
+          >(message),
+          configuration.httpRequestTimeoutMs,
+          "Timed out finalizing the recording",
+        );
+        if ("error" in response) {
+          throw new Error(
+            `${response.error} (${captures} screenshots captured)`,
+          );
+        }
+        const stoppedReason: RecordingStopReason = stoppedByTimer
+          ? "max_duration"
+          : "user";
+        return {
+          data: response.data,
+          durationMs: stoppedByTimer
+            ? configuration.maxRecordingDurationMs
+            : Date.now() - startedAt,
+          stoppedReason,
+          message: stoppedByTimer ? MAX_DURATION_MESSAGE : USER_STOP_MESSAGE,
+        };
+      } finally {
+        clearTimeout(timer);
+        clearInterval(keepAlive);
+        chrome.debugger.onDetach.removeListener(onDetach);
+      }
+    },
+  );
+
+  void pipeline.then(
+    (outcome) => markFinished(outcome),
+    (error: unknown) => {
+      if (!readyConfirmed) {
+        failReady(error);
+      }
+      failFinished(error);
+    },
+  );
+  return { ready, finished, requestStop };
+}
+
+export async function executeRecordStart(
+  tid: number,
+  recordingId: number,
+  configuration: Configuration,
+): Promise<RecordStartResult> {
+  await ensureOffscreenDocument();
+  const message: StartRecordingMessage = {
+    type: "startRecording",
+    recordingId,
+    tid,
+    maxRecordingDurationMs: configuration.maxRecordingDurationMs,
+    maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
+  };
+  const response = await withTimeout(
+    chrome.runtime.sendMessage<StartRecordingMessage, StartRecordingResponse>(
+      message,
+    ),
+    configuration.httpRequestTimeoutMs,
+    "Timed out starting the recording",
+  );
+  if ("error" in response) {
+    throw new Error(response.error);
+  }
+
+  const pipeline = startRecordingPipeline(recordingId, tid, configuration);
+  const session = {
+    tid,
+    requestStop: pipeline.requestStop,
+    finished: pipeline.finished,
+  };
+  state.recordings.set(recordingId, session);
+  void pipeline.finished.catch(() => {
+    state.recordings.delete(recordingId);
+  });
+  await withTimeout(
+    pipeline.ready,
+    configuration.httpRequestTimeoutMs,
+    "Timed out starting the recording",
+  );
+  return { recording_id: recordingId, started: true };
+}
+
+export async function executeRecordStop(
+  recordingId: number,
+  configuration: Configuration,
+): Promise<RecordStopUploadResult> {
+  const session = state.recordings.get(recordingId);
+  if (session === undefined) {
+    throw new Error(`No active recording with id ${recordingId}`);
+  }
+  session.requestStop();
+  let outcome: RecordingOutcome;
+  try {
+    outcome = await withTimeout(
+      session.finished,
+      configuration.httpRequestTimeoutMs,
+      "Timed out stopping the recording",
+    );
+  } finally {
+    state.recordings.delete(recordingId);
+  }
+  return {
+    data: outcome.data,
+    duration: outcome.durationMs / 1000,
+    stopped_reason: outcome.stoppedReason,
+    message: outcome.message,
+  };
 }
