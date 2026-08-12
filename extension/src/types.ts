@@ -15,7 +15,7 @@ export interface SettingValues {
   httpRequestTimeoutMs: number;
   javascriptTimeoutMs: number;
   maxScreenshotSizeMiB: number;
-  maxRecordingDurationMs: number;
+  maxRecordingDurationSec: number;
   maxRecordingSizeMiB: number;
   resultRetryAttempts: number;
   resultRetryDelayMs: number;
@@ -493,12 +493,18 @@ export interface StartRecordingMessage {
   // recordings pass zero and derive both from the first frame.
   width: number;
   height: number;
-  maxRecordingDurationMs: number;
+  maxRecordingDurationSec: number;
   maxRecordingSizeMiB: number;
 }
 
 export interface RecordingFrameMessage {
   type: "recordingFrame";
+  recordingId: number;
+  data: string;
+}
+
+export interface RecordingChunkMessage {
+  type: "recordingChunk";
   recordingId: number;
   data: string;
 }
@@ -519,6 +525,7 @@ export type RuntimeMessage =
   | PollMessage
   | StartRecordingMessage
   | RecordingFrameMessage
+  | RecordingChunkMessage
   | FinalizeRecordingMessage
   | SettingsUpdatedMessage;
 
@@ -540,11 +547,17 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       typeof message.fullPage === "boolean" &&
       typeof message.width === "number" &&
       typeof message.height === "number" &&
-      typeof message.maxRecordingDurationMs === "number" &&
+      typeof message.maxRecordingDurationSec === "number" &&
       typeof message.maxRecordingSizeMiB === "number"
     );
   }
   if (message.type === "recordingFrame") {
+    return (
+      typeof message.recordingId === "number" &&
+      typeof message.data === "string"
+    );
+  }
+  if (message.type === "recordingChunk") {
     return (
       typeof message.recordingId === "number" &&
       typeof message.data === "string"
@@ -568,7 +581,8 @@ export type StartRecordingResponse =
   | ErrorResponse;
 export interface FinalizeRecordingSuccess {
   ok: true;
-  data: string;
+  // The encoded video is delivered separately as recordingChunk messages
+  // because a single runtime message is limited to ~64 MiB.
   contentType: RecordingContentType;
 }
 export type FinalizeRecordingResponse = FinalizeRecordingSuccess | ErrorResponse;

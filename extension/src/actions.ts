@@ -414,7 +414,7 @@ function startRecordingPipeline(
         timer = setTimeout(() => {
           stoppedByTimer = true;
           requestStop();
-        }, configuration.maxRecordingDurationMs);
+        }, configuration.maxRecordingDurationSec * 1000);
 
         while (!stopped && !detached) {
           let data: string;
@@ -479,27 +479,36 @@ function startRecordingPipeline(
           recordingId,
           maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
         };
-        const response = await withTimeout(
-          chrome.runtime.sendMessage<
-            FinalizeRecordingMessage,
-            FinalizeRecordingResponse
-          >(message),
-          configuration.httpRequestTimeoutMs,
-          "Timed out finalizing the recording",
-        );
+        let response: FinalizeRecordingResponse;
+        try {
+          response = await withTimeout(
+            chrome.runtime.sendMessage<
+              FinalizeRecordingMessage,
+              FinalizeRecordingResponse
+            >(message),
+            configuration.httpRequestTimeoutMs,
+            "Timed out finalizing the recording",
+          );
+        } catch (error) {
+          state.recordingChunks.delete(recordingId);
+          throw error;
+        }
         if ("error" in response) {
+          state.recordingChunks.delete(recordingId);
           throw new Error(
             `${response.error} (${captures} screenshots captured)`,
           );
         }
+        const chunks = state.recordingChunks.get(recordingId) ?? [];
+        state.recordingChunks.delete(recordingId);
         const stoppedReason: RecordingStopReason = stoppedByTimer
           ? "max_duration"
           : "user";
         return {
-          data: response.data,
+          data: chunks.join(""),
           contentType: response.contentType,
           durationMs: stoppedByTimer
-            ? configuration.maxRecordingDurationMs
+            ? configuration.maxRecordingDurationSec * 1000
             : Date.now() - startedAt,
           stoppedReason,
           message: stoppedByTimer ? MAX_DURATION_MESSAGE : USER_STOP_MESSAGE,
@@ -560,7 +569,7 @@ export async function executeRecordStart(
     fullPage,
     width: size?.width ?? 0,
     height: size?.height ?? 0,
-    maxRecordingDurationMs: configuration.maxRecordingDurationMs,
+    maxRecordingDurationSec: configuration.maxRecordingDurationSec,
     maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
   };
   const response = await withTimeout(

@@ -119,8 +119,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 # Screenshots and recordings are posted as base64 JSON by the extension.
-# The 96 MiB limit covers a full-size 60 MiB encoded recording.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 96 * 1024 * 1024
+# The 768 MiB limit covers a full-size 512 MiB encoded recording.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 768 * 1024 * 1024
 
 # Media storage service: screenshots and recordings are uploaded there and
 # never stored locally. STORAGE_PROVIDER selects the backend (default

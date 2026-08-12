@@ -1,6 +1,7 @@
 import { ACOBSettings } from "./settings.js";
 import type {
   FinalizeRecordingMessage,
+  RecordingChunkMessage,
   RecordingContentType,
   RecordingFrameMessage,
   StartRecordingMessage,
@@ -11,6 +12,7 @@ const RECORDING_BITRATE_CAP = 2_000_000;
 const RECORDING_REFERENCE_PIXELS = 1920 * 1080;
 const RECORDING_FRAMERATE = 30;
 const RECORDING_DISCARD_GRACE_MS = 30_000;
+const RECORDING_CHUNK_LENGTH = 8 * 1024 * 1024;
 interface RecordingSink {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
@@ -136,7 +138,7 @@ export async function startRecordingSink(
     finalized: false,
     discardTimer: window.setTimeout(
       () => discardSink(message.recordingId),
-      message.maxRecordingDurationMs + RECORDING_DISCARD_GRACE_MS,
+      message.maxRecordingDurationSec * 1000 + RECORDING_DISCARD_GRACE_MS,
     ),
   };
   recorder.ondataavailable = (event) => {
@@ -170,7 +172,7 @@ export async function handleRecordingFrame(
 
 export async function handleFinalizeRecording(
   message: FinalizeRecordingMessage,
-): Promise<{ data: string; contentType: RecordingContentType }> {
+): Promise<{ contentType: RecordingContentType }> {
   const sink = sinks.get(message.recordingId);
   if (sink === undefined) {
     throw new Error(`No active recording with id ${message.recordingId}`);
@@ -210,7 +212,15 @@ export async function handleFinalizeRecording(
         `Recording exceeds the ${message.maxRecordingSizeMiB} MiB encoded size limit`,
       );
     }
-    return { data, contentType: containerTypeForMime(sink.mimeType) };
+    for (let offset = 0; offset < data.length; offset += RECORDING_CHUNK_LENGTH) {
+      const chunk: RecordingChunkMessage = {
+        type: "recordingChunk",
+        recordingId: message.recordingId,
+        data: data.slice(offset, offset + RECORDING_CHUNK_LENGTH),
+      };
+      await chrome.runtime.sendMessage<RecordingChunkMessage, void>(chunk);
+    }
+    return { contentType: containerTypeForMime(sink.mimeType) };
   } finally {
     sinks.delete(message.recordingId);
   }

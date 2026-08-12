@@ -481,8 +481,8 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.acob.settings.return_value = BrowserSettings(
             settings={
                 "pollIntervalMs": 1000,
-                "maxRecordingDurationMs": 300000,
-                "maxRecordingSizeMiB": 60,
+                "maxRecordingDurationSec": 300,
+                "maxRecordingSizeMiB": 512,
             },
             updated_at="2026-08-12T00:00:00Z",
         )
@@ -496,8 +496,8 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {
                 "settings": {
                     "pollIntervalMs": 1000,
-                    "maxRecordingDurationMs": 300000,
-                    "maxRecordingSizeMiB": 60,
+                    "maxRecordingDurationSec": 300,
+                    "maxRecordingSizeMiB": 512,
                 },
                 "updated_at": "2026-08-12T00:00:00Z",
             },

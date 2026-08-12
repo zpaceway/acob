@@ -27,6 +27,7 @@ export const state = {
   lastSettingsReportAt: 0,
   pollInProgress: false,
   recordings: new Map<number, ActiveRecording>(),
+  recordingChunks: new Map<number, string[]>(),
   reinstallScheduled: false,
   tabCreationQueue: Promise.resolve() as Promise<void>,
   tabExecutionQueues: new Map<number, Promise<void>>(),

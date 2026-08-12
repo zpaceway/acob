@@ -67,7 +67,7 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
   - `reinstall` is a separate command channel (not an instruction);
     `heartbeat`/`settings` are separate routes too.
 - `srv/acob/settings.py`: `DATA_UPLOAD_MAX_MEMORY_SIZE` must exceed the
-  largest accepted base64 body (96 MiB covers the 60 MiB recording cap).
+  largest accepted base64 body (768 MiB covers the 512 MiB recording cap).
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
   helpers, `patch` for storage backends).
 
@@ -203,7 +203,7 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
 ### Extension
 
 - Discriminated unions for requests; guard functions for claimed data;
-  runtime bounds match server bounds (e.g. `maxRecordingDurationMs` 300000 ms
+  runtime bounds match server bounds (e.g. `maxRecordingDurationSec` 300 s
   == server `MAX_RECORDING_DURATION_SECONDS` 300).
 - Everything that targets a known tab runs through `runInTabExecutionQueue`
   so same-tab work stays ordered while other tabs run concurrently.
@@ -242,8 +242,8 @@ instructions form the lifecycle:
   so growing pages stay covered.
 - `record_stop` (`{recording_id}`) stops the session and delivers the video
   through the normal result path (base64 -> server upload -> public URL).
-- Auto-stop: the worker timer at `maxRecordingDurationMs` (default
-  300000 ms, 5 minutes) stops the recording even when `record_stop` arrives
+- Auto-stop: the worker timer at `maxRecordingDurationSec * 1000` (default
+  300 s, 5 minutes) stops the recording even when `record_stop` arrives
   late; the stop result then carries `stopped_reason: "max_duration"` and a
   message instead of failing. The finalized video is held in the session
   until the first `record_stop` delivers it (single delivery).
@@ -260,28 +260,36 @@ instructions form the lifecycle:
   `Recording could not capture the tab; focus its window and try again`. The
   offscreen fails recordings that drew zero frames instead of delivering
   blank videos, and caps the encoded size at `maxRecordingSizeMiB`.
+- The finalized video is delivered to the worker in ~8 MiB
+  `recordingChunk` runtime messages (the offscreen awaits each send before
+  the next, and the worker reassembles them), because a single
+  `chrome.runtime.sendMessage` payload is limited to ~64 MiB — the chunked
+  transfer is what makes the 512 MiB recording cap reachable. The worker
+  joins the chunks into one base64 string and submits it through the normal
+  result path.
 - During a recording the worker holds a keep-alive interval timer; the
-  offscreen sink discards itself at `maxRecordingDurationMs + 30 s` as a
-  dead-worker safety net. The worker keeps one shared refcounted debugger
-  session per tab (`cdp.ts`), so a recording holding its tab's debugger does
-  not block `click`, `keyboard`, `screenshot`, `scroll`, or `javascript` on
-  that tab; external detaches (e.g. opened DevTools) stop the recording and
-  let later actions attach a fresh session.
+  offscreen sink discards itself at `maxRecordingDurationSec * 1000 + 30 s`
+  as a dead-worker safety net. The worker keeps one shared refcounted
+  debugger session per tab (`cdp.ts`), so a recording holding its tab's
+  debugger does not block `click`, `keyboard`, `screenshot`, `scroll`, or
+  `javascript` on that tab; external detaches (e.g. opened DevTools) stop
+  the recording and let later actions attach a fresh session.
 - Recordings are video-only, ~2-5 fps, ~1 Mbps (up to 2 Mbps for full-page
   frames) MP4/H.264 or WebM/VP9 at the tab's viewport or full-page
   resolution, and do not survive extension reloads (a later `record_stop`
   then fails with "No active recording").
-- The bounds chain is intentional: extension `maxRecordingSizeMiB` (60) ==
-  server `MAX_RECORDING_BASE64_LENGTH` (60 MiB) <
-  `DATA_UPLOAD_MAX_MEMORY_SIZE` (96 MiB) < the ~64 MiB
-  `chrome.runtime.sendMessage` limit. Any cap change must keep this chain.
+- The bounds chain is intentional: extension `maxRecordingSizeMiB` (512) ==
+  server `MAX_RECORDING_BASE64_LENGTH` (512 MiB) <
+  `DATA_UPLOAD_MAX_MEMORY_SIZE` (768 MiB), and the per-message
+  `chrome.runtime.sendMessage` limit (~64 MiB) is handled by chunking the
+  finalize transfer (see above). Any cap change must keep this chain.
 - Browser settings are a **separate command channel, not an instruction**
   (same pattern as `reinstall`): the extension POSTs its normalized
   configuration to `/api/browsers/<bid>/heartbeat/` from the poll loop
   (throttled to every 30 s, reset by `chrome.storage.onChanged`), the server
   stores it in `BrowserHeartbeat`, and agents read it with
   `GET /api/browsers/<bid>/settings/` so they can adapt to the browser's
-  configured limits (e.g. `maxRecordingDurationMs`) before acting.
+  configured limits (e.g. `maxRecordingDurationSec`) before acting.
 
 ## Verification
 
@@ -409,7 +417,7 @@ in the live extension after changes.
   instructions, never log page text/scripts/selectors/keyboard text, and
   never extract credentials or passwords.
 - Keep everything bounded: payloads (base64 caps), durations
-  (`maxRecordingDurationMs`), sizes (`maxRecordingSizeMiB`), timeouts, queue
+  (`maxRecordingDurationSec`), sizes (`maxRecordingSizeMiB`), timeouts, queue
   depth, and concurrent executions are all configured centrally in the
   extension and mirrored by server validation.
 - One deadline covers submission, queueing, execution, and result delivery;
@@ -422,10 +430,11 @@ in the live extension after changes.
 
 - Offscreen documents support only `chrome.runtime` — all `chrome.debugger`
   work must stay in the service worker.
-- `chrome.runtime.sendMessage` payloads are bounded (~64 MiB); keep base64
-  result payloads under the extension caps.
+- `chrome.runtime.sendMessage` payloads are bounded (~64 MiB); recordings
+  are delivered offscreen→worker in ~8 MiB `recordingChunk` messages, and
+  screenshots stay under the extension caps.
 - `DATA_UPLOAD_MAX_MEMORY_SIZE` (srv) must stay above the largest accepted
-  base64 body; it was raised to 96 MiB for the 60 MiB recording cap.
+  base64 body; it was raised to 768 MiB for the 512 MiB recording cap.
 - The MCP `@server.tool` functions are nested in `create_server`; a function
   named like the `settings` parameter would shadow it — use `name=` to
   decouple tool name from function name when needed.

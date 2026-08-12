@@ -558,8 +558,8 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         reported = {
             "settings": {
                 "pollIntervalMs": 1000,
-                "maxRecordingDurationMs": 300000,
-                "maxRecordingSizeMiB": 60,
+                "maxRecordingDurationSec": 300,
+                "maxRecordingSizeMiB": 512,
             },
             "updated_at": "2026-08-12T00:00:00Z",
         }
@@ -568,7 +568,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         result = await client.settings()
 
         self.assertIsInstance(result, BrowserSettings)
-        self.assertEqual(result.settings["maxRecordingDurationMs"], 300000)
+        self.assertEqual(result.settings["maxRecordingDurationSec"], 300)
         self.assertEqual(result.updated_at, "2026-08-12T00:00:00Z")
         self.assertEqual(len(requests), 1)
         self.assertEqual(requests[0].method, "GET")

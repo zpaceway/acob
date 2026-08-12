@@ -170,11 +170,11 @@ per tab.
 
 `screenshot()` and `record_stop()` return the same public media URL pattern.
 `settings()` returns the browser's reported configuration (limits such as
-`maxRecordingDurationMs`, polling, timeouts) so callers can plan bounded work:
+`maxRecordingDurationSec`, polling, timeouts) so callers can plan bounded work:
 
 ```python
 browser = await client.settings()
-print(browser.settings["maxRecordingDurationMs"])
+print(browser.settings["maxRecordingDurationSec"])
 ```
 
 The extension reports settings periodically and on change; `settings()`

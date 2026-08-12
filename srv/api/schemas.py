@@ -23,7 +23,7 @@ Tid = Annotated[int, Field(gt=0)]
 RecordingId = Annotated[int, Field(gt=0)]
 ScrollY = Annotated[float, Field(allow_inf_nan=False)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
-MAX_RECORDING_BASE64_LENGTH = 60 * 1024 * 1024
+MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
 MAX_RECORDING_DURATION_SECONDS = 300
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 

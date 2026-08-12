@@ -73,7 +73,7 @@ record the whole scrollable page instead of the visible viewport.
 `record_stop` delivers the recording's public download URL with a
 `stopped_reason` and message when the extension's maximum duration was
 reached first. `settings` returns the browser's reported configuration
-(including `maxRecordingDurationMs` and `maxRecordingSizeMiB`) so agents can
+(including `maxRecordingDurationSec` and `maxRecordingSizeMiB`) so agents can
 plan recordings and other bounded work.
 
 ## Docker

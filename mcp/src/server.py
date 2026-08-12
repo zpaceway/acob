@@ -44,7 +44,7 @@ from pydantic import (
     StringConstraints,
 )
 
-SERVER_VERSION = "0.8.0"
+SERVER_VERSION = "0.9.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
@@ -415,7 +415,7 @@ def create_server(
         """Return the settings most recently reported by the browser extension.
 
         The extension reports its settings periodically and whenever they
-        change. Use these values (for example maxRecordingDurationMs) to plan
+        change. Use these values (for example maxRecordingDurationSec) to plan
         recordings and other bounded work."""
         return await _client(ctx).settings(
             timeout=timeout,

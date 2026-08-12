@@ -18,8 +18,8 @@ test("normalizes a complete default configuration", () => {
     httpRequestTimeoutMs: 30000,
     javascriptTimeoutMs: 60000,
     maxScreenshotSizeMiB: 30,
-    maxRecordingDurationMs: 300000,
-    maxRecordingSizeMiB: 60,
+    maxRecordingDurationSec: 300,
+    maxRecordingSizeMiB: 512,
     resultRetryAttempts: 3,
     resultRetryDelayMs: 1000,
     popupStatusDurationMs: 2500,
@@ -39,7 +39,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
     httpRequestTimeoutMs: 10000,
     javascriptTimeoutMs: 45000,
     maxScreenshotSizeMiB: 12,
-    maxRecordingDurationMs: 60000,
+    maxRecordingDurationSec: 60,
     maxRecordingSizeMiB: 12,
     resultRetryAttempts: 2,
     resultRetryDelayMs: 500,
@@ -53,7 +53,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
   assert.equal(configuration.tabLoadTimeoutMs, 45000);
   assert.equal(configuration.httpRequestTimeoutMs, 10000);
   assert.equal(configuration.javascriptTimeoutMs, 45000);
-  assert.equal(configuration.maxRecordingDurationMs, 60000);
+  assert.equal(configuration.maxRecordingDurationSec, 60);
   assert.equal(configuration.maxRecordingSizeMiB, 12);
   assert.equal(configuration.resultRetryAttempts, 2);
   assert.equal(configuration.debuggerProtocolVersion, "1.4");
@@ -71,8 +71,8 @@ test("replaces invalid values with their centralized defaults", () => {
     httpRequestTimeoutMs: 30001,
     javascriptTimeoutMs: 90001,
     maxScreenshotSizeMiB: 31,
-    maxRecordingDurationMs: 300001,
-    maxRecordingSizeMiB: 61,
+    maxRecordingDurationSec: 301,
+    maxRecordingSizeMiB: 513,
     resultRetryAttempts: 4,
     resultRetryDelayMs: 30001,
     popupStatusDurationMs: -1,
@@ -88,8 +88,8 @@ test("replaces invalid values with their centralized defaults", () => {
   assert.equal(configuration.httpRequestTimeoutMs, 30000);
   assert.equal(configuration.javascriptTimeoutMs, 60000);
   assert.equal(configuration.maxScreenshotSizeMiB, 30);
-  assert.equal(configuration.maxRecordingDurationMs, 300000);
-  assert.equal(configuration.maxRecordingSizeMiB, 60);
+  assert.equal(configuration.maxRecordingDurationSec, 300);
+  assert.equal(configuration.maxRecordingSizeMiB, 512);
   assert.equal(configuration.resultRetryAttempts, 3);
   assert.equal(configuration.resultRetryDelayMs, 1000);
   assert.equal(configuration.popupStatusDurationMs, 2500);

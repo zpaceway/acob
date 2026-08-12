@@ -361,8 +361,8 @@ the extension reports them periodically to
 {
   "settings": {
     "pollIntervalMs": 1000,
-    "maxRecordingDurationMs": 300000,
-    "maxRecordingSizeMiB": 60
+    "maxRecordingDurationSec": 300,
+    "maxRecordingSizeMiB": 512
   },
   "updated_at": "2026-08-12T00:00:00Z"
 }

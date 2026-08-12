@@ -11,7 +11,7 @@ import type {
 const MEBIBYTE_IN_BYTES = 1024 * 1024;
 const MAX_HTTP_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_JAVASCRIPT_TIMEOUT_MS = 90_000;
-const MAX_RECORDING_DURATION_MS = 300_000;
+const MAX_RECORDING_DURATION_SECONDS = 300;
 const MAX_RESULT_RETRY_ATTEMPTS = 3;
 const MAX_RESULT_RETRY_DELAY_MS = 30_000;
 const MAX_TAB_LOAD_TIMEOUT_MS = 90_000;
@@ -122,26 +122,26 @@ const definitions: SettingDefinitions = {
     editable: true,
     visible: true,
   },
-  maxRecordingDurationMs: {
-    defaultValue: 300000,
+  maxRecordingDurationSec: {
+    defaultValue: 300,
     valueType: "integer",
     inputType: "number",
-    label: "Recording duration (ms)",
-    hint: "Maximum recording length; recordings stop automatically at this limit.",
-    min: 1000,
-    max: MAX_RECORDING_DURATION_MS,
-    step: 1000,
+    label: "Recording duration (s)",
+    hint: "Maximum recording length in seconds; recordings stop automatically at this limit.",
+    min: 1,
+    max: MAX_RECORDING_DURATION_SECONDS,
+    step: 1,
     editable: true,
     visible: true,
   },
   maxRecordingSizeMiB: {
-    defaultValue: 60,
+    defaultValue: 512,
     valueType: "integer",
     inputType: "number",
     label: "Recording limit (MiB)",
     hint: "Maximum encoded recording size accepted by the server.",
     min: 1,
-    max: 60,
+    max: 512,
     step: 1,
     editable: true,
     visible: true,

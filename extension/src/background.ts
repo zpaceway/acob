@@ -121,6 +121,13 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     );
     return true;
   }
+  if (message.type === "recordingChunk") {
+    const chunks = state.recordingChunks.get(message.recordingId) ?? [];
+    chunks.push(message.data);
+    state.recordingChunks.set(message.recordingId, chunks);
+    sendResponse({ ok: true });
+    return;
+  }
   if (message.type === "getConfiguration") {
     getConfiguration().then(sendResponse, (error) => {
       sendResponse({

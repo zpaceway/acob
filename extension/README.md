@@ -58,7 +58,7 @@ JavaScript on the same tab execute in claim order.
 `record_start` (`{tid}`, optional `full_page`) starts a video recording of the
 tab and completes immediately with `{recording_id, started}`; the recording
 continues in the background until `record_stop` (`{recording_id}`) or
-`maxRecordingDurationMs` (default 300000 ms, 5 minutes). `full_page: true`
+`maxRecordingDurationSec` (default 300 s, 5 minutes). `full_page: true`
 records the whole scrollable content instead of the viewport: the worker
 measures the content size up front and re-measures it each frame so growing
 pages stay covered, and the sink sizes its canvas and bitrate accordingly. A

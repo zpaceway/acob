@@ -967,8 +967,8 @@ class InstructionApiTests(TestCase):
             {
                 "settings": {
                     "pollIntervalMs": 1000,
-                    "maxRecordingDurationMs": 300000,
-                    "maxRecordingSizeMiB": 60,
+                    "maxRecordingDurationSec": 300,
+                    "maxRecordingSizeMiB": 512,
                 }
             },
         )
@@ -980,8 +980,8 @@ class InstructionApiTests(TestCase):
             reported.json()["settings"],
             {
                 "pollIntervalMs": 1000,
-                "maxRecordingDurationMs": 300000,
-                "maxRecordingSizeMiB": 60,
+                "maxRecordingDurationSec": 300,
+                "maxRecordingSizeMiB": 512,
             },
         )
         self.assertTrue(reported.json()["updated_at"])
