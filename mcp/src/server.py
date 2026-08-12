@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from acob import (
     ACOBClient,
@@ -131,6 +132,7 @@ class Settings:
     poll_interval: float = 0.5
     host: str = "127.0.0.1"
     port: int = DEFAULT_MCP_PORT
+    application_base_url: str | None = None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -140,6 +142,7 @@ class Settings:
             poll_interval=_positive_float(values, "ACOB_POLL_INTERVAL", 0.5),
             host=values.get("ACOB_MCP_HOST", "127.0.0.1"),
             port=_port(values.get("ACOB_MCP_PORT", str(DEFAULT_MCP_PORT))),
+            application_base_url=_application_base_url(values),
         )
 
 
@@ -354,6 +357,13 @@ def create_server(
                 full_page=full_page,
                 timeout=timeout,
             )
+            base_url = _screenshot_base_url(
+                ctx.request_context.request,
+                settings.application_base_url,
+            )
+            screenshot_url = screenshot_url.model_copy(
+                update={"url": _replace_origin(screenshot_url.url, base_url)}
+            )
             return CallToolResult(
                 content=[
                     TextContent(type="text", text=screenshot_url.model_dump_json())
@@ -482,6 +492,57 @@ def _connection_target(request: Any) -> tuple[str, str]:
         if not endpoint:
             raise ValueError("the 'endpoint' query parameter cannot be blank")
     return bid, endpoint
+
+
+def _screenshot_base_url(request: Any, application_base_url: str | None) -> str:
+    """Resolve the origin for returned screenshot download URLs.
+
+    Priority: the connection's endpoint query parameter, then the configured
+    APPLICATION_BASE_URL, then DEFAULT_ACOB_ENDPOINT.
+    """
+    if request is not None:
+        query_params = getattr(request, "query_params", None)
+        if isinstance(query_params, Mapping):
+            endpoint = query_params.get("endpoint")
+            if endpoint is not None and endpoint.strip():
+                return endpoint.strip()
+    if application_base_url is not None:
+        return application_base_url
+    return DEFAULT_ACOB_ENDPOINT
+
+
+def _replace_origin(url: str, base_url: str) -> str:
+    """Return ``url`` with its origin replaced by ``base_url``'s origin."""
+    parsed = urlsplit(url)
+    base = urlsplit(base_url)
+    if (parsed.scheme, parsed.netloc) == (base.scheme, base.netloc):
+        return url
+    return urlunsplit(
+        (base.scheme, base.netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def _application_base_url(environ: Mapping[str, str]) -> str | None:
+    raw = environ.get("APPLICATION_BASE_URL", "")
+    value = raw.strip()
+    if not value:
+        return None
+    normalized = value.rstrip("/")
+    try:
+        parsed = urlsplit(normalized)
+        _ = parsed.port
+    except ValueError as error:
+        raise ValueError(
+            "APPLICATION_BASE_URL must be a valid HTTP or HTTPS URL"
+        ) from error
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("APPLICATION_BASE_URL must be a valid HTTP or HTTPS URL")
+    return normalized
 
 
 def _validate_keyboard(

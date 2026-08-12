@@ -24,6 +24,7 @@ from src.server import (
     SERVER_TITLE,
     AppContext,
     Settings,
+    _screenshot_base_url,
     create_server,
     main,
 )
@@ -47,6 +48,7 @@ class SettingsTests(unittest.TestCase):
                 "ACOB_POLL_INTERVAL": "0.1",
                 "ACOB_MCP_HOST": "0.0.0.0",
                 "ACOB_MCP_PORT": "9000",
+                "APPLICATION_BASE_URL": "http://public.example:58347",
             }
         )
 
@@ -54,6 +56,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.poll_interval, 0.1)
         self.assertEqual(settings.host, "0.0.0.0")
         self.assertEqual(settings.port, 9000)
+        self.assertEqual(settings.application_base_url, "http://public.example:58347")
 
     def test_defaults_apply_when_env_is_empty(self):
         settings = Settings.from_env({})
@@ -62,6 +65,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.poll_interval, 0.5)
         self.assertEqual(settings.host, "127.0.0.1")
         self.assertEqual(settings.port, 58348)
+        self.assertIsNone(settings.application_base_url)
+        self.assertIsNone(
+            Settings.from_env({"APPLICATION_BASE_URL": "  "}).application_base_url
+        )
 
     def test_rejects_invalid_settings(self):
         invalid = (
@@ -72,6 +79,14 @@ class SettingsTests(unittest.TestCase):
             (
                 {"ACOB_MCP_PORT": "0"},
                 "ACOB_MCP_PORT must be an integer from 1 to 65535",
+            ),
+            (
+                {"APPLICATION_BASE_URL": "not-a-url"},
+                "APPLICATION_BASE_URL must be a valid HTTP or HTTPS URL",
+            ),
+            (
+                {"APPLICATION_BASE_URL": "http://example.com?q=1"},
+                "APPLICATION_BASE_URL must be a valid HTTP or HTTPS URL",
             ),
         )
 
@@ -131,6 +146,31 @@ class AppContextTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(ValueError, "URL path"):
             context.client_for(None)
+
+    def test_screenshot_base_url_prioritizes_request_endpoint(self):
+        request = self.request(self.BID, "http://request.example:58347")
+        application_base_url = "http://public.example:58347"
+
+        self.assertEqual(
+            _screenshot_base_url(request, application_base_url),
+            "http://request.example:58347",
+        )
+        self.assertEqual(
+            _screenshot_base_url(request, None),
+            "http://request.example:58347",
+        )
+
+    def test_screenshot_base_url_falls_back_to_application_base_url(self):
+        self.assertEqual(
+            _screenshot_base_url(self.request(self.BID), "http://public.example:58347"),
+            "http://public.example:58347",
+        )
+
+    def test_screenshot_base_url_falls_back_to_the_default_endpoint(self):
+        self.assertEqual(
+            _screenshot_base_url(self.request(self.BID), None),
+            DEFAULT_ACOB_ENDPOINT,
+        )
 
     def test_default_client_ignores_the_connection_url(self):
         default_client = create_autospec(ACOBClient, instance=True)
@@ -378,7 +418,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_returns_screenshot_download_url_when_as_url(self):
         screenshot_url = ScreenshotUrl(
-            url=f"http://acob.test/api/browsers/{self.BID}/screenshots/9/",
+            url=f"http://127.0.0.1:58347/api/browsers/{self.BID}/screenshots/9/",
             content_type="image/png",
             full_page=False,
             single_use=True,
@@ -402,6 +442,32 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             as_url=True,
             full_page=False,
             timeout=None,
+        )
+
+    async def test_screenshot_url_uses_application_base_url_when_endpoint_absent(self):
+        self.server = create_server(
+            Settings(application_base_url="http://public.example:58347"),
+            client=self.acob,
+        )
+        screenshot_url = ScreenshotUrl(
+            url=f"http://127.0.0.1:58347/api/browsers/{self.BID}/screenshots/9/",
+            content_type="image/png",
+            full_page=False,
+            single_use=True,
+            tid=12,
+        )
+        self.acob.screenshot.return_value = screenshot_url
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            result = await client.call_tool(
+                "screenshot",
+                {"tid": 12, "as_url": True},
+            )
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(
+            result.structured_content["url"],
+            f"http://public.example:58347/api/browsers/{self.BID}/screenshots/9/",
         )
 
     async def test_returns_javascript_json_values(self):

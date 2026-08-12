@@ -42,11 +42,18 @@ connection supplies its browser ID in the URL path:
 Without a query parameter, the API endpoint defaults to
 `http://127.0.0.1:58347`.
 
+Screenshot download URLs returned with `as_url=true` use the first available
+origin: the connection's `endpoint` query parameter, then the
+`APPLICATION_BASE_URL` environment variable, then `DEFAULT_ACOB_ENDPOINT`.
+`APPLICATION_BASE_URL` is for exposing an externally reachable API origin that
+differs from the one the adapter itself uses.
+
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DEFAULT_ACOB_ENDPOINT` | `http://127.0.0.1:58347` | Default ACOB API origin. |
+| `APPLICATION_BASE_URL` | unset | Externally reachable ACOB API origin used for returned screenshot URLs. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
