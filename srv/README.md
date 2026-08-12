@@ -30,9 +30,10 @@ make dev ACOB_SRV_HOST=0.0.0.0 ACOB_SRV_PORT=8000
 Use `make run` to apply migrations and serve `acob.asgi:application` with
 Uvicorn. Both commands use the development settings in `acob/settings.py`.
 
-Screenshot results require a media storage service. Set `STORAGE_ENDPOINT` and
-`STORAGE_API_KEY` (empty by default); without them, screenshot instructions
-fail with a clear error instead of storing anything locally.
+Screenshot results require a media storage service. `STORAGE_PROVIDER` selects
+the provider (default `chipf`); set `CHIPF_ENDPOINT` and `CHIPF_API_KEY`
+(empty by default); without them, screenshot instructions fail with a clear
+error instead of storing anything locally.
 
 Create and apply migrations separately with `make migrations` and
 `make migrate`.

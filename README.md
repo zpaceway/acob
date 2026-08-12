@@ -290,8 +290,9 @@ control first, usually with `click`.
 ```
 
 The server never stores the image: the extension submits the capture as base64,
-the server uploads the bytes to the storage service (`STORAGE_ENDPOINT` and
-`STORAGE_API_KEY`) and stores only the resulting URL in the instruction result.
+the server uploads the bytes to the configured storage provider (`STORAGE_PROVIDER`,
+default `chipf`, configured via `CHIPF_ENDPOINT` and `CHIPF_API_KEY`) and stores
+only the resulting URL in the instruction result.
 The storage service controls the lifetime of the URL. Without a configured
 storage service, or when the upload fails, the instruction completes as failed
 with a clear error. Encoded captures are limited to 30 MiB; larger captures

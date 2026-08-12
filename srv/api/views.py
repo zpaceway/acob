@@ -270,13 +270,13 @@ def complete_instruction(
 def _host_screenshot(image: bytes, payload: dict) -> str:
     """Upload screenshot bytes to the configured storage service."""
     backend = create_storage_backend(
-        settings.STORAGE_ENDPOINT,
-        settings.STORAGE_API_KEY,
+        settings.STORAGE_PROVIDER,
+        settings.STORAGE_CONFIG,
     )
     if backend is None:
         raise StorageError(
-            "no storage service is configured; set STORAGE_ENDPOINT and "
-            "STORAGE_API_KEY"
+            "no storage service is configured; set CHIPF_ENDPOINT and "
+            "CHIPF_API_KEY (or another provider's credentials)"
         )
     tid = payload.get("tid")
     filename = f"screenshot-{tid}.png" if isinstance(tid, int) else "screenshot.png"

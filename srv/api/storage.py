@@ -1,11 +1,13 @@
 """Media storage abstraction: upload bytes and receive a public URL.
 
-The current backend uploads to the CHIPF media service. Add another service
-by implementing ``StorageBackend`` and wiring it into
-``create_storage_backend``.
+``create_storage_backend`` dispatches on the configured provider
+(``STORAGE_PROVIDER``, default "chipf"), reading that provider's credentials
+from its config mapping. Add another service by implementing
+``StorageBackend`` and wiring it into ``create_storage_backend``.
 """
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
@@ -67,8 +69,21 @@ class ChipfStorageBackend(StorageBackend):
         return _upload_url(response.content, self.endpoint)
 
 
-def create_storage_backend(endpoint: str, api_key: str) -> StorageBackend | None:
-    """Return the configured storage backend, or None when unconfigured."""
+def create_storage_backend(
+    provider: str,
+    config: Mapping[str, Mapping[str, str]] | None = None,
+) -> StorageBackend | None:
+    """Return the configured storage backend, or None when unconfigured.
+
+    ``provider`` selects the backend; ``config`` maps each provider to its
+    settings (endpoint, API key, ...). Each provider requires its own
+    credentials, so an unknown provider is a configuration error.
+    """
+    if provider != "chipf":
+        raise StorageError(f"unknown storage provider: {provider!r}")
+    provider_config = (config or {}).get(provider) or {}
+    endpoint = provider_config.get("endpoint", "")
+    api_key = provider_config.get("api_key", "")
     if not endpoint or not api_key:
         return None
     return ChipfStorageBackend(endpoint, api_key)

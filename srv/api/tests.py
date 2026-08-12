@@ -531,8 +531,12 @@ class InstructionApiTests(TestCase):
 
         with (
             patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_ENDPOINT", "https://chipf.test"),
-            patch.object(settings, "STORAGE_API_KEY", "secret"),
+            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
+            patch.object(
+                settings,
+                "STORAGE_CONFIG",
+                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+            ),
         ):
             backend = create_backend.return_value
             backend.upload_file.return_value = (
@@ -553,7 +557,10 @@ class InstructionApiTests(TestCase):
                 "full_page": True,
             },
         )
-        create_backend.assert_called_once_with("https://chipf.test", "secret")
+        create_backend.assert_called_once_with(
+            "chipf",
+            {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+        )
         backend.upload_file.assert_called_once_with(
             image,
             "screenshot-12.png",
@@ -700,9 +707,34 @@ class StorageBackendTests(TestCase):
     def test_unconfigured_backend_is_none(self):
         from .storage import create_storage_backend
 
-        self.assertIsNone(create_storage_backend("", ""))
-        self.assertIsNone(create_storage_backend("https://chipf.test", ""))
-        self.assertIsNone(create_storage_backend("", "secret"))
+        self.assertIsNone(create_storage_backend("chipf", {}))
+        self.assertIsNone(create_storage_backend("chipf", {"chipf": {}}))
+        self.assertIsNone(
+            create_storage_backend(
+                "chipf", {"chipf": {"endpoint": "https://chipf.test"}}
+            )
+        )
+        self.assertIsNone(
+            create_storage_backend("chipf", {"chipf": {"api_key": "secret"}})
+        )
+        self.assertIsNone(create_storage_backend("chipf", None))
+
+    def test_unknown_provider_is_a_configuration_error(self):
+        from .storage import StorageError, create_storage_backend
+
+        with self.assertRaisesRegex(StorageError, "unknown storage provider"):
+            create_storage_backend("s3", {"s3": {"endpoint": "x", "api_key": "y"}})
+
+    def test_configured_chipf_backend_is_returned(self):
+        from .storage import ChipfStorageBackend, create_storage_backend
+
+        backend = create_storage_backend(
+            "chipf",
+            {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+        )
+        assert isinstance(backend, ChipfStorageBackend)
+        self.assertEqual(backend.endpoint, "https://chipf.test")
+        self.assertEqual(backend.api_key, "secret")
 
     def test_upload_file_returns_the_resolved_url(self):
         from .storage import ChipfStorageBackend

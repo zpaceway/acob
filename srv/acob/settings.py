@@ -122,6 +122,12 @@ STATIC_URL = "static/"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 32 * 1024 * 1024
 
 # Media storage service: screenshots are uploaded there and never stored
-# locally. Unset means screenshot results fail until it is configured.
-STORAGE_ENDPOINT = os.getenv("STORAGE_ENDPOINT", "").rstrip("/")
-STORAGE_API_KEY = os.getenv("STORAGE_API_KEY", "")
+# locally. STORAGE_PROVIDER selects the backend (default "chipf"); each
+# provider reads its own environment variables. Unset credentials mean
+# screenshot results fail until a provider is configured.
+STORAGE_PROVIDER = os.getenv("STORAGE_PROVIDER", "chipf").strip().lower()
+CHIPF_ENDPOINT = os.getenv("CHIPF_ENDPOINT", "").rstrip("/")
+CHIPF_API_KEY = os.getenv("CHIPF_API_KEY", "")
+STORAGE_CONFIG = {
+    "chipf": {"endpoint": CHIPF_ENDPOINT, "api_key": CHIPF_API_KEY},
+}
