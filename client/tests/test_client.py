@@ -434,7 +434,6 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.url, f"http://acob.test{download_url}")
         self.assertEqual(result.content_type, "image/png")
         self.assertTrue(result.full_page)
-        self.assertTrue(result.single_use)
         self.assertEqual(result.tid, 12)
         self.assertEqual(len(requests), 2)
         self.assertEqual(

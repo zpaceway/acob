@@ -17,6 +17,7 @@ directly in `src/` and is started through the Makefile.
 - Python 3.10 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - A running ACOB server and Chromium extension
+- A running CHIPF media service (for screenshot download URLs)
 - Docker with Compose, only for the container workflow
 
 Sync the service dependencies and run it:
@@ -39,33 +40,40 @@ connection supplies its browser ID in the URL path:
 }
 ```
 
-Without a query parameter, the API endpoint defaults to
-`http://127.0.0.1:58347`.
+Nothing is configurable per connection: the browser ID is baked into the URL
+path, and the ACOB API origin always comes from the `ACOB_ENDPOINT`
+environment variable.
 
-Screenshot download URLs returned with `as_url=true` use the first available
-origin: the connection's `endpoint` query parameter, then the
-`APPLICATION_BASE_URL` environment variable, then `DEFAULT_ACOB_ENDPOINT`.
-`APPLICATION_BASE_URL` is for exposing an externally reachable API origin that
-differs from the one the adapter itself uses.
+Screenshot URLs returned with `as_url=true` are not served by ACOB: the PNG
+bytes are uploaded to the CHIPF media service, which returns a public download
+URL. CHIPF controls the lifetime of those URLs with its own expiration policy.
+Without a configured CHIPF service, `as_url=true` fails with an error saying
+screenshots are not allowed because CHIPF is not set up; `as_url=false` still
+streams the PNG image directly.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DEFAULT_ACOB_ENDPOINT` | `http://127.0.0.1:58347` | Default ACOB API origin. |
-| `APPLICATION_BASE_URL` | unset | Externally reachable ACOB API origin used for returned screenshot URLs. |
+| `ACOB_ENDPOINT` | required | ACOB API origin, always taken from the environment. |
+| `CHIPF_ENDPOINT` | unset | CHIPF media service origin (or its full `/api/files/upload` URL). |
+| `CHIPF_API_KEY` | unset | Shared key for uploading to CHIPF. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
 | `ACOB_MCP_PORT` | `58348` | HTTP listen port. |
 
-`make run` sets `ACOB_MCP_HOST` to `0.0.0.0`; override either value with Make
-variables when needed.
+`ACOB_ENDPOINT` is required: the server refuses to start without it.
+`CHIPF_ENDPOINT` and `CHIPF_API_KEY` are optional together; without them the
+server starts, but `screenshot` with `as_url=true` is rejected. `make run` sets
+`ACOB_MCP_HOST` to `0.0.0.0` and provides a development default for
+`ACOB_ENDPOINT`; override any value with Make variables when needed.
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `javascript`, and `reinstall`. The
 `screenshot` tool always requires `as_url`: `false` streams the PNG image,
-`true` returns the single-use download URL for later analysis.
+`true` uploads it to CHIPF and returns the public download URL for later
+analysis.
 
 ## Docker
 

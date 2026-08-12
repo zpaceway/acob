@@ -86,7 +86,6 @@ class ScreenshotUrl(_ResultModel):
     url: str = Field(min_length=1)
     content_type: Literal["image/png"]
     full_page: bool
-    single_use: Literal[True]
     tid: int
 
 
@@ -483,7 +482,6 @@ class ACOBClient:
                 url=resolved_url,
                 content_type=result.content_type,
                 full_page=result.full_page,
-                single_use=result.single_use,
                 tid=result.tid,
             )
         return await self._request_bytes(

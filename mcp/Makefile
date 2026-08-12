@@ -1,5 +1,10 @@
 ACOB_MCP_HOST ?= 0.0.0.0
 ACOB_MCP_PORT ?= 58348
+ACOB_ENDPOINT ?= http://127.0.0.1:58347
+CHIPF_ENDPOINT ?=
+CHIPF_API_KEY ?=
+
+export ACOB_ENDPOINT CHIPF_ENDPOINT CHIPF_API_KEY
 
 .PHONY: format check test run docker logs build-push
 
@@ -21,7 +26,7 @@ test:
 
 run:
 	@echo "Starting ACOB MCP server..."
-	ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python src/server.py
+	ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server
 
 docker:
 	@echo "Building Docker image..."
