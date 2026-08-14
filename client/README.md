@@ -130,7 +130,8 @@ tab = await client.reload(123)
 scrolled = await client.scroll(123, 500)
 ```
 
-Only `focus()` activates a tab or focuses its window. Navigation, reload,
+Only `focus()` activates a tab within its own window; it never raises or
+focuses the window, so other applications keep OS focus. Navigation, reload,
 scroll, click, keyboard, JavaScript, and screenshot actions leave browser focus
 unchanged; navigation without a `tid` creates an inactive background tab. That
 new-tab action raises `ACOBInstructionError` if the browser has reached its

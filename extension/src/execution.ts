@@ -71,8 +71,6 @@ async function runInstructionAction(
   }
 
   if (action === "focus") {
-    const tab = await chrome.tabs.get(payload.tid);
-    await chrome.windows.update(tab.windowId, { focused: true });
     const focusedTab = await chrome.tabs.update(payload.tid, { active: true });
     if (!focusedTab) {
       throw new Error(`Chromium did not return focused tab ${payload.tid}`);

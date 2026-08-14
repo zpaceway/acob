@@ -264,7 +264,9 @@ non-empty `url`; it navigates the supplied `tid`, or creates an inactive
 background tab when `tid` is omitted, waits for the page load event, and
 returns the tab details. New-tab navigation fails when the browser already has
 the maximum number of tabs configured in the extension. Only `focus` activates
-a tab and focuses its containing window. `focus` and `close` require a `tid`.
+a tab within its own window. It never raises or focuses the window, so it
+cannot steal focus from another application. `focus` and `close` require a
+`tid`.
 
 `reload` requires a `tid`, reloads that tab, waits for its page load event, and
 returns updated tab details. `scroll` requires a `tid` and finite numeric `y`;
