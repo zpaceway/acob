@@ -353,7 +353,7 @@ def create_server(
     async def screenshot(
         tid: PositiveTid,
         ctx: Context[AppContext],
-        full_page: StrictBool = False,
+        full_page: StrictBool = True,
         timeout: ToolTimeout | None = None,
     ) -> Screenshot:
         """Capture a Chromium tab and return its public download URL hosted

@@ -90,7 +90,7 @@ class KeyboardInstruction(ApiModel):
 class ScreenshotInstruction(ApiModel):
     action: Literal["screenshot"]
     tid: Tid
-    full_page: bool = False
+    full_page: bool = True
 
 
 class RecordStartInstruction(ApiModel):

@@ -235,7 +235,7 @@ def complete_instruction(
             result = {
                 "url": url,
                 "content_type": "image/png",
-                "full_page": instruction.payload.get("full_page", False),
+                "full_page": instruction.payload.get("full_page", True),
             }
     elif (
         instruction.action == Instruction.Action.RECORD_START

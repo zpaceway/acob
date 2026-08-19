@@ -456,7 +456,7 @@ class ACOBClient:
         self,
         tid: int,
         *,
-        full_page: bool = False,
+        full_page: bool = True,
         timeout: float | None = None,
     ) -> Screenshot:
         """Capture a tab and return its public download URL.

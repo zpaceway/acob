@@ -126,7 +126,7 @@ async function runInstructionAction(
     await chrome.tabs.get(payload.tid);
     return executeScreenshot(
       payload.tid,
-      payload.full_page ?? false,
+      payload.full_page ?? true,
       configuration,
     );
   }
