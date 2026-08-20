@@ -208,14 +208,14 @@ export async function executeScreenshot(
   configuration: Configuration,
 ): Promise<ScreenshotUploadResult> {
   return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
-    const { data } = await sendCdpCommand(
-      target,
-      "Page.captureScreenshot",
-      {
+    const { data } = await withTimeout(
+      sendCdpCommand(target, "Page.captureScreenshot", {
         format: "png",
         fromSurface: true,
         captureBeyondViewport: fullPage,
-      },
+      }),
+      configuration.httpRequestTimeoutMs,
+      "Timed out capturing the screenshot",
     );
     if (
       data.length >
