@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isSupportedInstruction } from "../src/validation.js";
+import {
+  assertSupportedInstruction,
+  isSupportedInstruction,
+} from "../src/validation.js";
 import type { ClaimedInstruction } from "../src/types.js";
 
 function instruction(action: string, payload: unknown): ClaimedInstruction {
@@ -50,4 +53,31 @@ test("rejects batches with invalid sub-actions", () => {
   assert.equal(isSupportedInstruction(nestedBatch), false);
   assert.equal(isSupportedInstruction(nonObject), false);
   assert.equal(isSupportedInstruction(invalidScroll), false);
+});
+
+test("reports the invalid batch action index and name", () => {
+  const value = instruction("batch", {
+    actions: [
+      { action: "list" },
+      { action: "click", selector: "button" },
+    ],
+  });
+
+  assert.throws(
+    () => assertSupportedInstruction(value),
+    new Error("Unsupported or invalid instruction: batch action 1 (click)"),
+  );
+});
+
+test("reports malformed batch entries", () => {
+  const value = instruction("batch", {
+    actions: [{ action: "list" }, "scroll"],
+  });
+
+  assert.throws(
+    () => assertSupportedInstruction(value),
+    new Error(
+      "Unsupported or invalid instruction: batch action 1 must be an object with a string action",
+    ),
+  );
 });

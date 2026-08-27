@@ -15,7 +15,7 @@ import {
   tabDetails,
   waitForTab,
 } from "./tabs.js";
-import { isSupportedInstruction } from "./validation.js";
+import { assertSupportedInstruction } from "./validation.js";
 import type {
   ClaimedInstruction,
   Configuration,
@@ -242,11 +242,7 @@ export async function executeInstruction(
   }
   let body: InstructionResultRequest;
   try {
-    if (!isSupportedInstruction(instruction)) {
-      throw new Error(
-        `Unsupported or invalid instruction: ${instruction.action}`,
-      );
-    }
+    assertSupportedInstruction(instruction);
     const result = await runInstruction(instruction, configuration);
     body = { result };
   } catch (error) {

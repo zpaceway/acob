@@ -119,34 +119,49 @@ function isSupportedActionPayload(
   );
 }
 
-function isSupportedBatchPayload(payload: Record<string, unknown>): boolean {
-  if (
-    !Array.isArray(payload.actions) ||
-    payload.actions.length === 0 ||
-    payload.actions.length > MAX_BATCH_ACTIONS
-  ) {
-    return false;
+function instructionValidationError(
+  value: ClaimedInstruction,
+): string | null {
+  if (!isRecord(value.payload)) {
+    return `Unsupported or invalid instruction: ${value.action}: payload must be an object`;
   }
-  return payload.actions.every((entry) => {
+  if (value.action !== "batch") {
+    return isSupportedActionPayload(value.action, value.payload)
+      ? null
+      : `Unsupported or invalid instruction: ${value.action}`;
+  }
+  if (!Array.isArray(value.payload.actions)) {
+    return "Unsupported or invalid instruction: batch: actions must be an array";
+  }
+  if (
+    value.payload.actions.length === 0 ||
+    value.payload.actions.length > MAX_BATCH_ACTIONS
+  ) {
+    return `Unsupported or invalid instruction: batch: actions must contain 1-${MAX_BATCH_ACTIONS} entries`;
+  }
+  for (const [index, entry] of value.payload.actions.entries()) {
     if (!isRecord(entry) || typeof entry.action !== "string") {
-      return false;
+      return `Unsupported or invalid instruction: batch action ${index} must be an object with a string action`;
     }
     const { action: entryAction, ...entryPayload } = entry;
-    if (typeof entryAction !== "string") {
-      return false;
+    if (!isSupportedActionPayload(entryAction, entryPayload)) {
+      return `Unsupported or invalid instruction: batch action ${index} (${entryAction})`;
     }
-    return isSupportedActionPayload(entryAction, entryPayload);
-  });
+  }
+  return null;
+}
+
+export function assertSupportedInstruction(
+  value: ClaimedInstruction,
+): asserts value is SupportedInstruction {
+  const validationError = instructionValidationError(value);
+  if (validationError !== null) {
+    throw new Error(validationError);
+  }
 }
 
 export function isSupportedInstruction(
   value: ClaimedInstruction,
 ): value is SupportedInstruction {
-  if (!isRecord(value.payload)) {
-    return false;
-  }
-  if (value.action === "batch") {
-    return isSupportedBatchPayload(value.payload);
-  }
-  return isSupportedActionPayload(value.action, value.payload);
+  return instructionValidationError(value) === null;
 }
