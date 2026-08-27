@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import base64
 import json
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import httpx
@@ -8,34 +11,51 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
+
 from .models import Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR
-from .storage import StorageConnectionError
+from .storage import (
+    ChipfStorageBackend,
+    StorageConnectionError,
+    StorageError,
+    StorageHTTPError,
+    StorageProtocolError,
+    create_storage_backend,
+)
 
 
 class InstructionApiTests(TestCase):
     BID = "0123456789ab4def8123456789abcdef"
 
-    def instruction_path(self, suffix=""):
+    def instruction_path(self, suffix: str = "") -> str:
         return f"/api/browsers/{self.BID}/instructions/{suffix}"
 
-    def post_json(self, path, data):
+    def batch_path(self, suffix: str = "") -> str:
+        return f"/api/browsers/{self.BID}/instructions/batch/{suffix}"
+
+    def post_json(self, path: str, data: object) -> _MonkeyPatchedWSGIResponse:
         return self.client.post(
             path,
             data=json.dumps(data),
             content_type="application/json",
         )
 
-    def post_result(self, instruction_id, data):
+    def post_result(
+        self,
+        instruction_id: int,
+        data: object,
+    ) -> _MonkeyPatchedWSGIResponse:
         return self.post_json(
             self.instruction_path(f"{instruction_id}/result/"),
             data,
         )
 
-    def reinstall_path(self, suffix=""):
+    def reinstall_path(self, suffix: str = "") -> str:
         return f"/api/browsers/{self.BID}/reinstall/{suffix}"
 
-    def test_instruction_flow(self):
+    def test_instruction_flow(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "list"},
@@ -79,7 +99,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(empty_queue.status_code, 204)
         self.assertEqual(empty_queue.headers["Cache-Control"], "no-store")
 
-    def test_pending_and_processing_reads_are_not_consumed(self):
+    def test_pending_and_processing_reads_are_not_consumed(self) -> None:
         instruction = Instruction.objects.create(bid=self.BID, action="list")
 
         pending = self.client.get(self.instruction_path(f"{instruction.id}/"))
@@ -89,7 +109,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(processing["status"], "processing")
         self.assertTrue(Instruction.objects.filter(id=instruction.id).exists())
 
-    def test_browser_queues_are_isolated(self):
+    def test_browser_queues_are_isolated(self) -> None:
         other_bid = "fedcba9876544210a9876543210fedcb"
         created = self.post_json(
             self.instruction_path(),
@@ -108,7 +128,7 @@ class InstructionApiTests(TestCase):
             instruction_id,
         )
 
-    def test_claims_up_to_the_requested_instruction_limit(self):
+    def test_claims_up_to_the_requested_instruction_limit(self) -> None:
         instructions = [
             Instruction.objects.create(bid=self.BID, action="list") for _ in range(6)
         ]
@@ -132,7 +152,7 @@ class InstructionApiTests(TestCase):
             [instruction.id for instruction in instructions[4:]],
         )
 
-    def test_pending_reinstall_blocks_instruction_claims(self):
+    def test_pending_reinstall_blocks_instruction_claims(self) -> None:
         instruction = Instruction.objects.create(bid=self.BID, action="list")
         reinstall_request = Reinstall.objects.create(bid=self.BID)
 
@@ -152,7 +172,7 @@ class InstructionApiTests(TestCase):
         instruction.refresh_from_db()
         self.assertEqual(instruction.status, Instruction.Status.PENDING)
 
-    def test_rejects_invalid_instruction_claim_limits(self):
+    def test_rejects_invalid_instruction_claim_limits(self) -> None:
         for limit in ("0", "21", "invalid"):
             with self.subTest(limit=limit):
                 response = self.client.get(
@@ -163,7 +183,411 @@ class InstructionApiTests(TestCase):
                 self.assertEqual(response.json()["error"], "Invalid request")
                 self.assertEqual(response.json()["details"][0]["field"], "limit")
 
-    def test_rejects_invalid_browser_ids(self):
+    def test_batch_creates_one_instruction_with_all_actions(self) -> None:
+        response = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "scroll", "tid": 12, "y": 500},
+                    {"action": "click", "tid": 12, "selector": "button"},
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["bid"], self.BID)
+        self.assertEqual(response.json()["action"], "batch")
+        self.assertEqual(
+            response.json()["payload"]["actions"],
+            [
+                {"action": "list"},
+                {"action": "scroll", "tid": 12, "y": 500},
+                {"action": "click", "tid": 12, "selector": "button"},
+            ],
+        )
+        self.assertEqual(Instruction.objects.count(), 1)
+        instruction = Instruction.objects.get()
+        self.assertEqual(instruction.action, Instruction.Action.BATCH)
+
+    def test_batch_rejects_empty_or_oversized_action_lists(self) -> None:
+        empty = self.post_json(
+            self.batch_path(),
+            {"action": "batch", "actions": []},
+        )
+        oversized = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "list"} for _ in range(21)],
+            },
+        )
+
+        self.assertEqual(empty.status_code, 400)
+        self.assertEqual(empty.json()["details"][0]["field"], "actions")
+        self.assertEqual(oversized.status_code, 400)
+        self.assertEqual(oversized.json()["details"][0]["field"], "actions")
+
+    def test_batch_rejects_invalid_sub_actions(self) -> None:
+        missing_tid = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "click", "selector": "button"},
+                ],
+            },
+        )
+        unknown_action = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "unknown"}],
+            },
+        )
+
+        self.assertEqual(missing_tid.status_code, 400)
+        self.assertEqual(
+            missing_tid.json()["details"][0]["field"],
+            "actions.1.click.tid",
+        )
+        self.assertEqual(unknown_action.status_code, 400)
+
+    def test_single_instruction_route_rejects_batch(self) -> None:
+        response = self.post_json(
+            self.instruction_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "list"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+        self.assertEqual(
+            response.json()["details"][0]["type"],
+            "union_tag_invalid",
+        )
+
+    def test_batch_claims_and_completes_with_per_action_results(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "scroll", "tid": 12, "y": 500},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+
+        claimed = self.client.get(self.instruction_path("next/"))
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(len(claimed.json()), 1)
+        self.assertEqual(claimed.json()[0]["action"], "batch")
+        self.assertEqual(claimed.json()[0]["status"], "processing")
+
+        completed = self.post_result(
+            instruction_id,
+            {
+                "result": [
+                    {"result": []},
+                    {"result": {"scrolled": True, "y": 500}},
+                ]
+            },
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["status"], "completed")
+        self.assertEqual(
+            completed.json()["result"],
+            [
+                {"result": []},
+                {"result": {"scrolled": True, "y": 500}},
+            ],
+        )
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["result"], completed.json()["result"])
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+
+    def test_batch_reports_per_action_errors_without_stopping(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "close", "tid": 12},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {
+                "result": [
+                    {"error": "Chromium did not return a tab"},
+                    {"result": {"closed": True, "tab": {}}},
+                ]
+            },
+        )
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["status"], "completed")
+        self.assertEqual(
+            completed.json()["result"],
+            [
+                {"error": "Chromium did not return a tab"},
+                {"result": {"closed": True, "tab": {}}},
+            ],
+        )
+
+    def test_batch_screenshot_entries_are_hosted(self) -> None:
+        image = b"\x89PNG\r\n\x1a\nACOB"
+        encoded = base64.b64encode(image).decode()
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "screenshot", "tid": 12, "full_page": True},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            patch("api.views.create_storage_backend") as create_backend,
+            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
+            patch.object(
+                settings,
+                "STORAGE_CONFIG",
+                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+            ),
+        ):
+            backend = create_backend.return_value
+            backend.upload_file.return_value = (
+                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+            )
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": [
+                        {"result": []},
+                        {"result": {"data": encoded}},
+                    ]
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(
+            completed.json()["result"],
+            [
+                {"result": []},
+                {
+                    "result": {
+                        "url": (
+                            "https://chipf.test/api/files/"
+                            "638a5f9f16a24e1fbb4b3ab093016ec7"
+                        ),
+                        "content_type": "image/png",
+                        "full_page": True,
+                    }
+                },
+            ],
+        )
+        backend.upload_file.assert_called_once_with(
+            image,
+            "screenshot-12.png",
+            "image/png",
+        )
+
+    def test_batch_capture_hosting_failure_becomes_an_entry_error(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "screenshot", "tid": 12},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with patch("api.views.create_storage_backend", return_value=None):
+            completed = self.post_result(
+                instruction_id,
+                {"result": [{"result": {"data": base64.b64encode(b"image").decode()}}]},
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "completed")
+        entry = response["result"][0]
+        self.assertIn("error", entry)
+        self.assertIn("Could not host the screenshot", entry["error"])
+
+    def test_batch_record_entries_are_validated(self) -> None:
+        recording = b"0\x9awEBMACOB"
+        encoded = base64.b64encode(recording).decode()
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "record_start", "tid": 12},
+                    {"action": "record_stop", "recording_id": 42},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            patch("api.views.create_storage_backend") as create_backend,
+            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
+            patch.object(
+                settings,
+                "STORAGE_CONFIG",
+                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
+            ),
+        ):
+            backend = create_backend.return_value
+            backend.upload_file.return_value = (
+                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+            )
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": [
+                        {"result": {"recording_id": 42, "started": True}},
+                        {
+                            "result": {
+                                "data": encoded,
+                                "content_type": "video/webm",
+                                "duration": 5.0,
+                                "stopped_reason": "user",
+                                "message": "Recording stopped by user request",
+                            }
+                        },
+                    ]
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(
+            completed.json()["result"],
+            [
+                {"result": {"recording_id": 42, "started": True}},
+                {
+                    "result": {
+                        "url": (
+                            "https://chipf.test/api/files/"
+                            "638a5f9f16a24e1fbb4b3ab093016ec7"
+                        ),
+                        "content_type": "video/webm",
+                        "duration": 5.0,
+                        "stopped_reason": "user",
+                        "message": "Recording stopped by user request",
+                    }
+                },
+            ],
+        )
+        backend.upload_file.assert_called_once_with(
+            recording,
+            "recording-42.webm",
+            "video/webm",
+        )
+
+    def test_batch_rejects_malformed_entries(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "screenshot", "tid": 12}],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        bad_base64 = self.post_result(
+            instruction_id,
+            {"result": [{"result": {"data": "not base64!"}}]},
+        )
+        self.assertEqual(bad_base64.status_code, 400)
+        self.assertEqual(bad_base64.json()["error"], "Invalid screenshot data")
+
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "record_start", "tid": 12}],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        invalid_result = self.post_result(
+            instruction_id,
+            {"result": [{"result": {"recording_id": 0, "started": True}}]},
+        )
+        self.assertEqual(invalid_result.status_code, 400)
+
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "list"},
+                    {"action": "list"},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        wrong_count = self.post_result(
+            instruction_id,
+            {"result": [{"result": []}]},
+        )
+        self.assertEqual(wrong_count.status_code, 400)
+        self.assertEqual(
+            wrong_count.json()["error"],
+            "Batch result must contain one entry per batch action",
+        )
+        self.assertFalse(
+            Instruction.objects.filter(
+                id=instruction_id,
+                status=Instruction.Status.COMPLETED,
+            ).exists()
+        )
+
+    def test_batch_rejects_entries_with_result_and_error(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "list"}],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        response = self.post_result(
+            instruction_id,
+            {"result": [{"result": [], "error": "Browser is unavailable"}]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Invalid request")
+
+    def test_rejects_invalid_browser_ids(self) -> None:
         invalid_bids = (
             "not-a-uuid",
             "00000000000000000000000000000000",
@@ -179,13 +603,13 @@ class InstructionApiTests(TestCase):
                 )
                 self.assertEqual(response.status_code, 404)
 
-    def test_model_validates_browser_id(self):
+    def test_model_validates_browser_id(self) -> None:
         instruction = Instruction(bid="0" * 32, action="list")
 
         with self.assertRaises(ValidationError):
             instruction.full_clean()
 
-    def test_failed_instruction(self):
+    def test_failed_instruction(self) -> None:
         instruction = Instruction.objects.create(bid=self.BID, action="list")
         self.client.get(self.instruction_path("next/"))
 
@@ -202,7 +626,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(detail.json()["error"], "Browser is unavailable")
         self.assertFalse(Instruction.objects.filter(id=instruction.id).exists())
 
-    def test_rejects_invalid_instruction(self):
+    def test_rejects_invalid_instruction(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "javascript", "tid": 12, "script": ""},
@@ -212,7 +636,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "javascript.script")
 
-    def test_rejects_unknown_action(self):
+    def test_rejects_unknown_action(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "unknown"},
@@ -225,7 +649,7 @@ class InstructionApiTests(TestCase):
             "union_tag_invalid",
         )
 
-    def test_does_not_return_processing_instruction(self):
+    def test_does_not_return_processing_instruction(self) -> None:
         Instruction.objects.create(
             bid=self.BID,
             action="list",
@@ -236,7 +660,7 @@ class InstructionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 204)
 
-    def test_accepts_root_tab_actions(self):
+    def test_accepts_root_tab_actions(self) -> None:
         listed = self.post_json(self.instruction_path(), {"action": "list"})
         close_tab = self.post_json(
             self.instruction_path(),
@@ -287,7 +711,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(scrolled.status_code, 201)
         self.assertEqual(scrolled.json()["payload"], {"tid": 12, "y": -500.0})
 
-    def test_rejects_legacy_grouped_tabs_action(self):
+    def test_rejects_legacy_grouped_tabs_action(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "tabs", "operation": "list"},
@@ -297,7 +721,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["type"], "union_tag_invalid")
 
-    def test_targeted_tab_actions_require_tid(self):
+    def test_targeted_tab_actions_require_tid(self) -> None:
         for action in ("close", "focus", "reload", "scroll"):
             payload: dict[str, str | int] = {"action": action}
             if action == "scroll":
@@ -312,7 +736,7 @@ class InstructionApiTests(TestCase):
                     f"{action}.tid",
                 )
 
-    def test_list_rejects_tab_fields(self):
+    def test_list_rejects_tab_fields(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "list", "tid": 12},
@@ -323,7 +747,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["details"][0]["field"], "list.tid")
         self.assertEqual(response.json()["details"][0]["type"], "extra_forbidden")
 
-    def test_navigate_requires_url(self):
+    def test_navigate_requires_url(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "navigate"},
@@ -332,7 +756,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "navigate.url")
 
-    def test_navigate_rejects_empty_url(self):
+    def test_navigate_rejects_empty_url(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "navigate", "url": "  "},
@@ -341,7 +765,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "navigate.url")
 
-    def test_scroll_requires_a_finite_number(self):
+    def test_scroll_requires_a_finite_number(self) -> None:
         for y in ("500", float("inf"), float("-inf"), float("nan")):
             with self.subTest(y=y):
                 response = self.post_json(
@@ -355,7 +779,7 @@ class InstructionApiTests(TestCase):
                     "scroll.y",
                 )
 
-    def test_rejects_result_with_error(self):
+    def test_rejects_result_with_error(self) -> None:
         instruction = Instruction.objects.create(bid=self.BID, action="list")
         self.client.get(self.instruction_path("next/"))
 
@@ -368,7 +792,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "body")
 
-    def test_rejects_non_finite_scroll_result(self):
+    def test_rejects_non_finite_scroll_result(self) -> None:
         instruction = Instruction.objects.create(
             bid=self.BID,
             action="scroll",
@@ -386,7 +810,7 @@ class InstructionApiTests(TestCase):
         instruction.refresh_from_db()
         self.assertEqual(instruction.status, Instruction.Status.PROCESSING)
 
-    def test_accepts_javascript_instruction(self):
+    def test_accepts_javascript_instruction(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {
@@ -400,7 +824,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["action"], "javascript")
         self.assertEqual(response.json()["payload"]["script"], "document.title")
 
-    def test_javascript_requires_target_tab(self):
+    def test_javascript_requires_target_tab(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "javascript", "script": "document.title"},
@@ -410,7 +834,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["error"], "Invalid request")
         self.assertEqual(response.json()["details"][0]["field"], "javascript.tid")
 
-    def test_accepts_click_instruction(self):
+    def test_accepts_click_instruction(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "click", "tid": 12, "selector": "button[type=submit]"},
@@ -421,7 +845,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.json()["payload"]["tid"], 12)
         self.assertEqual(response.json()["payload"]["selector"], "button[type=submit]")
 
-    def test_click_requires_target_tab(self):
+    def test_click_requires_target_tab(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "click", "selector": "button"},
@@ -430,7 +854,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "click.tid")
 
-    def test_click_requires_non_empty_selector(self):
+    def test_click_requires_non_empty_selector(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "click", "tid": 12, "selector": "  "},
@@ -439,7 +863,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "click.selector")
 
-    def test_accepts_keyboard_text_and_key_instructions(self):
+    def test_accepts_keyboard_text_and_key_instructions(self) -> None:
         text = self.post_json(
             self.instruction_path(),
             {"action": "keyboard", "tid": 12, "text": " ACOB "},
@@ -460,7 +884,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(key.json()["payload"]["key"], "a")
         self.assertEqual(key.json()["payload"]["modifiers"], ["ctrl", "shift"])
 
-    def test_keyboard_requires_exactly_one_input(self):
+    def test_keyboard_requires_exactly_one_input(self) -> None:
         missing = self.post_json(
             self.instruction_path(),
             {"action": "keyboard", "tid": 12},
@@ -473,7 +897,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(both.status_code, 400)
 
-    def test_keyboard_rejects_invalid_modifiers_and_keys(self):
+    def test_keyboard_rejects_invalid_modifiers_and_keys(self) -> None:
         text_modifiers = self.post_json(
             self.instruction_path(),
             {
@@ -501,7 +925,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(duplicate_modifiers.status_code, 400)
         self.assertEqual(unsupported_key.status_code, 400)
 
-    def test_accepts_screenshot_instruction(self):
+    def test_accepts_screenshot_instruction(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "screenshot", "tid": 12, "full_page": True},
@@ -510,7 +934,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["payload"], {"tid": 12, "full_page": True})
 
-    def test_screenshot_requires_target_tab(self):
+    def test_screenshot_requires_target_tab(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "screenshot"},
@@ -519,7 +943,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "screenshot.tid")
 
-    def test_screenshot_result_is_uploaded_to_the_storage_service(self):
+    def test_screenshot_result_is_uploaded_to_the_storage_service(self) -> None:
         image = b"\x89PNG\r\n\x1a\nACOB"
         encoded = base64.b64encode(image).decode()
         created = self.post_json(
@@ -571,7 +995,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_screenshot_fails_when_no_storage_service_is_configured(self):
+    def test_screenshot_fails_when_no_storage_service_is_configured(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "screenshot", "tid": 12},
@@ -594,7 +1018,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(detail.json()["error"], response["error"])
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_screenshot_fails_when_the_storage_service_is_unavailable(self):
+    def test_screenshot_fails_when_the_storage_service_is_unavailable(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "screenshot", "tid": 12},
@@ -616,7 +1040,7 @@ class InstructionApiTests(TestCase):
         self.assertIn("Could not host the screenshot", response["error"])
         self.assertIn("storage is down", response["error"])
 
-    def test_rejects_invalid_screenshot_result(self):
+    def test_rejects_invalid_screenshot_result(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "screenshot", "tid": 12},
@@ -632,7 +1056,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid screenshot data")
 
-    def test_accepts_record_start_and_record_stop_instructions(self):
+    def test_accepts_record_start_and_record_stop_instructions(self) -> None:
         started = self.post_json(
             self.instruction_path(),
             {"action": "record_start", "tid": 12},
@@ -650,7 +1074,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(stopped.status_code, 201)
         self.assertEqual(stopped.json()["payload"], {"recording_id": 42})
 
-    def test_record_start_accepts_full_page_flag(self):
+    def test_record_start_accepts_full_page_flag(self) -> None:
         response = self.post_json(
             self.instruction_path(),
             {"action": "record_start", "tid": 12, "full_page": True},
@@ -668,7 +1092,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(invalid.status_code, 400)
 
-    def test_record_instructions_require_valid_arguments(self):
+    def test_record_instructions_require_valid_arguments(self) -> None:
         missing_tid = self.post_json(
             self.instruction_path(),
             {"action": "record_start"},
@@ -694,7 +1118,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(invalid_recording_id.status_code, 400)
 
-    def test_record_start_result_is_validated(self):
+    def test_record_start_result_is_validated(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_start", "tid": 12},
@@ -725,7 +1149,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_record_stop_result_is_uploaded_to_the_storage_service(self):
+    def test_record_stop_result_is_uploaded_to_the_storage_service(self) -> None:
         recording = b"0\x9awEBMACOB"
         encoded = base64.b64encode(recording).decode()
         created = self.post_json(
@@ -757,8 +1181,7 @@ class InstructionApiTests(TestCase):
                         "duration": 5.0,
                         "stopped_reason": "max_duration",
                         "message": (
-                            "Recording stopped because the maximum duration "
-                            "was reached"
+                            "Recording stopped because the maximum duration was reached"
                         ),
                     }
                 },
@@ -788,7 +1211,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_record_stop_fails_when_no_storage_service_is_configured(self):
+    def test_record_stop_fails_when_no_storage_service_is_configured(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_stop", "recording_id": 42},
@@ -815,7 +1238,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response["status"], "failed")
         self.assertIn("no storage service is configured", response["error"])
 
-    def test_record_stop_fails_when_the_storage_service_is_unavailable(self):
+    def test_record_stop_fails_when_the_storage_service_is_unavailable(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_stop", "recording_id": 42},
@@ -845,7 +1268,7 @@ class InstructionApiTests(TestCase):
         self.assertIn("Could not host the recording", response["error"])
         self.assertIn("storage is down", response["error"])
 
-    def test_rejects_invalid_record_stop_result(self):
+    def test_rejects_invalid_record_stop_result(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_stop", "recording_id": 42},
@@ -888,7 +1311,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(bad_reason.status_code, 400)
 
-    def test_record_stop_result_accepts_mp4_content_type(self):
+    def test_record_stop_result_accepts_mp4_content_type(self) -> None:
         recording = b"0\x9awMP4ACOB"
         encoded = base64.b64encode(recording).decode()
         created = self.post_json(
@@ -935,7 +1358,7 @@ class InstructionApiTests(TestCase):
             "video/mp4",
         )
 
-    def test_rejects_unknown_record_stop_content_type(self):
+    def test_rejects_unknown_record_stop_content_type(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_stop", "recording_id": 42},
@@ -957,7 +1380,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(bad_type.status_code, 400)
 
-    def test_heartbeat_stores_and_returns_browser_settings(self):
+    def test_heartbeat_stores_and_returns_browser_settings(self) -> None:
         settings_url = f"/api/browsers/{self.BID}/settings/"
         not_reported = self.client.get(settings_url)
         self.assertEqual(not_reported.status_code, 404)
@@ -996,14 +1419,14 @@ class InstructionApiTests(TestCase):
             {"pollIntervalMs": 2500},
         )
 
-    def test_heartbeat_requires_a_settings_object(self):
+    def test_heartbeat_requires_a_settings_object(self) -> None:
         response = self.post_json(
             f"/api/browsers/{self.BID}/heartbeat/",
             {"settings": []},
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_reinstall_is_idempotent_until_acknowledged(self):
+    def test_reinstall_is_idempotent_until_acknowledged(self) -> None:
         first = self.client.post(self.reinstall_path())
         second = self.client.post(self.reinstall_path())
         pending = self.client.get(self.reinstall_path())
@@ -1016,7 +1439,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(pending.json()["token"], first.json()["token"])
         self.assertEqual(Reinstall.objects.count(), 1)
 
-    def test_reinstall_request_recovers_processing_work(self):
+    def test_reinstall_request_recovers_processing_work(self) -> None:
         processing = Instruction.objects.create(
             bid=self.BID,
             action="javascript",
@@ -1075,8 +1498,7 @@ class InstructionApiTests(TestCase):
 
 
 class StorageBackendTests(TestCase):
-    def test_unconfigured_backend_is_none(self):
-        from .storage import create_storage_backend
+    def test_unconfigured_backend_is_none(self) -> None:
 
         self.assertIsNone(create_storage_backend("chipf", {}))
         self.assertIsNone(create_storage_backend("chipf", {"chipf": {}}))
@@ -1090,14 +1512,12 @@ class StorageBackendTests(TestCase):
         )
         self.assertIsNone(create_storage_backend("chipf", None))
 
-    def test_unknown_provider_is_a_configuration_error(self):
-        from .storage import StorageError, create_storage_backend
+    def test_unknown_provider_is_a_configuration_error(self) -> None:
 
         with self.assertRaisesRegex(StorageError, "unknown storage provider"):
             create_storage_backend("s3", {"s3": {"endpoint": "x", "api_key": "y"}})
 
-    def test_configured_chipf_backend_is_returned(self):
-        from .storage import ChipfStorageBackend, create_storage_backend
+    def test_configured_chipf_backend_is_returned(self) -> None:
 
         backend = create_storage_backend(
             "chipf",
@@ -1107,8 +1527,7 @@ class StorageBackendTests(TestCase):
         self.assertEqual(backend.endpoint, "https://chipf.test")
         self.assertEqual(backend.api_key, "secret")
 
-    def test_upload_file_returns_the_resolved_url(self):
-        from .storage import ChipfStorageBackend
+    def test_upload_file_returns_the_resolved_url(self) -> None:
 
         backend = ChipfStorageBackend("https://chipf.test", "secret")
         response = SimpleNamespace(
@@ -1132,8 +1551,7 @@ class StorageBackendTests(TestCase):
             timeout=30.0,
         )
 
-    def test_upload_file_rejects_a_non_201_response(self):
-        from .storage import ChipfStorageBackend, StorageHTTPError
+    def test_upload_file_rejects_a_non_201_response(self) -> None:
 
         backend = ChipfStorageBackend("https://chipf.test", "secret")
         response = SimpleNamespace(
@@ -1147,8 +1565,7 @@ class StorageBackendTests(TestCase):
         ):
             backend.upload_file(b"png", "screenshot-12.png", "image/png")
 
-    def test_upload_file_wraps_connection_failures(self):
-        from .storage import ChipfStorageBackend, StorageConnectionError
+    def test_upload_file_wraps_connection_failures(self) -> None:
 
         backend = ChipfStorageBackend("https://chipf.test", "secret")
 
@@ -1161,8 +1578,7 @@ class StorageBackendTests(TestCase):
         ):
             backend.upload_file(b"png", "screenshot-12.png", "image/png")
 
-    def test_upload_file_rejects_invalid_responses(self):
-        from .storage import ChipfStorageBackend, StorageProtocolError
+    def test_upload_file_rejects_invalid_responses(self) -> None:
 
         backend = ChipfStorageBackend("https://chipf.test", "secret")
         response = SimpleNamespace(status_code=201, content=b"not json")

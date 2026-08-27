@@ -3,7 +3,7 @@ import json
 import math
 from collections.abc import Sequence
 from types import TracebackType
-from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast, overload
+from typing import Annotated, Literal, TypeAlias, TypeVar, cast, overload
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -15,9 +15,12 @@ from pydantic import (
     JsonValue,
     TypeAdapter,
     ValidationError,
+    model_validator,
 )
+from typing_extensions import Self
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:58347"
+UUIDV4_VERSION = 4
 
 JsonObject: TypeAlias = dict[str, JsonValue]
 KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
@@ -68,7 +71,7 @@ class KeyboardKeyResult(_ResultModel):
 
 class ReinstallResult(_ResultModel):
     token: str = Field(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     )
     status: Literal["pending"]
     requested_at: str = Field(min_length=1)
@@ -113,6 +116,19 @@ class _RecordingStopMetadata(_ResultModel):
     message: str = Field(min_length=1)
 
 
+class BatchResultEntry(_ResultModel):
+    """One batch action's result: either a result or an error."""
+
+    result: JsonValue = None
+    error: str | None = None
+
+    @model_validator(mode="after")
+    def validate_entry(self) -> Self:
+        if self.error is not None and self.result is not None:
+            raise ValueError("result and error cannot both be provided")
+        return self
+
+
 class Screenshot(_ResultModel):
     url: str = Field(min_length=1)
     content_type: Literal["image/png"]
@@ -121,6 +137,7 @@ class Screenshot(_ResultModel):
 
 
 _LISTED_TABS_ADAPTER = TypeAdapter(list[ListedTab])
+_BATCH_RESULTS_ADAPTER = TypeAdapter(list[BatchResultEntry])
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
@@ -167,7 +184,7 @@ class ACOBTimeoutError(ACOBError):
 
     def __init__(self, instruction_id: int, timeout: float) -> None:
         super().__init__(
-            f"Instruction {instruction_id} did not finish within {timeout:g} seconds"
+            f"Instruction {instruction_id} did not finish within {timeout:g} seconds",
         )
         self.instruction_id = instruction_id
         self.timeout = timeout
@@ -188,7 +205,7 @@ class ACOBClient:
     ) -> None:
         self.bid = self._validate_bid(bid)
         self.endpoint = self._validate_endpoint(
-            DEFAULT_ENDPOINT if endpoint is None else endpoint
+            DEFAULT_ENDPOINT if endpoint is None else endpoint,
         )
         self.timeout = self._positive_float(timeout, "timeout")
         self.poll_interval = self._positive_float(
@@ -202,7 +219,7 @@ class ACOBClient:
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
 
-    async def __aenter__(self) -> "ACOBClient":
+    async def __aenter__(self) -> Self:
         if self._closed:
             raise ACOBError("ACOBClient is closed")
         return self
@@ -274,13 +291,13 @@ class ACOBClient:
                 or not isinstance(status, str)
             ):
                 raise ACOBProtocolError(
-                    f"Instruction {instruction_id} returned an invalid response"
+                    f"Instruction {instruction_id} returned an invalid response",
                 )
             if status in {"completed", "failed"}:
                 return response
             if status not in {"pending", "processing"}:
                 raise ACOBProtocolError(
-                    f"Instruction {instruction_id} returned invalid status: {status!r}"
+                    f"Instruction {instruction_id} returned invalid status: {status!r}",
                 )
 
             remaining = deadline - loop.time()
@@ -295,7 +312,7 @@ class ACOBClient:
         *,
         timeout: float | None = None,
         **payload: JsonValue,
-    ) -> Any:
+    ) -> JsonValue:
         """Submit an action, wait for it, and return its browser result."""
         instruction = await self.submit(action, **payload)
         instruction_id = instruction.get("id")
@@ -310,6 +327,63 @@ class ACOBClient:
         if terminal.get("status") == "failed":
             raise ACOBInstructionError(instruction_id, terminal)
         return terminal.get("result")
+
+    async def submit_batch(self, actions: Sequence[JsonObject], /) -> JsonObject:
+        """Submit a batch of instructions that run sequentially in the browser.
+
+        Each entry is a complete instruction request, e.g.
+        ``{"action": "click", "tid": 12, "selector": "button"}``. The
+        extension executes the actions one at a time in order and reports one
+        result or error per action.
+        """
+        if not actions:
+            raise ValueError("actions must contain at least one instruction")
+        for action in actions:
+            if not isinstance(action, dict):
+                raise TypeError("each action must be an instruction object")
+        body: JsonObject = {
+            "action": "batch",
+            "actions": [dict(action) for action in actions],
+        }
+        return await self._request_json(
+            "POST",
+            f"{self._instructions_url}/batch/",
+            body,
+            timeout=min(self._REQUEST_TIMEOUT, self.timeout),
+        )
+
+    async def execute_batch(
+        self,
+        actions: Sequence[JsonObject],
+        /,
+        *,
+        timeout: float | None = None,
+    ) -> list[BatchResultEntry]:
+        """Submit a batch and wait for every action to finish.
+
+        The browser runs the actions sequentially and the returned list holds
+        one ``BatchResultEntry`` per action, in order. A failed action does
+        not stop the rest of the batch; check each entry's ``error`` field.
+        """
+        instruction = await self.submit_batch(actions)
+        instruction_id = instruction.get("id")
+        if (
+            isinstance(instruction_id, bool)
+            or not isinstance(instruction_id, int)
+            or instruction_id <= 0
+        ):
+            raise ACOBProtocolError("Created instruction did not contain a valid id")
+
+        terminal = await self.wait(instruction_id, timeout=timeout)
+        if terminal.get("status") == "failed":
+            raise ACOBInstructionError(instruction_id, terminal)
+        try:
+            return _BATCH_RESULTS_ADAPTER.validate_python(
+                terminal.get("result"),
+                strict=True,
+            )
+        except ValidationError as error:
+            raise ACOBProtocolError("batch returned an invalid result") from error
 
     async def list(self, *, timeout: float | None = None) -> list[ListedTab]:
         """List Chromium tabs."""
@@ -576,7 +650,7 @@ class ACOBClient:
         script: str,
         *,
         timeout: float | None = None,
-    ) -> Any:
+    ) -> JsonValue:
         """Evaluate JavaScript in a tab and return its value."""
         return await self.execute(
             "javascript",
@@ -612,9 +686,9 @@ class ACOBClient:
             raise ACOBProtocolError(f"{method} {url} returned invalid JSON") from error
         if not isinstance(parsed, dict):
             raise ACOBProtocolError(
-                f"{method} {url} returned a non-object JSON response"
+                f"{method} {url} returned a non-object JSON response",
             )
-        return cast(JsonObject, parsed)
+        return cast("JsonObject", parsed)
 
     async def _request_bytes(
         self,
@@ -644,10 +718,10 @@ class ACOBClient:
         except httpx.RequestError as error:
             reason = str(error) or type(error).__name__
             raise ACOBConnectionError(
-                f"Could not connect to ACOB at {self.endpoint}: {reason}"
+                f"Could not connect to ACOB at {self.endpoint}: {reason}",
             ) from error
 
-        if not 200 <= response.status_code < 300:
+        if not httpx.codes.OK <= response.status_code < httpx.codes.MULTIPLE_CHOICES:
             parsed = self._try_parse_object(response.content)
             message = self._http_error_message(parsed)
             raise ACOBHTTPError(response.status_code, message, parsed)
@@ -666,7 +740,7 @@ class ACOBClient:
 
     @staticmethod
     def _expect_model(
-        result: Any,
+        result: JsonValue,
         model: type[_ModelT],
         action: str,
     ) -> _ModelT:
@@ -688,7 +762,7 @@ class ACOBClient:
                 raise ValueError("invalid URL")
         except ValueError as error:
             raise ACOBProtocolError(
-                f"{action} returned an invalid download URL"
+                f"{action} returned an invalid download URL",
             ) from error
 
     @staticmethod
@@ -697,7 +771,7 @@ class ACOBClient:
             parsed: object = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None
-        return cast(JsonObject, parsed) if isinstance(parsed, dict) else None
+        return cast("JsonObject", parsed) if isinstance(parsed, dict) else None
 
     @staticmethod
     def _http_error_message(response: JsonObject | None) -> str:
@@ -728,7 +802,7 @@ class ACOBClient:
             parsed = UUID(bid)
         except (ValueError, TypeError, AttributeError) as error:
             raise ValueError("bid must be a lowercase dashless UUIDv4") from error
-        if parsed.hex != bid or parsed.version != 4:
+        if parsed.hex != bid or parsed.version != UUIDV4_VERSION:
             raise ValueError("bid must be a lowercase dashless UUIDv4")
         return bid
 
@@ -754,7 +828,7 @@ class ACOBClient:
     @staticmethod
     def _positive_float(value: float, name: str) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{name} must be a positive number")
+            raise TypeError(f"{name} must be a positive number")
         converted = float(value)
         if not math.isfinite(converted) or converted <= 0:
             raise ValueError(f"{name} must be a positive number")

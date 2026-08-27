@@ -45,9 +45,9 @@ make check
 make test
 ```
 
-`make check` runs Ruff, Black in check mode, mypy, Pyright, Django's system
-checks, and a missing-migration check. `make test` runs the API test suite.
-`make format` applies Ruff fixes and Black formatting.
+`make check` runs Ruff (lint and format check), ty (strict type checking),
+Django's system checks, and a missing-migration check. `make test` runs the
+API test suite. `make format` applies Ruff fixes and formatting.
 
 ## Docker
 
@@ -77,6 +77,7 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `POST` | `instructions/` | Validate and enqueue an instruction. |
+| `POST` | `instructions/batch/` | Enqueue one instruction that runs up to 20 actions sequentially. |
 | `GET` | `instructions/next/?limit=1` | Claim 1 to 20 pending instructions for the extension. |
 | `GET` | `instructions/<id>/` | Read status or consume a terminal response. |
 | `POST` | `instructions/<id>/result/` | Complete a claimed instruction. |
@@ -89,6 +90,14 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `record_start`, `record_stop`, and
 `javascript`. See the root [API guide](../README.md#api) for payload examples.
+
+`POST instructions/batch/` accepts `{"action": "batch", "actions": [...]}`
+with 1 to 20 complete instruction requests. The extension executes the
+actions strictly in order and completes the single instruction with one
+result or error entry per action; a failed action does not stop the rest of
+the batch. Only the batch route accepts the `batch` action, and the result
+route validates each entry against its action's result model (screenshots and
+recordings are hosted through the same storage pipeline per entry).
 
 Instructions are transport state, not history. Pending and processing reads are
 non-destructive. The first successful detail request for a completed or failed

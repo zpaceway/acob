@@ -9,6 +9,7 @@ from its config mapping. Add another service by implementing
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import override
 from urllib.parse import urljoin
 
 import httpx
@@ -48,6 +49,7 @@ class ChipfStorageBackend(StorageBackend):
     timeout: float = 30.0
     upload_path: str = "/api/files/upload"
 
+    @override
     def upload_file(self, data: bytes, filename: str, content_type: str) -> str:
         try:
             response = httpx.post(
@@ -61,7 +63,7 @@ class ChipfStorageBackend(StorageBackend):
             raise StorageConnectionError(
                 f"Could not connect to the storage service: {reason}"
             ) from error
-        if response.status_code != 201:
+        if response.status_code != httpx.codes.CREATED:
             raise StorageHTTPError(
                 response.status_code,
                 _error_message(response.content),

@@ -5,14 +5,13 @@ CLIENT_DIST_DIR ?= dist
 format:
 	@echo "Formatting Python code..."
 	uv run ruff check --fix .
-	uv run black acob tests
+	uv run ruff format .
 
 check:
 	@echo "Checking Python code..."
 	uv run ruff check .
-	uv run black --check acob tests
-	uv run mypy --no-incremental acob tests
-	uv run pyright
+	uv run ruff format --check .
+	uv run ty check .
 
 test:
 	@echo "Running tests..."

@@ -1,21 +1,23 @@
 [project]
 name = "acob-mcp"
-version = "0.9.0"
+version = "0.10.0"
 description = "MCP server for controlling a user's existing Chromium session with ACOB"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "acob-client>=0.11.0",
+    "acob-client>=0.12.0",
     "mcp==2.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "black>=26.5.1",
-    "mypy>=2.3.0",
-    "pyright>=1.1.411",
     "ruff>=0.16.0",
+    "ty>=0.0.75",
 ]
+
+[project.urls]
+Repository = "https://github.com/zpaceway/acob"
+Issues = "https://github.com/zpaceway/acob/issues"
 
 [tool.uv]
 package = false
@@ -23,20 +25,44 @@ package = false
 [tool.uv.sources]
 acob-client = { path = "../client", editable = true }
 
-[tool.black]
-target-version = ["py310"]
-
 [tool.ruff]
 target-version = "py310"
+line-length = 88
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "RUF", "UP"]
+select = ["ALL"]
+ignore = [
+    "A001",   # the MCP tool named `list` deliberately shadows the builtin
+    "COM812", # the ruff formatter owns trailing commas
+    "CPY",   # no per-file copyright headers in this repository
+    "D",     # docstring enforcement is out of scope; typing is the contract
+    "EM101", # exception messages stay inline in the custom exception classes
+    "EM102",
+    "PLR0913", # MCP tool parameter counts are part of the public tool API
+    "PLR0917",
+    "PT",    # the project deliberately uses unittest (not pytest)
+    "TC002", # the mcp library evaluates annotations at runtime (eval_str)
+    "TRY003",
+    "TRY004", # heuristic misfires on isinstance-adjacent raises
+    "TRY301",
+]
 
-[tool.pyright]
-include = ["src", "tests"]
-pythonVersion = "3.10"
-venvPath = "."
-venv = ".venv"
+[tool.ruff.lint.mccabe]
+# Tool registrations all live inside create_server, so its complexity is
+# proportional to the number of tools, not to any single function's logic.
+max-complexity = 20
 
-[tool.mypy]
-python_version = "3.10"
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "PLR2004", # magic-number comparisons inside test assertions
+    "S101",    # bare asserts are used for type narrowing in tests
+    "S104",    # tests deliberately bind to all interfaces
+    "S106",    # tests use literal tokens as fixtures
+    "SLF001",  # tests deliberately reach into server internals
+]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+all = "error"

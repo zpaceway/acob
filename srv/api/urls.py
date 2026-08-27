@@ -48,6 +48,11 @@ urlpatterns = [
         name="create-instruction",
     ),
     path(
+        "browsers/<bid:bid>/instructions/batch/",
+        views.create_batch_instruction,
+        name="create-batch-instruction",
+    ),
+    path(
         "browsers/<bid:bid>/instructions/next/",
         views.next_instructions,
         name="next-instructions",

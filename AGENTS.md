@@ -56,10 +56,12 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
   are `TextChoices`. `BrowserHeartbeat` stores the extension's last reported
   settings. Model changes require a migration (`make -C srv migrations`).
 - `srv/api/views.py`:
-  - `create_instruction` validates and enqueues; `next_instructions` claims
-    pending work with conditional updates; `complete_instruction` validates
-    action-specific results; the first detail GET of a terminal instruction
-    returns and deletes it (single-use terminal responses).
+  - `create_instruction` validates and enqueues; `create_batch_instruction`
+    enqueues one instruction that runs up to 20 actions sequentially;
+    `next_instructions` claims pending work with conditional updates;
+    `complete_instruction` validates action-specific results (per entry for
+    batches); the first detail GET of a terminal instruction returns and
+    deletes it (single-use terminal responses).
   - Screenshots and recordings are never stored locally: the extension posts
     base64, the view decodes, uploads through `srv/api/storage.py`
     (`STORAGE_PROVIDER`, default `chipf`, via `CHIPF_ENDPOINT`/`CHIPF_API_KEY`),
@@ -67,7 +69,8 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
   - `reinstall` is a separate command channel (not an instruction);
     `heartbeat`/`settings` are separate routes too.
 - `srv/acob/settings.py`: `DATA_UPLOAD_MAX_MEMORY_SIZE` must exceed the
-  largest accepted base64 body (768 MiB covers the 512 MiB recording cap).
+  largest accepted base64 body (1 GiB covers the 512 MiB recording cap and a
+  full-size 20-action batch).
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
   helpers, `patch` for storage backends).
 
@@ -97,7 +100,8 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
     worker-side recording pipeline (debugger + `Page.captureScreenshot`
     polling, per-tab serialized).
 - `execution.ts` — instruction dispatch, per-tab execution queues,
-  result submission with retries.
+  sequential batch execution (each sub-action still routed through the
+  per-tab queue), result submission with retries.
 - `lifecycle.ts` — configuration loading, reinstall command handling,
   settings heartbeat reporting, offscreen document management.
 - The worker owns the debugger for everything (click, screenshot, JS, and
@@ -280,7 +284,8 @@ instructions form the lifecycle:
   then fails with "No active recording").
 - The bounds chain is intentional: extension `maxRecordingSizeMiB` (512) ==
   server `MAX_RECORDING_BASE64_LENGTH` (512 MiB) <
-  `DATA_UPLOAD_MAX_MEMORY_SIZE` (768 MiB), and the per-message
+  `DATA_UPLOAD_MAX_MEMORY_SIZE` (1 GiB), which also covers a full-size
+  20-action batch of 30 MiB screenshots (~800 MiB base64), and the per-message
   `chrome.runtime.sendMessage` limit (~64 MiB) is handled by chunking the
   finalize transfer (see above). Any cap change must keep this chain.
 - Browser settings are a **separate command channel, not an instruction**
@@ -297,7 +302,7 @@ Run from each component directory (or `make -C <dir>` from the root):
 
 | Component | Commands |
 | --- | --- |
-| srv | `make check` (Ruff, Black, mypy, Pyright, Django checks, migration drift), `make test`, `make format`, `make migrations`, `make migrate` |
+| srv | `make check` (Ruff, ty, Django checks, migration drift), `make test`, `make format`, `make migrations`, `make migrate` |
 | extension | `npm run typecheck`, `npm test`, `npm run build` (also `make -C extension ...`) |
 | client | `make check`, `make test`, `make build` |
 | mcp | `make check`, `make test` |
@@ -434,7 +439,8 @@ in the live extension after changes.
   are delivered offscreen→worker in ~8 MiB `recordingChunk` messages, and
   screenshots stay under the extension caps.
 - `DATA_UPLOAD_MAX_MEMORY_SIZE` (srv) must stay above the largest accepted
-  base64 body; it was raised to 768 MiB for the 512 MiB recording cap.
+  base64 body; it was raised to 1 GiB for the 512 MiB recording cap and a
+  full-size 20-action batch of 30 MiB screenshots.
 - The MCP `@server.tool` functions are nested in `create_server`; a function
   named like the `settings` parameter would shadow it — use `name=` to
   decouple tool name from function name when needed.
@@ -444,7 +450,9 @@ in the live extension after changes.
 - Recordings are tracked by the extension keyed by the `record_start`
   instruction id (`recording_id`); they do not survive extension reloads and
   are not tracked by the server — stopping is delivered through a
-  `record_stop` instruction.
+  `record_stop` instruction. A `record_start` inside a batch therefore uses
+  the batch instruction id as the recording id, so a batch can contain at
+  most one `record_start`.
 - A recording holds its tab's shared debugger session for its whole lifetime;
   the per-tab execution queue serializes same-tab work, but other
   debugger-backed actions (`click`, `keyboard`, `screenshot`, `scroll`,

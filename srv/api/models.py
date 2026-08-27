@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import ClassVar, override
 from uuid import uuid4
 
 from django.db import models
@@ -10,6 +10,7 @@ class Instruction(models.Model):
     id: int
 
     class Action(models.TextChoices):
+        BATCH = "batch"
         CLICK = "click"
         CLOSE = "close"
         FOCUS = "focus"
@@ -45,6 +46,10 @@ class Instruction(models.Model):
     class Meta:
         ordering: ClassVar[list[str]] = ["created_at"]
 
+    @override
+    def __str__(self) -> str:
+        return f"{self.action} ({self.id})"
+
 
 class Reinstall(models.Model):
     bid = models.CharField(
@@ -54,6 +59,10 @@ class Reinstall(models.Model):
     )
     token = models.UUIDField(default=uuid4, editable=False, unique=True)
     requested_at = models.DateTimeField(auto_now_add=True)
+
+    @override
+    def __str__(self) -> str:
+        return f"reinstall {self.bid}"
 
 
 class BrowserHeartbeat(models.Model):
@@ -66,3 +75,7 @@ class BrowserHeartbeat(models.Model):
     )
     settings = models.JSONField(default=dict)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @override
+    def __str__(self) -> str:
+        return f"heartbeat {self.bid}"

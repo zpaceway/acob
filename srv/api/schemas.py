@@ -26,6 +26,7 @@ MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
 MAX_RECORDING_DURATION_SECONDS = 300
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
+MAX_BATCH_ACTIONS = 20
 
 KEYBOARD_KEYS = {
     "ArrowDown",
@@ -153,6 +154,16 @@ InstructionRequest = Annotated[
 instruction_adapter: TypeAdapter[InstructionRequest] = TypeAdapter(InstructionRequest)
 
 
+class BatchInstructionRequest(ApiModel):
+    """A list of instructions that the browser executes sequentially."""
+
+    action: Literal["batch"]
+    actions: list[InstructionRequest] = Field(
+        min_length=1,
+        max_length=MAX_BATCH_ACTIONS,
+    )
+
+
 class ScreenshotResult(ApiModel):
     data: Annotated[
         str,
@@ -201,6 +212,13 @@ class InstructionResultRequest(ApiModel):
         if self.error is not None and self.result is not None:
             raise ValueError("result and error cannot both be provided")
         return self
+
+
+BatchResultList = Annotated[
+    list[InstructionResultRequest],
+    Field(min_length=1, max_length=MAX_BATCH_ACTIONS),
+]
+batch_results_adapter: TypeAdapter[BatchResultList] = TypeAdapter(BatchResultList)
 
 
 class NextInstructionsQuery(ApiModel):

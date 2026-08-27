@@ -11,14 +11,13 @@ export STORAGE_PROVIDER CHIPF_ENDPOINT CHIPF_API_KEY
 format:
 	@echo "Formatting Python code..."
 	uv run ruff check --fix .
-	uv run black acob api manage.py
+	uv run ruff format .
 
 check:
 	@echo "Checking Python code..."
 	uv run ruff check .
-	uv run black --check acob api manage.py
-	uv run mypy --no-incremental acob api manage.py
-	uv run pyright
+	uv run ruff format --check .
+	uv run ty check .
 	uv run manage.py check
 	uv run manage.py makemigrations --check --dry-run
 

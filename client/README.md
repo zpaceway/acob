@@ -190,6 +190,29 @@ request = await client.reinstall()
 print(request.status, request.token)
 ```
 
+`execute_batch()` submits a list of complete instruction requests that the
+browser runs sequentially with one request for the whole cascade. It returns
+one `BatchResultEntry` per action, in order; a failed action does not stop
+the rest of the batch, so check each entry's `error` field:
+
+```python
+entries = await client.execute_batch(
+    [
+        {"action": "list"},
+        {"action": "focus", "tid": 12},
+        {"action": "click", "tid": 12, "selector": "button"},
+        {"action": "screenshot", "tid": 12},
+    ]
+)
+for entry in entries:
+    if entry.error is not None:
+        print("failed:", entry.error)
+```
+
+`submit_batch()` returns the created instruction without waiting, and batches
+accept 1 to 20 actions. Actions submitted outside a batch still run in
+parallel.
+
 For an unpacked extension, build `extension/dist/` first. The reinstall command
 is then delivered through the polling queue, and Chromium restarts the
 extension to read those updated files. Active JavaScript executions are
@@ -248,7 +271,8 @@ make test
 make build
 ```
 
-`make check` runs Ruff, Black in check mode, and Pyright. `make test` runs the
+`make check` runs Ruff (lint and format check) and ty (strict type checking).
+`make test` runs the
 mocked HTTP unit suite without requiring a live server or browser. `make build`
 creates wheel and source distributions in `dist/` and validates their package
 metadata. `make publish` additionally uploads those artifacts and should only

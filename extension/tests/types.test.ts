@@ -1,6 +1,8 @@
 import { ACOBSettings } from "../src/settings.js";
 import { keyboardCharacter } from "../src/types.js";
 import type {
+  BatchInstructionRequest,
+  BatchResult,
   ClosedTab,
   Configuration,
   InstructionRequest,
@@ -59,6 +61,12 @@ type RecordStopResultIsTyped = Expect<
     RecordStopResult
   >
 >;
+type BatchResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{ action: "batch"; actions: InstructionRequest[] }>,
+    BatchResult
+  >
+>;
 
 const configuration: Configuration = ACOBSettings.normalizeConfiguration({
   baseUrl: "https://acob.example",
@@ -79,6 +87,18 @@ if (instruction.action === "click") {
   const selector: string = instruction.payload.selector;
   void selector;
 }
+if (instruction.action === "batch") {
+  const actions: InstructionRequest[] = instruction.payload.actions;
+  void actions;
+}
+
+const batchRequest: BatchInstructionRequest = {
+  action: "batch",
+  actions: [
+    { action: "list" },
+    { action: "click", tid: 1, selector: "button" },
+  ],
+};
 
 const request: InstructionRequest = {
   action: "keyboard",
@@ -124,6 +144,7 @@ void characterRequest;
 void invalidRequest;
 void legacyTabsRequest;
 void invalidKeyRequest;
+void batchRequest;
 const listTabsResultIsTyped: ListTabsResultIsTyped = true;
 void listTabsResultIsTyped;
 const closeTabResultIsTyped: CloseTabResultIsTyped = true;
@@ -136,3 +157,5 @@ const recordStartResultIsTyped: RecordStartResultIsTyped = true;
 void recordStartResultIsTyped;
 const recordStopResultIsTyped: RecordStopResultIsTyped = true;
 void recordStopResultIsTyped;
+const batchResultIsTyped: BatchResultIsTyped = true;
+void batchResultIsTyped;

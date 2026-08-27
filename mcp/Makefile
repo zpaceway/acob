@@ -7,14 +7,13 @@ ACOB_ENDPOINT ?= http://127.0.0.1:58347
 format:
 	@echo "Formatting ACOB MCP code..."
 	uv run ruff check --fix .
-	uv run black src tests
+	uv run ruff format .
 
 check:
 	@echo "Checking ACOB MCP code..."
 	uv run ruff check .
-	uv run black --check src tests
-	uv run mypy --no-incremental src tests
-	uv run pyright
+	uv run ruff format --check .
+	uv run ty check .
 
 test:
 	@echo "Running tests..."

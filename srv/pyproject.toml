@@ -13,28 +13,64 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=26.5.1",
     "django-stubs>=6.0.7",
-    "mypy>=2.3.0",
-    "pyright>=1.1.411",
     "ruff>=0.16.0",
+    "ty>=0.0.75",
 ]
-
-[tool.black]
-target-version = ["py314"]
-
-[tool.mypy]
-python_version = "3.14"
-plugins = ["mypy_django_plugin.main"]
 
 [tool.django-stubs]
 django_settings_module = "acob.settings"
 
-[tool.pyright]
-include = ["acob", "api", "manage.py"]
-pythonVersion = "3.14"
-venvPath = "."
-venv = ".venv"
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+extend-exclude = ["api/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812", # the ruff formatter owns trailing commas
+    "CPY",   # no per-file copyright headers in this repository
+    "D",     # docstring enforcement is out of scope; typing is the contract
+    "EM101", # exception messages stay inline in the custom exception classes
+    "EM102",
+    "PLR0911", # view and result dispatch functions have many early returns
+    "PLR0912",
+    "PT",    # the project deliberately uses unittest (not pytest)
+    "TC001", # annotations are evaluated at runtime by pydantic/Django
+    "TC002",
+    "TC003",
+    "TRY003",
+    "TRY004", # heuristic misfires on isinstance-adjacent raises
+    "TRY301",
+]
+
+[tool.ruff.lint.mccabe]
+# create_server-like dispatch functions (complete_instruction,
+# _prepare_action_result) are inherently branchy; 13 keeps those covered
+# without hiding complexity elsewhere.
+max-complexity = 13
 
 [tool.ruff.lint.per-file-ignores]
-"api/migrations/*.py" = ["RUF012"]
+"acob/settings.py" = [
+    "S105", # the development SECRET_KEY is a deliberate local default
+]
+"api/tests.py" = [
+    "PLR2004", # magic-number comparisons inside test assertions
+    "S101",    # bare asserts are used for type narrowing in tests
+    "SLF001",  # tests deliberately reach into server internals
+]
+"tests/**" = [
+    "PLR2004", # magic-number comparisons inside test assertions
+    "S101",    # bare asserts are used for type narrowing in tests
+    "SLF001",  # tests deliberately reach into server internals
+]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+exclude = ["api/migrations/*.py"]
+
+[tool.ty.rules]
+all = "error"

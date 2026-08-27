@@ -99,6 +99,7 @@ export interface SettingsApi {
 }
 
 export type InstructionAction =
+  | "batch"
   | "click"
   | "close"
   | "focus"
@@ -117,6 +118,7 @@ export type InstructionStatus =
   | "completed"
   | "failed";
 export type KeyboardModifier = "alt" | "ctrl" | "meta" | "shift";
+export const MAX_BATCH_ACTIONS = 20;
 export const NAMED_KEYBOARD_KEYS = Object.freeze([
   "ArrowDown",
   "ArrowLeft",
@@ -220,7 +222,12 @@ export interface RecordStopPayload {
   recording_id: number;
 }
 
+export interface BatchPayload {
+  actions: InstructionRequest[];
+}
+
 export interface InstructionPayloadMap {
+  batch: BatchPayload;
   click: ClickPayload;
   close: CloseTabPayload;
   focus: FocusTabPayload;
@@ -335,6 +342,11 @@ export interface RecordStopInstructionRequest {
   recording_id: number;
 }
 
+export interface BatchInstructionRequest {
+  action: "batch";
+  actions: InstructionRequest[];
+}
+
 export type InstructionRequest =
   | ClickInstructionRequest
   | CloseTabInstructionRequest
@@ -430,32 +442,41 @@ export interface UnserializableJavaScriptResult {
 
 export type JavaScriptResult = JsonValue | UnserializableJavaScriptResult;
 
-export type InstructionResultFor<Request extends InstructionRequest> =
-  Request extends { action: "click" }
-    ? ClickResult
-    : Request extends { action: "javascript" }
-      ? JavaScriptResult
-      : Request extends { action: "keyboard"; text: string }
-        ? KeyboardTextResult
-        : Request extends { action: "keyboard"; key: KeyboardKey }
-          ? KeyboardKeyResult
-          : Request extends { action: "screenshot" }
-            ? ScreenshotResult
-            : Request extends { action: "record_start" }
-              ? RecordStartResult
-              : Request extends { action: "record_stop" }
-                ? RecordStopResult
-                : Request extends { action: "list" }
-              ? ListedTab[]
-              : Request extends { action: "close" }
-                ? ClosedTab
-                : Request extends { action: "focus" | "navigate" | "reload" }
-                  ? TabDetails
-                  : Request extends { action: "scroll" }
-                    ? ScrollResult
-                    : never;
+export type InstructionResultFor<
+  Request extends InstructionRequest | BatchInstructionRequest,
+> = Request extends { action: "batch" }
+    ? BatchResult
+    : Request extends { action: "click" }
+      ? ClickResult
+      : Request extends { action: "javascript" }
+        ? JavaScriptResult
+        : Request extends { action: "keyboard"; text: string }
+          ? KeyboardTextResult
+          : Request extends { action: "keyboard"; key: KeyboardKey }
+            ? KeyboardKeyResult
+            : Request extends { action: "screenshot" }
+              ? ScreenshotResult
+              : Request extends { action: "record_start" }
+                ? RecordStartResult
+                : Request extends { action: "record_stop" }
+                  ? RecordStopResult
+                  : Request extends { action: "list" }
+                ? ListedTab[]
+                : Request extends { action: "close" }
+                  ? ClosedTab
+                  : Request extends { action: "focus" | "navigate" | "reload" }
+                    ? TabDetails
+                    : Request extends { action: "scroll" }
+                      ? ScrollResult
+                      : never;
 
 export type InstructionResult = InstructionResultFor<InstructionRequest>;
+
+// A batch instruction's submitted and completed results are one entry per
+// action, in order; an entry carries either a result or an error.
+export type BatchResultEntry = InstructionResultRequest;
+export type BatchResult = BatchResultEntry[];
+export type BatchSubmissionResult = BatchResultEntry[];
 
 export type ExtensionInstructionResult =
   | JsonValue
@@ -469,7 +490,8 @@ export type ExtensionInstructionResult =
   | ScreenshotUploadResult
   | RecordStartResult
   | RecordStopUploadResult
-  | UnserializableJavaScriptResult;
+  | UnserializableJavaScriptResult
+  | BatchSubmissionResult;
 
 export type InstructionResultRequest =
   | { result: ExtensionInstructionResult; error?: never }

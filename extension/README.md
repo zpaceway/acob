@@ -53,6 +53,19 @@ Instructions with a known target tab run in a per-tab queue. Work on different
 tabs can still overlap, while reloads, navigation, input, screenshots, and
 JavaScript on the same tab execute in claim order.
 
+## Batches
+
+A `batch` instruction (`{actions: [...]}`, 1 to 20 complete instruction
+requests, delivered by the server's `instructions/batch/` route) executes its
+actions strictly in order, one at a time, awaiting each before the next. Each
+sub-action still routes through the per-tab execution queue, so a batch keeps
+its order relative to other instructions on the same tab while other tabs run
+concurrently. The batch completes with one result or error entry per action;
+a failed action does not stop the rest of the batch. The worker holds a
+keep-alive timer for the whole batch. A batch uses the batch instruction's ID
+as the recording ID for any `record_start` sub-action, so a batch can contain
+at most one `record_start` (a duplicate fails with a clear error).
+
 ## Recordings And Browser Settings
 
 `record_start` (`{tid}`, optional `full_page`) starts a video recording of the

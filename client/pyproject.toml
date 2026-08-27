@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "acob-client"
-version = "0.11.0"
+version = "0.12.0"
 description = "Asynchronous Python client for Agent Controlled Browser"
 authors = [{ name = "zpaceway" }]
 readme = "README.md"
@@ -16,10 +16,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=26.5.1",
-    "mypy>=2.3.0",
-    "pyright>=1.1.411",
     "ruff>=0.16.0",
+    "ty>=0.0.75",
 ]
 
 [project.urls]
@@ -29,18 +27,32 @@ Issues = "https://github.com/zpaceway/acob/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["acob"]
 
-[tool.black]
-target-version = ["py310"]
-
 [tool.ruff]
 target-version = "py310"
+line-length = 88
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "RUF", "UP"]
+select = ["ALL"]
+ignore = [
+    "COM812", # the ruff formatter owns trailing commas
+    "CPY",   # no per-file copyright headers in this repository
+    "D",     # docstring enforcement is out of scope; typing is the contract
+    "EM101", # exception messages stay inline in the custom exception classes
+    "EM102",
+    "PT",    # the project deliberately uses unittest (not pytest)
+    "TRY003",
+    "TRY004", # heuristic misfires on isinstance-adjacent raises
+    "TRY301",
+]
 
-[tool.pyright]
-include = ["acob", "tests"]
-pythonVersion = "3.10"
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "PLR2004", # magic-number comparisons inside test assertions
+    "SLF001",  # tests deliberately reach into client internals
+]
 
-[tool.mypy]
-python_version = "3.10"
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+all = "error"

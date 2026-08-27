@@ -410,6 +410,48 @@ For example, an input can be updated and notified with:
 }
 ```
 
+A batch runs up to 20 complete instructions sequentially, one at a time, so a
+cascade of dependent actions is claimed and executed with a single request.
+Submit it to `POST /api/browsers/<bid>/instructions/batch/`:
+
+```json
+{
+  "action": "batch",
+  "actions": [
+    {"action": "list"},
+    {"action": "focus", "tid": 123},
+    {"action": "click", "tid": 123, "selector": "input[name=query]"},
+    {"action": "keyboard", "tid": 123, "text": "ACOB"},
+    {"action": "screenshot", "tid": 123, "full_page": false}
+  ]
+}
+```
+
+The extension executes the actions strictly in order (each action still
+respects the per-tab ordering shared with concurrently running instructions)
+and completes the single batch instruction with one entry per action, in
+order. Each entry carries either a `result` or an `error`; a failed action
+does not stop the rest of the batch. Screenshot and recording entries go
+through the same base64 upload pipeline as standalone actions, so screenshot
+entries contain the hosted download URL in their final result:
+
+```json
+[
+  {"result": [{"tid": 123, "window_id": 1, "active": true, "focused": true, "title": "Example", "url": "https://example.com/", "domain": "example.com"}]},
+  {"result": {"tid": 123, "window_id": 1, "active": true, "title": "Example", "url": "https://example.com/", "domain": "example.com"}},
+  {"result": {"clicked": true, "selector": "input[name=query]", "x": 240.0, "y": 18.0}},
+  {"result": {"inserted_characters": 4}},
+  {"result": {"url": "https://media.example/api/files/<file-id>", "content_type": "image/png", "full_page": false}},
+  {"error": "No element matches selector: button"}
+]
+```
+
+The batch instruction itself is claimed and completed like any other
+instruction, so actions submitted outside a batch still run in parallel with
+each other. `record_start` inside a batch uses the batch instruction's ID as
+the recording ID, so a batch can contain at most one `record_start`; two would
+fail the second with a duplicate-ID error.
+
 The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`. While a reinstall is pending, the response is a single `reinstall` command instead of queued work.
 
 Use the ID returned when creating an instruction to retrieve its status and result:

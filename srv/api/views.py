@@ -1,6 +1,7 @@
 import base64
 import binascii
 import logging
+from typing import Any
 
 from django.conf import settings
 from django.db import transaction
@@ -9,14 +10,13 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from pydantic import ValidationError
-
-logger = logging.getLogger(__name__)
+from pydantic import JsonValue, ValidationError
 
 from .models import BrowserHeartbeat, Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR, request_reinstall
 from .schemas import (
     ApiModel,
+    BatchInstructionRequest,
     BrowserSettingsResponse,
     ErrorResponse,
     HeartbeatRequest,
@@ -33,9 +33,12 @@ from .schemas import (
     ScrollResult,
     ValidationErrorResponse,
     ValidationIssue,
+    batch_results_adapter,
     instruction_adapter,
 )
 from .storage import StorageError, create_storage_backend
+
+logger = logging.getLogger(__name__)
 
 
 def model_response(model: ApiModel, status: int = 200) -> JsonResponse:
@@ -98,6 +101,27 @@ def create_instruction(request: HttpRequest, bid: str) -> JsonResponse:
     instruction = Instruction.objects.create(
         bid=bid,
         action=request_model.action,
+        payload=payload,
+    )
+    return instruction_response(instruction, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def create_batch_instruction(request: HttpRequest, bid: str) -> JsonResponse:
+    """Create one instruction that runs its actions sequentially."""
+    try:
+        request_model = BatchInstructionRequest.model_validate_json(request.body)
+    except ValidationError as error:
+        return validation_error_response(error)
+
+    payload = request_model.model_dump(
+        mode="json",
+        exclude={"action"},
+    )
+    instruction = Instruction.objects.create(
+        bid=bid,
+        action=Instruction.Action.BATCH,
         payload=payload,
     )
     return instruction_response(instruction, status=201)
@@ -215,74 +239,25 @@ def complete_instruction(
 
     result = result_request.result
     instruction_error = result_request.error
-    if (
-        instruction.action == Instruction.Action.SCREENSHOT
-        and result_request.error is None
-    ):
+    if instruction.action in ACTION_RESULT_PROCESSED and result_request.error is None:
         try:
-            captured = ScreenshotResult.model_validate(result)
-            image = base64.b64decode(captured.data, validate=True)
-        except ValidationError as error:
-            return validation_error_response(error)
-        except binascii.Error, ValueError:
-            return error_response("Invalid screenshot data")
-        try:
-            url = _host_screenshot(image, instruction.payload)
-        except StorageError as error:
-            result = None
-            instruction_error = f"Could not host the screenshot: {error}"
-        else:
-            result = {
-                "url": url,
-                "content_type": "image/png",
-                "full_page": instruction.payload.get("full_page", True),
-            }
-    elif (
-        instruction.action == Instruction.Action.RECORD_START
-        and result_request.error is None
-    ):
-        try:
-            result = RecordStartResult.model_validate(result).model_dump(mode="json")
-        except ValidationError as error:
-            return validation_error_response(error)
-    elif (
-        instruction.action == Instruction.Action.RECORD_STOP
-        and result_request.error is None
-    ):
-        try:
-            captured_recording = RecordStopUploadResult.model_validate(result)
-            recording = base64.b64decode(captured_recording.data, validate=True)
-        except ValidationError as error:
-            logger.warning(
-                "record_stop result rejected: %s",
-                error.errors(include_url=False, include_context=False),
+            result, instruction_error = _prepare_action_result(
+                instruction.action,
+                result,
+                instruction.payload,
             )
-            return validation_error_response(error)
-        except binascii.Error, ValueError:
-            logger.warning("record_stop base64 rejected")
-            return error_response("Invalid recording data")
-        try:
-            url = _host_recording(
-                recording, instruction.payload, captured_recording.content_type
-            )
-        except StorageError as error:
-            result = None
-            instruction_error = f"Could not host the recording: {error}"
-        else:
-            result = {
-                "url": url,
-                "content_type": captured_recording.content_type,
-                "duration": captured_recording.duration,
-                "stopped_reason": captured_recording.stopped_reason,
-                "message": captured_recording.message,
-            }
+        except InvalidResultDataError as error:
+            return _invalid_result_response(error)
     elif (
-        instruction.action == Instruction.Action.SCROLL and result_request.error is None
+        instruction.action == Instruction.Action.BATCH and result_request.error is None
     ):
         try:
-            result = ScrollResult.model_validate(result).model_dump(mode="json")
-        except ValidationError as error:
-            return validation_error_response(error)
+            result = _process_batch_result(
+                instruction.payload.get("actions", []),
+                result,
+            )
+        except InvalidResultDataError as error:
+            return _invalid_result_response(error)
 
     final_status = (
         Instruction.Status.FAILED if instruction_error else Instruction.Status.COMPLETED
@@ -313,7 +288,180 @@ def complete_instruction(
     return instruction_response(instruction)
 
 
-def _host_screenshot(image: bytes, payload: dict) -> str:
+class InvalidResultDataError(Exception):
+    """Submitted result data is malformed; maps to an HTTP 400 response."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        validation_error: ValidationError | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.validation_error = validation_error
+
+
+def _invalid_result_response(error: InvalidResultDataError) -> JsonResponse:
+    if error.validation_error is not None:
+        return validation_error_response(error.validation_error)
+    return error_response(error.message)
+
+
+ACTION_RESULT_PROCESSED = frozenset(
+    {
+        Instruction.Action.SCREENSHOT,
+        Instruction.Action.RECORD_START,
+        Instruction.Action.RECORD_STOP,
+        Instruction.Action.SCROLL,
+    }
+)
+
+
+def _process_batch_result(
+    batch_actions_value: JsonValue,
+    result_value: JsonValue,
+) -> list[dict[str, Any]]:
+    """Validate and transform every entry of a batch result.
+
+    Returns one processed entry per action, in order. Malformed submitted
+    data raises ``InvalidResultDataError``.
+    """
+    try:
+        batch_entries = batch_results_adapter.validate_python(result_value)
+    except ValidationError as error:
+        raise InvalidResultDataError(
+            "Invalid batch result",
+            validation_error=error,
+        ) from error
+    if not isinstance(batch_actions_value, list):
+        raise InvalidResultDataError("Batch payload is invalid")
+    if len(batch_entries) != len(batch_actions_value):
+        raise InvalidResultDataError(
+            "Batch result must contain one entry per batch action"
+        )
+    processed: list[dict[str, Any]] = []
+    for entry, action_entry in zip(batch_entries, batch_actions_value, strict=True):
+        if entry.error is not None:
+            processed.append(entry.model_dump(mode="json", exclude_none=True))
+            continue
+        if not isinstance(action_entry, dict):
+            processed.append({"result": entry.result})
+            continue
+        action_name = action_entry.get("action")
+        if not isinstance(action_name, str):
+            processed.append({"result": entry.result})
+            continue
+        try:
+            transformed, entry_error = _prepare_action_result(
+                action_name,
+                entry.result,
+                action_entry,
+            )
+        except InvalidResultDataError as error:
+            raise InvalidResultDataError(
+                error.message,
+                validation_error=error.validation_error,
+            ) from error
+        processed.append(
+            {"result": transformed} if entry_error is None else {"error": entry_error}
+        )
+    return processed
+
+
+def _prepare_action_result(
+    action: str,
+    result_value: JsonValue,
+    payload: dict[str, JsonValue],
+) -> tuple[JsonValue | None, str | None]:
+    """Validate and transform one action's submitted result.
+
+    Returns the transformed result and an error message when hosting a capture
+    failed. Malformed submitted data raises ``InvalidResultDataError``.
+    """
+    if action == Instruction.Action.SCREENSHOT:
+        try:
+            captured = ScreenshotResult.model_validate(result_value)
+            image = base64.b64decode(captured.data, validate=True)
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid screenshot result",
+                validation_error=error,
+            ) from error
+        except binascii.Error, ValueError:
+            raise InvalidResultDataError("Invalid screenshot data") from None
+        try:
+            url = _host_screenshot(image, payload)
+        except StorageError as error:
+            return None, f"Could not host the screenshot: {error}"
+        return (
+            {
+                "url": url,
+                "content_type": "image/png",
+                "full_page": payload.get("full_page", True),
+            },
+            None,
+        )
+
+    if action == Instruction.Action.RECORD_START:
+        try:
+            return (
+                RecordStartResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid record_start result",
+                validation_error=error,
+            ) from error
+
+    if action == Instruction.Action.RECORD_STOP:
+        try:
+            captured_recording = RecordStopUploadResult.model_validate(result_value)
+            recording = base64.b64decode(captured_recording.data, validate=True)
+        except ValidationError as error:
+            logger.warning(
+                "record_stop result rejected: %s",
+                error.errors(include_url=False, include_context=False),
+            )
+            raise InvalidResultDataError(
+                "Invalid record_stop result",
+                validation_error=error,
+            ) from error
+        except binascii.Error, ValueError:
+            logger.warning("record_stop base64 rejected")
+            raise InvalidResultDataError("Invalid recording data") from None
+        try:
+            url = _host_recording(recording, payload, captured_recording.content_type)
+        except StorageError as error:
+            return None, f"Could not host the recording: {error}"
+        return (
+            {
+                "url": url,
+                "content_type": captured_recording.content_type,
+                "duration": captured_recording.duration,
+                "stopped_reason": captured_recording.stopped_reason,
+                "message": captured_recording.message,
+            },
+            None,
+        )
+
+    if action == Instruction.Action.SCROLL:
+        try:
+            return (
+                ScrollResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid scroll result",
+                validation_error=error,
+            ) from error
+
+    return result_value, None
+
+
+def _host_screenshot(image: bytes, payload: dict[str, Any]) -> str:
     """Upload screenshot bytes to the configured storage service."""
     backend = create_storage_backend(
         settings.STORAGE_PROVIDER,
@@ -329,7 +477,11 @@ def _host_screenshot(image: bytes, payload: dict) -> str:
     return backend.upload_file(image, filename, "image/png")
 
 
-def _host_recording(recording: bytes, payload: dict, content_type: str) -> str:
+def _host_recording(
+    recording: bytes,
+    payload: dict[str, Any],
+    content_type: str,
+) -> str:
     """Upload recording bytes to the configured storage service."""
     backend = create_storage_backend(
         settings.STORAGE_PROVIDER,

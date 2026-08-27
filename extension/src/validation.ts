@@ -1,6 +1,6 @@
 import { MODIFIER_BITS } from "./keys.js";
 import { state } from "./state.js";
-import { isKeyboardKey } from "./types.js";
+import { isKeyboardKey, MAX_BATCH_ACTIONS } from "./types.js";
 import type {
   ClaimedInstruction,
   KeyboardModifier,
@@ -58,23 +58,19 @@ export function isClaimedInstruction(value: unknown): value is ClaimedInstructio
   );
 }
 
-export function isSupportedInstruction(
-  value: ClaimedInstruction,
-): value is SupportedInstruction {
-  if (!isRecord(value.payload)) {
-    return false;
-  }
-
-  const payload = value.payload;
-  if (value.action === "click") {
+function isSupportedActionPayload(
+  action: string,
+  payload: Record<string, unknown>,
+): boolean {
+  if (action === "click") {
     return (
       isPositiveInteger(payload.tid) && typeof payload.selector === "string"
     );
   }
-  if (value.action === "javascript") {
+  if (action === "javascript") {
     return isPositiveInteger(payload.tid) && typeof payload.script === "string";
   }
-  if (value.action === "keyboard") {
+  if (action === "keyboard") {
     if (
       !isPositiveInteger(payload.tid) ||
       (payload.modifiers !== undefined &&
@@ -86,43 +82,71 @@ export function isSupportedInstruction(
       ? (payload.modifiers?.length ?? 0) === 0 && payload.key === undefined
       : isKeyboardKey(payload.key) && payload.text === undefined;
   }
-  if (value.action === "screenshot") {
+  if (action === "screenshot") {
     return (
       isPositiveInteger(payload.tid) &&
       (payload.full_page === undefined ||
         typeof payload.full_page === "boolean")
     );
   }
-  if (value.action === "record_start") {
+  if (action === "record_start") {
     return (
       isPositiveInteger(payload.tid) &&
       (payload.full_page === undefined ||
         typeof payload.full_page === "boolean")
     );
   }
-  if (value.action === "record_stop") {
+  if (action === "record_stop") {
     return isPositiveInteger(payload.recording_id);
   }
-  if (value.action === "list") {
+  if (action === "list") {
     return true;
   }
-  if (
-    value.action === "close" ||
-    value.action === "focus" ||
-    value.action === "reload"
-  ) {
+  if (action === "close" || action === "focus" || action === "reload") {
     return isPositiveInteger(payload.tid);
   }
-  if (value.action === "navigate") {
+  if (action === "navigate") {
     return (
       typeof payload.url === "string" &&
       (payload.tid === undefined || isPositiveInteger(payload.tid))
     );
   }
   return (
-    value.action === "scroll" &&
+    action === "scroll" &&
     isPositiveInteger(payload.tid) &&
     typeof payload.y === "number" &&
     Number.isFinite(payload.y)
   );
+}
+
+function isSupportedBatchPayload(payload: Record<string, unknown>): boolean {
+  if (
+    !Array.isArray(payload.actions) ||
+    payload.actions.length === 0 ||
+    payload.actions.length > MAX_BATCH_ACTIONS
+  ) {
+    return false;
+  }
+  return payload.actions.every((entry) => {
+    if (!isRecord(entry) || typeof entry.action !== "string") {
+      return false;
+    }
+    const { action: entryAction, ...entryPayload } = entry;
+    if (typeof entryAction !== "string") {
+      return false;
+    }
+    return isSupportedActionPayload(entryAction, entryPayload);
+  });
+}
+
+export function isSupportedInstruction(
+  value: ClaimedInstruction,
+): value is SupportedInstruction {
+  if (!isRecord(value.payload)) {
+    return false;
+  }
+  if (value.action === "batch") {
+    return isSupportedBatchPayload(value.payload);
+  }
+  return isSupportedActionPayload(value.action, value.payload);
 }

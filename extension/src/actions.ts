@@ -560,6 +560,9 @@ export async function executeRecordStart(
   fullPage: boolean,
   configuration: Configuration,
 ): Promise<RecordStartResult> {
+  if (state.recordings.has(recordingId)) {
+    throw new Error(`A recording with id ${recordingId} is already active`);
+  }
   await ensureOffscreenDocument();
   const size = fullPage ? await measurePageSize(tid, configuration) : null;
   const message: StartRecordingMessage = {

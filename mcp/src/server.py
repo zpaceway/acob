@@ -6,11 +6,12 @@ import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Annotated, Any, cast
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from acob import (
     ACOBClient,
+    BatchResultEntry,
     BrowserSettings,
     ClickResult,
     ClosedTab,
@@ -44,7 +45,7 @@ from pydantic import (
     StringConstraints,
 )
 
-SERVER_VERSION = "0.9.0"
+SERVER_VERSION = "0.10.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
@@ -75,9 +76,15 @@ SERVER_INSTRUCTIONS = (
     "messages, purchases, deletions, credential entry, or other consequential "
     "actions. A timed-out or cancelled call may still complete, so do not blindly "
     "repeat side-effecting work. reinstall reloads the unpacked extension from disk, "
-    "interrupts active work, and is only for explicit recovery after rebuilding it."
+    "interrupts active work, and is only for explicit recovery after rebuilding it.\n\n"
+    "Use execute_batch to submit a list of complete instructions that the browser "
+    "runs sequentially, one at a time, with a single request for the whole cascade; "
+    "every action still returns its own result or error, and instructions submitted "
+    "outside a batch keep running in parallel."
 )
 DEFAULT_MCP_PORT = 58348
+MIN_MCP_PORT = 1
+MAX_MCP_PORT = 65535
 NAMED_KEYS = {
     "ArrowDown",
     "ArrowLeft",
@@ -109,6 +116,7 @@ TOOL_ARGUMENT_NAMES = {
     "record_stop": frozenset({"recording_id", "timeout"}),
     "settings": frozenset({"timeout"}),
     "javascript": frozenset({"tid", "script", "timeout"}),
+    "execute_batch": frozenset({"actions", "timeout"}),
     "reinstall": frozenset(),
 }
 
@@ -131,6 +139,18 @@ ScrollY = Annotated[
     Field(
         allow_inf_nan=False,
         description="Relative vertical distance in CSS pixels; positive is down.",
+    ),
+]
+BatchAction = dict[str, JsonValue]
+BatchActions = Annotated[
+    builtins.list[BatchAction],
+    Field(
+        min_length=1,
+        max_length=20,
+        description=(
+            "Complete instruction requests, e.g. "
+            '{"action": "click", "tid": 12, "selector": "button"}'
+        ),
     ),
 ]
 
@@ -163,7 +183,7 @@ class AppContext:
     default_client: ACOBClient | None = None
     clients: dict[str, ACOBClient] = field(default_factory=dict)
 
-    def client_for(self, request: Any) -> ACOBClient:
+    def client_for(self, request: object) -> ACOBClient:
         """Return the client addressed by the connection URL, creating it once."""
         if self.default_client is not None:
             return self.default_client
@@ -339,7 +359,8 @@ def create_server(
         acob = _client(ctx)
         if text is not None:
             return await acob.keyboard(tid, text=text, timeout=timeout)
-        assert key is not None
+        if key is None:
+            raise ValueError("exactly one of text or key is required")
         return await acob.keyboard(
             tid,
             key=key,
@@ -352,6 +373,7 @@ def create_server(
     )
     async def screenshot(
         tid: PositiveTid,
+        *,
         ctx: Context[AppContext],
         full_page: StrictBool = True,
         timeout: ToolTimeout | None = None,
@@ -369,6 +391,7 @@ def create_server(
     )
     async def record_start(
         tid: PositiveTid,
+        *,
         ctx: Context[AppContext],
         full_page: StrictBool = False,
         timeout: ToolTimeout | None = None,
@@ -431,12 +454,29 @@ def create_server(
         timeout: ToolTimeout | None = None,
     ) -> JsonValue:
         """Evaluate JavaScript in a Chromium tab and return its JSON value."""
-        result = await _client(ctx).javascript(
+        return await _client(ctx).javascript(
             tid,
             script,
             timeout=timeout,
         )
-        return cast(JsonValue, result)
+
+    @server.tool(
+        annotations=ToolAnnotations(open_world_hint=True),
+    )
+    async def execute_batch(
+        actions: BatchActions,
+        ctx: Context[AppContext],
+        timeout: ToolTimeout | None = None,
+    ) -> builtins.list[BatchResultEntry]:
+        """Submit a list of instructions that the browser runs sequentially.
+
+        Each entry is a complete instruction request, for example
+        {"action": "click", "tid": 12, "selector": "button"}. The extension
+        executes the actions one at a time in order and returns one result
+        or error entry per action; a failed action does not stop the rest
+        of the batch. Instructions submitted outside a batch still run in
+        parallel."""
+        return await _client(ctx).execute_batch(actions, timeout=timeout)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -473,7 +513,7 @@ def main() -> None:
 
 
 async def _enforce_tool_arguments(
-    ctx: ServerRequestContext[Any, Any],
+    ctx: ServerRequestContext[AppContext, object],
     call_next: CallNext,
 ) -> HandlerResult:
     try:
@@ -520,12 +560,15 @@ def _client(ctx: Context[AppContext]) -> ACOBClient:
     return request_context.lifespan_context.client_for(request_context.request)
 
 
-def _connection_bid(request: Any) -> str:
+def _connection_bid(request: object) -> str:
     """Read the browser ID from the connection URL path."""
     if request is None:
         raise ValueError("connections must include the browser ID in the URL path")
-    bid = request.path_params.get("bid", "")
-    if not bid:
+    path_params = getattr(request, "path_params", None)
+    if not isinstance(path_params, Mapping):
+        raise ValueError("connections must include the browser ID in the URL path")
+    bid = path_params.get("bid", "")
+    if not isinstance(bid, str) or not bid:
         raise ValueError("connections must include the browser ID in the URL path")
     return bid
 
@@ -585,9 +628,13 @@ def _port(raw: str) -> int:
     try:
         port = int(raw)
     except ValueError as error:
-        raise ValueError("ACOB_MCP_PORT must be an integer from 1 to 65535") from error
-    if not 1 <= port <= 65535:
-        raise ValueError("ACOB_MCP_PORT must be an integer from 1 to 65535")
+        raise ValueError(
+            f"ACOB_MCP_PORT must be an integer from {MIN_MCP_PORT} to {MAX_MCP_PORT}"
+        ) from error
+    if not MIN_MCP_PORT <= port <= MAX_MCP_PORT:
+        raise ValueError(
+            f"ACOB_MCP_PORT must be an integer from {MIN_MCP_PORT} to {MAX_MCP_PORT}"
+        )
     return port
 
 

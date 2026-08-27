@@ -61,7 +61,8 @@ Python client or MCP host
   storage.
 - Supported actions are `list`, `navigate`, `focus`, `close`, `reload`,
   `scroll`, `click`, `keyboard`, `screenshot`, `record_start`, `record_stop`,
-  and `javascript`.
+  `javascript`, and `batch` (up to 20 actions executed sequentially with one
+  result or error entry per action).
 - Targeted operations are serialized per tab while different tabs can run
   concurrently.
 - New-tab creation is serialized and bounded by the configured tab limit.
@@ -108,7 +109,7 @@ Python client or MCP host
 - Server, client, MCP, extension, and website are independently owned
   components.
 - Python components use Ruff, Black, Pyright, and component-specific tests.
-- The server also uses mypy, Django checks, and migration drift checks.
+- The server also uses ty, Django checks, and migration drift checks.
 - The extension uses strict TypeScript, unit tests, and a production build.
 - The website is a buildless static project with manual verification guidance.
 

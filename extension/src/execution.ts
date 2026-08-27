@@ -20,10 +20,12 @@ import type {
   ClaimedInstruction,
   Configuration,
   ExtensionInstructionResult,
+  InstructionAction,
   InstructionResultRequest,
   SupportedInstruction,
 } from "./types.js";
 
+type NonBatchAction = Exclude<InstructionAction, "batch">;
 function runInTabExecutionQueue<Result>(
   tid: number,
   operation: () => Promise<Result>,
@@ -143,6 +145,37 @@ async function runInstructionAction(
 
   if (action === "record_stop") {
     return executeRecordStop(payload.recording_id, configuration);
+  }
+
+  if (action === "batch") {
+    const entries: InstructionResultRequest[] = [];
+    const keepAlive = setInterval(() => undefined, 20_000);
+    try {
+      for (const subAction of payload.actions) {
+        if (state.reinstallScheduled) {
+          entries.push({ error: "Extension reinstall is in progress" });
+          continue;
+        }
+        const { action: subActionName, ...subPayload } = subAction;
+        const subInstruction = {
+          id: instruction.id,
+          action: subActionName,
+          payload: subPayload,
+        } as SupportedInstruction<NonBatchAction>;
+        try {
+          entries.push({
+            result: await runInstruction(subInstruction, configuration),
+          });
+        } catch (error) {
+          entries.push({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    } finally {
+      clearInterval(keepAlive);
+    }
+    return entries;
   }
 
   throw new Error(`Unknown action: ${action}`);
