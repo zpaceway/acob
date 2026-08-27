@@ -2,28 +2,21 @@ from __future__ import annotations
 
 import base64
 import json
-from types import SimpleNamespace
-from typing import TYPE_CHECKING
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
-import httpx
-from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 if TYPE_CHECKING:
     from django.test.client import _MonkeyPatchedWSGIResponse
 
 from .models import Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR
-from .storage import (
-    ChipfStorageBackend,
-    StorageConnectionError,
-    StorageError,
-    StorageHTTPError,
-    StorageProtocolError,
-    create_storage_backend,
-)
+from .storage import StorageError, store_media
 
 
 class InstructionApiTests(TestCase):
@@ -347,7 +340,7 @@ class InstructionApiTests(TestCase):
             ],
         )
 
-    def test_batch_screenshot_entries_are_hosted(self) -> None:
+    def test_batch_screenshot_entries_are_stored_locally(self) -> None:
         image = b"\x89PNG\r\n\x1a\nACOB"
         encoded = base64.b64encode(image).decode()
         created = self.post_json(
@@ -364,18 +357,9 @@ class InstructionApiTests(TestCase):
         self.client.get(self.instruction_path("next/"))
 
         with (
-            patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
-            patch.object(
-                settings,
-                "STORAGE_CONFIG",
-                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-            ),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend = create_backend.return_value
-            backend.upload_file.return_value = (
-                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-            )
             completed = self.post_result(
                 instruction_id,
                 {
@@ -385,28 +369,25 @@ class InstructionApiTests(TestCase):
                     ]
                 },
             )
+            stored = list(Path(media_dir).glob("screenshot-12-*.png"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
 
         self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, image)
         self.assertEqual(
             completed.json()["result"],
             [
                 {"result": []},
                 {
                     "result": {
-                        "url": (
-                            "https://chipf.test/api/files/"
-                            "638a5f9f16a24e1fbb4b3ab093016ec7"
-                        ),
+                        "url": f"http://testserver/api/media/{stored_name}",
                         "content_type": "image/png",
                         "full_page": True,
                     }
                 },
             ],
-        )
-        backend.upload_file.assert_called_once_with(
-            image,
-            "screenshot-12.png",
-            "image/png",
         )
 
     def test_batch_capture_hosting_failure_becomes_an_entry_error(self) -> None:
@@ -422,7 +403,10 @@ class InstructionApiTests(TestCase):
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
 
-        with patch("api.views.create_storage_backend", return_value=None):
+        with patch(
+            "api.views.store_media",
+            side_effect=StorageError("disk is full"),
+        ):
             completed = self.post_result(
                 instruction_id,
                 {"result": [{"result": {"data": base64.b64encode(b"image").decode()}}]},
@@ -434,6 +418,7 @@ class InstructionApiTests(TestCase):
         entry = response["result"][0]
         self.assertIn("error", entry)
         self.assertIn("Could not host the screenshot", entry["error"])
+        self.assertIn("disk is full", entry["error"])
 
     def test_batch_record_entries_are_validated(self) -> None:
         recording = b"0\x9awEBMACOB"
@@ -452,18 +437,9 @@ class InstructionApiTests(TestCase):
         self.client.get(self.instruction_path("next/"))
 
         with (
-            patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
-            patch.object(
-                settings,
-                "STORAGE_CONFIG",
-                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-            ),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend = create_backend.return_value
-            backend.upload_file.return_value = (
-                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-            )
             completed = self.post_result(
                 instruction_id,
                 {
@@ -481,18 +457,20 @@ class InstructionApiTests(TestCase):
                     ]
                 },
             )
+            stored = list(Path(media_dir).glob("recording-42-*.webm"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
 
         self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, recording)
         self.assertEqual(
             completed.json()["result"],
             [
                 {"result": {"recording_id": 42, "started": True}},
                 {
                     "result": {
-                        "url": (
-                            "https://chipf.test/api/files/"
-                            "638a5f9f16a24e1fbb4b3ab093016ec7"
-                        ),
+                        "url": f"http://testserver/api/media/{stored_name}",
                         "content_type": "video/webm",
                         "duration": 5.0,
                         "stopped_reason": "user",
@@ -500,11 +478,6 @@ class InstructionApiTests(TestCase):
                     }
                 },
             ],
-        )
-        backend.upload_file.assert_called_once_with(
-            recording,
-            "recording-42.webm",
-            "video/webm",
         )
 
     def test_batch_rejects_malformed_entries(self) -> None:
@@ -943,7 +916,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "screenshot.tid")
 
-    def test_screenshot_result_is_uploaded_to_the_storage_service(self) -> None:
+    def test_screenshot_result_is_stored_locally(self) -> None:
         image = b"\x89PNG\r\n\x1a\nACOB"
         encoded = base64.b64encode(image).decode()
         created = self.post_json(
@@ -954,48 +927,35 @@ class InstructionApiTests(TestCase):
         self.client.get(self.instruction_path("next/"))
 
         with (
-            patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
-            patch.object(
-                settings,
-                "STORAGE_CONFIG",
-                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-            ),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend = create_backend.return_value
-            backend.upload_file.return_value = (
-                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-            )
             completed = self.post_result(
                 instruction_id,
                 {"result": {"data": encoded}},
             )
+            stored = list(Path(media_dir).glob("screenshot-12-*.png"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
 
         self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, image)
         result = completed.json()["result"]
         self.assertEqual(
             result,
             {
-                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "url": f"http://testserver/api/media/{stored_name}",
                 "content_type": "image/png",
                 "full_page": True,
             },
-        )
-        create_backend.assert_called_once_with(
-            "chipf",
-            {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-        )
-        backend.upload_file.assert_called_once_with(
-            image,
-            "screenshot-12.png",
-            "image/png",
         )
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_screenshot_fails_when_no_storage_service_is_configured(self) -> None:
+    def test_screenshot_fails_when_media_cannot_be_stored(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "screenshot", "tid": 12},
@@ -1003,32 +963,10 @@ class InstructionApiTests(TestCase):
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
 
-        with patch("api.views.create_storage_backend", return_value=None):
-            completed = self.post_result(
-                instruction_id,
-                {"result": {"data": base64.b64encode(b"image").decode()}},
-            )
-
-        self.assertEqual(completed.status_code, 200)
-        response = completed.json()
-        self.assertEqual(response["status"], "failed")
-        self.assertIn("no storage service is configured", response["error"])
-
-        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
-        self.assertEqual(detail.json()["error"], response["error"])
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
-
-    def test_screenshot_fails_when_the_storage_service_is_unavailable(self) -> None:
-        created = self.post_json(
-            self.instruction_path(),
-            {"action": "screenshot", "tid": 12},
-        )
-        instruction_id = created.json()["id"]
-        self.client.get(self.instruction_path("next/"))
-
-        with patch("api.views.create_storage_backend") as create_backend:
-            backend = create_backend.return_value
-            backend.upload_file.side_effect = StorageConnectionError("storage is down")
+        with patch(
+            "api.views.store_media",
+            side_effect=StorageError("disk is full"),
+        ):
             completed = self.post_result(
                 instruction_id,
                 {"result": {"data": base64.b64encode(b"image").decode()}},
@@ -1038,7 +976,11 @@ class InstructionApiTests(TestCase):
         response = completed.json()
         self.assertEqual(response["status"], "failed")
         self.assertIn("Could not host the screenshot", response["error"])
-        self.assertIn("storage is down", response["error"])
+        self.assertIn("disk is full", response["error"])
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["error"], response["error"])
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
     def test_rejects_invalid_screenshot_result(self) -> None:
         created = self.post_json(
@@ -1149,7 +1091,7 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_record_stop_result_is_uploaded_to_the_storage_service(self) -> None:
+    def test_record_stop_result_is_stored_locally(self) -> None:
         recording = b"0\x9awEBMACOB"
         encoded = base64.b64encode(recording).decode()
         created = self.post_json(
@@ -1160,18 +1102,9 @@ class InstructionApiTests(TestCase):
         self.client.get(self.instruction_path("next/"))
 
         with (
-            patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
-            patch.object(
-                settings,
-                "STORAGE_CONFIG",
-                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-            ),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend = create_backend.return_value
-            backend.upload_file.return_value = (
-                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-            )
             completed = self.post_result(
                 instruction_id,
                 {
@@ -1186,13 +1119,18 @@ class InstructionApiTests(TestCase):
                     }
                 },
             )
+            stored = list(Path(media_dir).glob("recording-42-*.webm"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
 
         self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, recording)
         result = completed.json()["result"]
         self.assertEqual(
             result,
             {
-                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "url": f"http://testserver/api/media/{stored_name}",
                 "content_type": "video/webm",
                 "duration": 5.0,
                 "stopped_reason": "max_duration",
@@ -1201,17 +1139,12 @@ class InstructionApiTests(TestCase):
                 ),
             },
         )
-        backend.upload_file.assert_called_once_with(
-            recording,
-            "recording-42.webm",
-            "video/webm",
-        )
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_record_stop_fails_when_no_storage_service_is_configured(self) -> None:
+    def test_record_stop_fails_when_media_cannot_be_stored(self) -> None:
         created = self.post_json(
             self.instruction_path(),
             {"action": "record_stop", "recording_id": 42},
@@ -1219,36 +1152,10 @@ class InstructionApiTests(TestCase):
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
 
-        with patch("api.views.create_storage_backend", return_value=None):
-            completed = self.post_result(
-                instruction_id,
-                {
-                    "result": {
-                        "data": base64.b64encode(b"video").decode(),
-                        "content_type": "video/webm",
-                        "duration": 1.0,
-                        "stopped_reason": "user",
-                        "message": "Recording stopped by user request",
-                    }
-                },
-            )
-
-        self.assertEqual(completed.status_code, 200)
-        response = completed.json()
-        self.assertEqual(response["status"], "failed")
-        self.assertIn("no storage service is configured", response["error"])
-
-    def test_record_stop_fails_when_the_storage_service_is_unavailable(self) -> None:
-        created = self.post_json(
-            self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
-        )
-        instruction_id = created.json()["id"]
-        self.client.get(self.instruction_path("next/"))
-
-        with patch("api.views.create_storage_backend") as create_backend:
-            backend = create_backend.return_value
-            backend.upload_file.side_effect = StorageConnectionError("storage is down")
+        with patch(
+            "api.views.store_media",
+            side_effect=StorageError("disk is full"),
+        ):
             completed = self.post_result(
                 instruction_id,
                 {
@@ -1266,7 +1173,7 @@ class InstructionApiTests(TestCase):
         response = completed.json()
         self.assertEqual(response["status"], "failed")
         self.assertIn("Could not host the recording", response["error"])
-        self.assertIn("storage is down", response["error"])
+        self.assertIn("disk is full", response["error"])
 
     def test_rejects_invalid_record_stop_result(self) -> None:
         created = self.post_json(
@@ -1322,18 +1229,9 @@ class InstructionApiTests(TestCase):
         self.client.get(self.instruction_path("next/"))
 
         with (
-            patch("api.views.create_storage_backend") as create_backend,
-            patch.object(settings, "STORAGE_PROVIDER", "chipf"),
-            patch.object(
-                settings,
-                "STORAGE_CONFIG",
-                {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-            ),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend = create_backend.return_value
-            backend.upload_file.return_value = (
-                "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
-            )
             completed = self.post_result(
                 instruction_id,
                 {
@@ -1346,17 +1244,18 @@ class InstructionApiTests(TestCase):
                     }
                 },
             )
+            stored = list(Path(media_dir).glob("recording-42-*.mp4"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
 
         self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, recording)
         result = completed.json()["result"]
         self.assertEqual(result["content_type"], "video/mp4")
         self.assertEqual(result["duration"], 5.0)
         self.assertEqual(result["stopped_reason"], "user")
-        backend.upload_file.assert_called_once_with(
-            recording,
-            "recording-42.mp4",
-            "video/mp4",
-        )
+        self.assertEqual(result["url"], f"http://testserver/api/media/{stored_name}")
 
     def test_rejects_unknown_record_stop_content_type(self) -> None:
         created = self.post_json(
@@ -1497,94 +1396,62 @@ class InstructionApiTests(TestCase):
         self.assertEqual(repeated.status_code, 204)
 
 
-class StorageBackendTests(TestCase):
-    def test_unconfigured_backend_is_none(self) -> None:
-
-        self.assertIsNone(create_storage_backend("chipf", {}))
-        self.assertIsNone(create_storage_backend("chipf", {"chipf": {}}))
-        self.assertIsNone(
-            create_storage_backend(
-                "chipf", {"chipf": {"endpoint": "https://chipf.test"}}
-            )
-        )
-        self.assertIsNone(
-            create_storage_backend("chipf", {"chipf": {"api_key": "secret"}})
-        )
-        self.assertIsNone(create_storage_backend("chipf", None))
-
-    def test_unknown_provider_is_a_configuration_error(self) -> None:
-
-        with self.assertRaisesRegex(StorageError, "unknown storage provider"):
-            create_storage_backend("s3", {"s3": {"endpoint": "x", "api_key": "y"}})
-
-    def test_configured_chipf_backend_is_returned(self) -> None:
-
-        backend = create_storage_backend(
-            "chipf",
-            {"chipf": {"endpoint": "https://chipf.test", "api_key": "secret"}},
-        )
-        assert isinstance(backend, ChipfStorageBackend)
-        self.assertEqual(backend.endpoint, "https://chipf.test")
-        self.assertEqual(backend.api_key, "secret")
-
-    def test_upload_file_returns_the_resolved_url(self) -> None:
-
-        backend = ChipfStorageBackend("https://chipf.test", "secret")
-        response = SimpleNamespace(
-            status_code=201,
-            content=(
-                b'{"files":[{"file_id":"abc","url":"/api/files/abc",'
-                b'"content_type":"image/png"}]}'
-            ),
-        )
-
-        with patch("api.storage.httpx.post", return_value=response) as post:
-            url = backend.upload_file(b"png", "screenshot-12.png", "image/png")
-
-        self.assertEqual(url, "https://chipf.test/api/files/abc")
-        post.assert_called_once_with(
-            "https://chipf.test/api/files/upload",
-            files={
-                "file": ("screenshot-12.png", b"png", "image/png"),
-            },
-            headers={"X-API-Key": "secret"},
-            timeout=30.0,
-        )
-
-    def test_upload_file_rejects_a_non_201_response(self) -> None:
-
-        backend = ChipfStorageBackend("https://chipf.test", "secret")
-        response = SimpleNamespace(
-            status_code=401,
-            content=b'{"error":"unauthorized"}',
-        )
-
+class MediaStorageTests(TestCase):
+    def test_store_media_writes_bytes_and_returns_the_url_path(self) -> None:
         with (
-            patch("api.storage.httpx.post", return_value=response),
-            self.assertRaisesRegex(StorageHTTPError, "unauthorized"),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend.upload_file(b"png", "screenshot-12.png", "image/png")
+            url_path = store_media(b"png", "screenshot-12-abc.png")
+            stored_bytes = (Path(media_dir) / "screenshot-12-abc.png").read_bytes()
 
-    def test_upload_file_wraps_connection_failures(self) -> None:
+        self.assertEqual(url_path, "/api/media/screenshot-12-abc.png")
+        self.assertEqual(stored_bytes, b"png")
 
-        backend = ChipfStorageBackend("https://chipf.test", "secret")
+    def test_store_media_creates_the_media_root(self) -> None:
+        with tempfile.TemporaryDirectory() as media_dir:
+            root = Path(media_dir) / "nested" / "media"
+            with override_settings(MEDIA_ROOT=root):
+                store_media(b"png", "shot.png")
+                stored_bytes = (root / "shot.png").read_bytes()
+        self.assertEqual(stored_bytes, b"png")
 
+    def test_store_media_raises_when_the_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as media_dir:
+            root = Path(media_dir)
+            (root / "shot.png").mkdir()
+            with (
+                override_settings(MEDIA_ROOT=root),
+                self.assertRaisesRegex(StorageError, "Could not store the media file"),
+            ):
+                store_media(b"png", "shot.png")
+
+    def test_served_media_returns_bytes_and_content_type(self) -> None:
+        with tempfile.TemporaryDirectory() as media_dir:
+            (Path(media_dir) / "shot.png").write_bytes(b"png-bytes")
+            with override_settings(MEDIA_ROOT=Path(media_dir)):
+                response = self.client.get("/api/media/shot.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            b"".join(cast("Iterator[bytes]", response)),
+            b"png-bytes",
+        )
+        self.assertEqual(response.headers["Content-Type"], "image/png")
+
+    def test_unknown_media_is_404(self) -> None:
         with (
-            patch(
-                "api.storage.httpx.post",
-                side_effect=httpx.ConnectError("refused"),
-            ),
-            self.assertRaisesRegex(StorageConnectionError, "refused"),
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
         ):
-            backend.upload_file(b"png", "screenshot-12.png", "image/png")
+            response = self.client.get("/api/media/missing.png")
 
-    def test_upload_file_rejects_invalid_responses(self) -> None:
+        self.assertEqual(response.status_code, 404)
 
-        backend = ChipfStorageBackend("https://chipf.test", "secret")
-        response = SimpleNamespace(status_code=201, content=b"not json")
+    def test_media_names_are_basenames_only(self) -> None:
+        with tempfile.TemporaryDirectory() as media_dir:
+            (Path(media_dir) / "secret.png").write_bytes(b"secret")
+            with override_settings(MEDIA_ROOT=Path(media_dir)):
+                response = self.client.get("/api/media/..%2Fsecret.png")
 
-        with (
-            patch("api.storage.httpx.post", return_value=response),
-            self.assertRaises(StorageProtocolError),
-        ):
-            backend.upload_file(b"png", "screenshot-12.png", "image/png")
+        self.assertEqual(response.status_code, 404)

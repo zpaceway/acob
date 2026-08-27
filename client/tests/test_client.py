@@ -500,7 +500,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             await client.submit("list")
 
     async def test_screenshot_returns_the_media_url_without_downloading(self) -> None:
-        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         client = self.make_client()
         requests = self.add_responses(
             client,
@@ -606,7 +606,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_record_stop_returns_the_media_url(self) -> None:
-        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         client = self.make_client()
         requests = self.add_responses(
             client,
@@ -648,7 +648,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_record_stop_accepts_an_mp4_recording(self) -> None:
-        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         client = self.make_client()
         requests = self.add_responses(
             client,

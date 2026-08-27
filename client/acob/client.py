@@ -535,9 +535,9 @@ class ACOBClient:
     ) -> Screenshot:
         """Capture a tab and return its public download URL.
 
-        The URL is hosted by the configured media storage service, not by the
-        ACOB server. The client never transfers the image bytes; the caller
-        decides whether and how to download the capture.
+        The ACOB server serves the capture at the returned URL; the client
+        never transfers the image bytes, and the caller decides whether and
+        how to download the capture.
         """
         result = self._expect_model(
             await self.execute(

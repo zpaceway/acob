@@ -209,9 +209,9 @@ MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `record_start`, `record_stop`, `settings`, `javascript`, and `reinstall`.
 Structured results use SDK-generated output schemas. `screenshot` always
-returns the public download URL produced by the ACOB server's configured
-media storage service; neither the client nor the MCP server downloads the
-image, so the agent fetches the capture itself when it needs the pixels. See
+returns the public download URL served by the ACOB server itself; neither the
+client nor the MCP server downloads the image, so the agent fetches the
+capture itself when it needs the pixels. See
 [`mcp/README.md`](mcp/README.md) for all environment, transport, Docker,
 security, and verification details.
 
@@ -285,26 +285,24 @@ include unique `alt`, `ctrl`, `meta`, and `shift` modifiers. The extension
 leaves tab and window focus unchanged, so the agent must focus the intended page
 control first, usually with `click`.
 
-`screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains the public download URL hosted by the configured media storage service, not image data:
+`screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains the public download URL served by the ACOB server itself, not image data:
 
 ```json
 {
-  "url": "https://media.example/api/files/<file-id>",
+  "url": "https://acob.example/api/media/screenshot-12-<id>.png",
   "content_type": "image/png",
   "full_page": false
 }
 ```
 
-The server never stores the image: the extension submits the capture as base64,
-the server uploads the bytes to the configured storage provider (`STORAGE_PROVIDER`,
-default `chipf`, configured via `CHIPF_ENDPOINT` and `CHIPF_API_KEY`) and stores
-only the resulting URL in the instruction result. Clients and the MCP server
-relay that URL without downloading it; fetching the image from the media
-storage service is left to the user or agent.
-The storage service controls the lifetime of the URL. Without a configured
-storage service, or when the upload fails, the instruction completes as failed
-with a clear error. Encoded captures are limited to 30 MiB; larger captures
-complete as failed instructions rather than being submitted.
+The server stores the capture locally under its media root and serves the
+bytes at `/api/media/<filename>`; the instruction result carries only that
+URL. Clients and the MCP server relay the URL without downloading it; fetching
+the image is left to the user or agent. The server controls the lifetime of
+the URL, which dies with the media files when the server restarts. When
+storing the capture fails, the instruction completes as failed with a clear
+error. Encoded captures are limited to 30 MiB; larger captures complete as
+failed instructions rather than being submitted.
 
 `record_start` requires a positive `tid` and starts a video recording of that
 tab. It completes almost immediately with a tracking ID; the recording
@@ -335,7 +333,7 @@ screenshots. Recordings are encoded as MP4 (H.264) when the browser's
 
 ```json
 {
-  "url": "https://media.example/api/files/<file-id>",
+  "url": "https://acob.example/api/media/recording-42-<id>.mp4",
   "content_type": "video/mp4",
   "duration": 300.0,
   "stopped_reason": "max_duration",
@@ -432,8 +430,8 @@ respects the per-tab ordering shared with concurrently running instructions)
 and completes the single batch instruction with one entry per action, in
 order. Each entry carries either a `result` or an `error`; a failed action
 does not stop the rest of the batch. Screenshot and recording entries go
-through the same base64 upload pipeline as standalone actions, so screenshot
-entries contain the hosted download URL in their final result:
+through the same base64 storage pipeline as standalone actions, so screenshot
+entries contain the served download URL in their final result:
 
 ```json
 [
@@ -441,7 +439,7 @@ entries contain the hosted download URL in their final result:
   {"result": {"tid": 123, "window_id": 1, "active": true, "title": "Example", "url": "https://example.com/", "domain": "example.com"}},
   {"result": {"clicked": true, "selector": "input[name=query]", "x": 240.0, "y": 18.0}},
   {"result": {"inserted_characters": 4}},
-  {"result": {"url": "https://media.example/api/files/<file-id>", "content_type": "image/png", "full_page": false}},
+  {"result": {"url": "https://acob.example/api/media/screenshot-123-<id>.png", "content_type": "image/png", "full_page": false}},
   {"error": "No element matches selector: button"}
 ]
 ```

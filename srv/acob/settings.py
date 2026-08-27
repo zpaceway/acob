@@ -10,7 +10,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -125,13 +124,7 @@ STATIC_URL = "static/"
 # full-size 20-action batch of 30 MiB encoded screenshots.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 1024
 
-# Media storage service: screenshots and recordings are uploaded there and
-# never stored locally. STORAGE_PROVIDER selects the backend (default
-# "chipf"); each provider reads its own environment variables. Unset
-# credentials mean capture results fail until a provider is configured.
-STORAGE_PROVIDER = os.getenv("STORAGE_PROVIDER", "chipf").strip().lower()
-CHIPF_ENDPOINT = os.getenv("CHIPF_ENDPOINT", "").rstrip("/")
-CHIPF_API_KEY = os.getenv("CHIPF_API_KEY", "")
-STORAGE_CONFIG = {
-    "chipf": {"endpoint": CHIPF_ENDPOINT, "api_key": CHIPF_API_KEY},
-}
+# Captures (screenshots and recordings) are stored locally under MEDIA_ROOT
+# and served by this server at /api/media/<filename>; there is no external
+# storage service. The directory is created on first use.
+MEDIA_ROOT = BASE_DIR / "media"

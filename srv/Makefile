@@ -1,10 +1,5 @@
 ACOB_SRV_HOST ?= 0.0.0.0
 ACOB_SRV_PORT ?= 58347
-STORAGE_PROVIDER ?= chipf
-CHIPF_ENDPOINT ?=
-CHIPF_API_KEY ?=
-
-export STORAGE_PROVIDER CHIPF_ENDPOINT CHIPF_API_KEY
 
 .PHONY: format check test migrations migrate dev run docker logs
 

@@ -30,10 +30,10 @@ make dev ACOB_SRV_HOST=0.0.0.0 ACOB_SRV_PORT=8000
 Use `make run` to apply migrations and serve `acob.asgi:application` with
 Uvicorn. Both commands use the development settings in `acob/settings.py`.
 
-Screenshot results require a media storage service. `STORAGE_PROVIDER` selects
-the provider (default `chipf`); set `CHIPF_ENDPOINT` and `CHIPF_API_KEY`
-(empty by default); without them, screenshot instructions fail with a clear
-error instead of storing anything locally.
+Screenshots and recordings are stored locally under `media/` (`MEDIA_ROOT`)
+and served by this server at `/api/media/<filename>`. No external storage
+service is configured; when storing a capture fails, the instruction
+completes as failed with a clear error.
 
 Create and apply migrations separately with `make migrations` and
 `make migrate`.
@@ -86,6 +86,7 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 | `POST` | `reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
 | `POST` | `heartbeat/` | Store the extension's reported settings. |
 | `GET` | `settings/` | Return the settings most recently reported by the extension. |
+| `GET` | `media/<name>` | Serve a stored screenshot or recording. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `record_start`, `record_stop`, and
@@ -97,19 +98,21 @@ actions strictly in order and completes the single instruction with one
 result or error entry per action; a failed action does not stop the rest of
 the batch. Only the batch route accepts the `batch` action, and the result
 route validates each entry against its action's result model (screenshots and
-recordings are hosted through the same storage pipeline per entry).
+recordings are stored through the same local media pipeline per entry).
 
 Instructions are transport state, not history. Pending and processing reads are
 non-destructive. The first successful detail request for a completed or failed
 instruction returns its terminal response and deletes the row.
 
-Screenshots and recordings are never stored by this server. When the
-extension reports a capture, the server immediately uploads the bytes to the
-configured media storage service and stores only the resulting public
-download URL in the instruction result. Recordings use the same pipeline:
-`record_start` (with an optional `full_page` flag to record the whole
-scrollable page) and `record_stop` are instructions whose results carry the
-final video URL, and the extension-side session is not tracked by the server.
+Screenshots and recordings are stored locally by this server under
+`media/` (`MEDIA_ROOT`, created on first use) and served at
+`/api/media/<filename>`; the instruction result carries the absolute URL on
+this server itself. Recordings use the same pipeline: `record_start` (with an
+optional `full_page` flag to record the whole scrollable page) and
+`record_stop` are instructions whose results carry the final video URL, and
+the extension-side session is not tracked by the server. Like the SQLite
+database, the media directory lives on the local filesystem; a fresh
+container starts with an empty media root.
 
 While a reinstall is pending, `instructions/next/` claims no queue work and
 instead returns the `reinstall` command directly to the extension; the
@@ -125,6 +128,8 @@ Pending instructions remain available to the restarted extension.
 The default configuration is for trusted local development only:
 
 - SQLite stores all queue state in `db.sqlite3`.
+- `media/` holds screenshots and recordings; any client that can reach the
+  server can fetch them from `/api/media/<filename>`.
 - `DEBUG` is enabled, `ALLOWED_HOSTS` accepts every host, and the secret key is
   committed as a development value.
 - Queue endpoints have no authentication, and API POST routes are CSRF-exempt.

@@ -9,6 +9,3 @@ services:
     environment:
       ACOB_SRV_HOST: ${ACOB_SRV_HOST:-0.0.0.0}
       ACOB_SRV_PORT: ${ACOB_SRV_PORT:-58347}
-      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-chipf}
-      CHIPF_ENDPOINT: ${CHIPF_ENDPOINT:-}
-      CHIPF_API_KEY: ${CHIPF_API_KEY:-}

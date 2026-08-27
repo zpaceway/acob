@@ -216,7 +216,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             "timed-out or cancelled call",
             "reinstall reloads the unpacked extension",
             "ACOB_ENDPOINT environment variable",
-            "media storage service",
+            "served by the ACOB server",
             "execute_batch",
         ):
             with self.subTest(guidance=guidance):
@@ -419,7 +419,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_returns_screenshot_download_url_from_the_client(self) -> None:
-        media_url = "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7"
+        media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         self.acob.screenshot.return_value = Screenshot(
             url=media_url,
             content_type="image/png",
@@ -456,7 +456,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             tid=12,
         )
         self.acob.record_stop.return_value = RecordingStop(
-            url="https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+            url="http://acob.test/api/media/screenshot-12-abc.png",
             content_type="video/webm",
             duration=300.0,
             stopped_reason="max_duration",
@@ -480,7 +480,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             stopped.structured_content,
             {
-                "url": "https://chipf.test/api/files/638a5f9f16a24e1fbb4b3ab093016ec7",
+                "url": "http://acob.test/api/media/screenshot-12-abc.png",
                 "content_type": "video/webm",
                 "duration": 300.0,
                 "stopped_reason": "max_duration",

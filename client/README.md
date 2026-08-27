@@ -139,7 +139,7 @@ configured tab limit. Navigating an existing `tid` is unaffected by the limit.
 Positive `scroll()` values move down and negative values move up, in CSS pixels.
 
 `screenshot()` returns a `Screenshot` model carrying the public download URL
-hosted by the media storage service. The client never transfers the image
+served by the ACOB server itself. The client never transfers the image
 bytes; the caller decides whether and how to fetch the capture:
 
 ```python

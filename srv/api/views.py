@@ -1,12 +1,19 @@
 import base64
 import binascii
 import logging
+import uuid
+from pathlib import Path
 from typing import Any
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Exists
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import (
+    FileResponse,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+    JsonResponse,
+)
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -36,7 +43,7 @@ from .schemas import (
     batch_results_adapter,
     instruction_adapter,
 )
-from .storage import StorageError, create_storage_backend
+from .storage import StorageError, media_file, store_media
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +252,7 @@ def complete_instruction(
                 instruction.action,
                 result,
                 instruction.payload,
+                request,
             )
         except InvalidResultDataError as error:
             return _invalid_result_response(error)
@@ -255,6 +263,7 @@ def complete_instruction(
             result = _process_batch_result(
                 instruction.payload.get("actions", []),
                 result,
+                request,
             )
         except InvalidResultDataError as error:
             return _invalid_result_response(error)
@@ -321,6 +330,7 @@ ACTION_RESULT_PROCESSED = frozenset(
 def _process_batch_result(
     batch_actions_value: JsonValue,
     result_value: JsonValue,
+    request: HttpRequest,
 ) -> list[dict[str, Any]]:
     """Validate and transform every entry of a batch result.
 
@@ -357,6 +367,7 @@ def _process_batch_result(
                 action_name,
                 entry.result,
                 action_entry,
+                request,
             )
         except InvalidResultDataError as error:
             raise InvalidResultDataError(
@@ -373,10 +384,11 @@ def _prepare_action_result(
     action: str,
     result_value: JsonValue,
     payload: dict[str, JsonValue],
+    request: HttpRequest,
 ) -> tuple[JsonValue | None, str | None]:
     """Validate and transform one action's submitted result.
 
-    Returns the transformed result and an error message when hosting a capture
+    Returns the transformed result and an error message when storing a capture
     failed. Malformed submitted data raises ``InvalidResultDataError``.
     """
     if action == Instruction.Action.SCREENSHOT:
@@ -391,7 +403,7 @@ def _prepare_action_result(
         except binascii.Error, ValueError:
             raise InvalidResultDataError("Invalid screenshot data") from None
         try:
-            url = _host_screenshot(image, payload)
+            url = _host_screenshot(image, payload, request)
         except StorageError as error:
             return None, f"Could not host the screenshot: {error}"
         return (
@@ -432,7 +444,12 @@ def _prepare_action_result(
             logger.warning("record_stop base64 rejected")
             raise InvalidResultDataError("Invalid recording data") from None
         try:
-            url = _host_recording(recording, payload, captured_recording.content_type)
+            url = _host_recording(
+                recording,
+                payload,
+                captured_recording.content_type,
+                request,
+            )
         except StorageError as error:
             return None, f"Could not host the recording: {error}"
         return (
@@ -461,45 +478,48 @@ def _prepare_action_result(
     return result_value, None
 
 
-def _host_screenshot(image: bytes, payload: dict[str, Any]) -> str:
-    """Upload screenshot bytes to the configured storage service."""
-    backend = create_storage_backend(
-        settings.STORAGE_PROVIDER,
-        settings.STORAGE_CONFIG,
-    )
-    if backend is None:
-        raise StorageError(
-            "no storage service is configured; set CHIPF_ENDPOINT and "
-            "CHIPF_API_KEY (or another provider's credentials)"
-        )
+def _host_screenshot(
+    image: bytes,
+    payload: dict[str, Any],
+    request: HttpRequest,
+) -> str:
+    """Store screenshot bytes locally and return their served URL."""
     tid = payload.get("tid")
-    filename = f"screenshot-{tid}.png" if isinstance(tid, int) else "screenshot.png"
-    return backend.upload_file(image, filename, "image/png")
+    name = (
+        f"screenshot-{tid}-{uuid.uuid4().hex}.png"
+        if isinstance(tid, int)
+        else f"screenshot-{uuid.uuid4().hex}.png"
+    )
+    return request.build_absolute_uri(store_media(image, name))
 
 
 def _host_recording(
     recording: bytes,
     payload: dict[str, Any],
     content_type: str,
+    request: HttpRequest,
 ) -> str:
-    """Upload recording bytes to the configured storage service."""
-    backend = create_storage_backend(
-        settings.STORAGE_PROVIDER,
-        settings.STORAGE_CONFIG,
-    )
-    if backend is None:
-        raise StorageError(
-            "no storage service is configured; set CHIPF_ENDPOINT and "
-            "CHIPF_API_KEY (or another provider's credentials)"
-        )
+    """Store recording bytes locally and return their served URL."""
     extension = ".mp4" if content_type == "video/mp4" else ".webm"
     recording_id = payload.get("recording_id")
-    filename = (
-        f"recording-{recording_id}{extension}"
+    name = (
+        f"recording-{recording_id}-{uuid.uuid4().hex}{extension}"
         if isinstance(recording_id, int)
-        else f"recording{extension}"
+        else f"recording-{uuid.uuid4().hex}{extension}"
     )
-    return backend.upload_file(recording, filename, content_type)
+    return request.build_absolute_uri(store_media(recording, name))
+
+
+@require_http_methods(["GET"])
+def serve_media(_request: HttpRequest, name: str) -> HttpResponseBase:
+    """Serve a capture stored under the local media root."""
+    safe_name = Path(name).name
+    if safe_name != name:
+        return error_response("Media not found", status=404)
+    path = media_file(safe_name)
+    if not path.is_file():
+        return error_response("Media not found", status=404)
+    return FileResponse(path.open("rb"))
 
 
 @csrf_exempt

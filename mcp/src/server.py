@@ -62,7 +62,7 @@ SERVER_INSTRUCTIONS = (
     "tab. Await navigation and use the returned tid before dependent actions.\n\n"
     "Prefer list, navigate, focus, close, reload, scroll, click, and keyboard for "
     "normal browser interaction. Use screenshot to inspect visual state; it "
-    "returns the public download URL hosted by the media storage service, so "
+    "returns the public download URL served by the ACOB server, so "
     "download the image yourself when you need its pixels. Use javascript only "
     "for bounded, page-specific work or compact structured extraction; return "
     "minimal JSON instead of whole-page content.\n\n"
@@ -378,8 +378,8 @@ def create_server(
         full_page: StrictBool = True,
         timeout: ToolTimeout | None = None,
     ) -> Screenshot:
-        """Capture a Chromium tab and return its public download URL hosted
-        by the media storage service."""
+        """Capture a Chromium tab and return its public download URL served
+        by the ACOB server."""
         return await _client(ctx).screenshot(
             tid,
             full_page=full_page,
@@ -416,8 +416,8 @@ def create_server(
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
     ) -> RecordingStop:
-        """Stop a recording and return its public download URL hosted by the
-        media storage service.
+        """Stop a recording and return its public download URL served by the
+        ACOB server.
 
         A recording that already reached the extension's maximum duration is
         returned as-is with stopped_reason \"max_duration\" and an explanatory

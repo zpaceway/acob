@@ -62,17 +62,17 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
     `complete_instruction` validates action-specific results (per entry for
     batches); the first detail GET of a terminal instruction returns and
     deletes it (single-use terminal responses).
-  - Screenshots and recordings are never stored locally: the extension posts
-    base64, the view decodes, uploads through `srv/api/storage.py`
-    (`STORAGE_PROVIDER`, default `chipf`, via `CHIPF_ENDPOINT`/`CHIPF_API_KEY`),
-    and stores only the resulting public download URL.
+  - Screenshots and recordings are stored locally: the extension posts
+    base64, the view decodes and writes the bytes through `srv/api/storage.py`
+    under `MEDIA_ROOT`, and the instruction result carries only the URL under
+    which this server serves the capture (`/api/media/<filename>`).
   - `reinstall` is a separate command channel (not an instruction);
     `heartbeat`/`settings` are separate routes too.
 - `srv/acob/settings.py`: `DATA_UPLOAD_MAX_MEMORY_SIZE` must exceed the
   largest accepted base64 body (1 GiB covers the 512 MiB recording cap and a
   full-size 20-action batch).
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
-  helpers, `patch` for storage backends).
+  helpers, `patch` for media storage failures).
 
 ### extension/ — Manifest V3 Chromium extension (TypeScript)
 
@@ -324,9 +324,10 @@ The deployed environment is Kubernetes (`namespace: acob`, deployment
   `ACOB_ENDPOINT` override and uses the image default.
 - Ingress `acob.zpaceway.com`: `/mcp/` -> port 58348 (MCP Streamable HTTP),
   `/` -> port 58347 (API).
-- Media storage is configured on the deployment via `CHIPF_ENDPOINT` and
-  `CHIPF_API_KEY` (chipf cluster service); without it, screenshot and
-  recording instructions fail with a clear error.
+- Media is stored locally by the srv container under its media root and
+  served at `/api/media/<filename>`; there is no external storage service.
+  Like the SQLite database, the media files live in the container and are
+  dropped when the pod restarts.
 - The srv container runs `make run` on start, which applies migrations.
 - Deploy a component with `make -C srv deploy` and `make -C mcp deploy`
   (build + push + `kubectl rollout restart deployment/acob -n acob`).
@@ -399,7 +400,7 @@ End-to-end browser testing against the deployed stack:
    work and reads the latest files from `extension/dist/`.
 3. Use the MCP/client tool surface (e.g. `settings`, `record_start`,
    `record_stop`, `screenshot`) against a live tab; downloads are public
-   media URLs that the storage service hosts. Recordings should come back
+   media URLs that the ACOB server serves. Recordings should come back
    as `video/mp4` (H.264) on Chromium 126+; verify the returned file with
    `ffprobe` (`Duration:` must be present) — the old WebM fallback lacks a
    duration element and tools that probe duration (e.g. vsense) reject it.

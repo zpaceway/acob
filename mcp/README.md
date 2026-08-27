@@ -17,7 +17,6 @@ directly in `src/` and is started through the Makefile.
 - Python 3.10 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - A running ACOB server and Chromium extension
-- A media storage service configured on the ACOB server for screenshot URLs
 - Docker with Compose, only for the container workflow
 
 Sync the service dependencies and run it:
@@ -44,10 +43,10 @@ Nothing is configurable per connection: the browser ID is baked into the URL
 path, and the ACOB API origin always comes from the `ACOB_ENDPOINT`
 environment variable.
 
-Screenshot URLs are not served by ACOB: the ACOB server uploads each capture
-to the configured media storage service and reports the public download URL in
-the instruction result. This adapter only relays that URL; it never receives
-or stores the image bytes, and it never downloads the image itself.
+Screenshot URLs are served by the ACOB server itself: it stores each capture
+locally and reports the public download URL in the instruction result. This
+adapter only relays that URL; it never receives or stores the image bytes,
+and it never downloads the image itself.
 
 ## Configuration
 

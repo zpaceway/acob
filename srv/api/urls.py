@@ -67,4 +67,9 @@ urlpatterns = [
         views.complete_instruction,
         name="complete-instruction",
     ),
+    path(
+        "media/<str:name>",
+        views.serve_media,
+        name="serve-media",
+    ),
 ]
