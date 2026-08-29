@@ -33,11 +33,10 @@ logs:
 	docker compose logs --follow acob-mcp
 
 build-push:
-	@echo "Building and pushing Docker image..."
-	docker build -t harbor.zpaceway.com/zpaceway/acob-mcp:latest -f ./Dockerfile ..
-	docker push harbor.zpaceway.com/zpaceway/acob-mcp:latest
+	@echo "Building Docker image..."
+	docker build -t acob-mcp:latest -f ./Dockerfile ..
 
 deploy:
-	@echo "Deploying to Kubernetes..."
+	@echo "Deploying locally..."
 	$(MAKE) build-push
-	kubectl rollout restart deployment/acob --namespace=acob
+	docker compose up -d --build

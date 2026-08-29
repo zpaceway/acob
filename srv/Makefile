@@ -48,11 +48,10 @@ logs:
 	docker compose logs -f acob-srv
 
 build-push:
-	@echo "Building and pushing Docker image..."
-	docker build -t harbor.zpaceway.com/zpaceway/acob-srv:latest .
-	docker push harbor.zpaceway.com/zpaceway/acob-srv:latest
+	@echo "Building Docker image..."
+	docker build -t acob-srv:latest .
 
 deploy:
-	@echo "Deploying to Kubernetes..."
+	@echo "Deploying locally..."
 	$(MAKE) build-push
-	kubectl rollout restart deployment/acob --namespace=acob
+	docker compose up -d --build

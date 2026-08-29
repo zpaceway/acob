@@ -313,42 +313,43 @@ same change.
 
 ## Deployment and E2E Testing
 
-The deployed environment is Kubernetes (`namespace: acob`, deployment
-`acob`), with the Docker images pushed to
-`harbor.zpaceway.com/zpaceway/acob-srv:latest` and
-`harbor.zpaceway.com/zpaceway/acob-mcp:latest`.
+The services run locally. Each component can be started with its `make run` /
+`make dev` target or via Docker Compose on the host network.
 
-- Pod layout: one pod with `container-0` (acob-srv, port 58347) and
-  `container-1` (acob-mcp, port 58348). The MCP container reaches the API at
-  `127.0.0.1:58347` (shared pod network namespace); it has no
+- API server: `http://127.0.0.1:58347` (configurable via `ACOB_SRV_HOST` /
+  `ACOB_SRV_PORT`, defaults to `0.0.0.0:58347`). The MCP container reaches the
+  API at `127.0.0.1:58347` when using host networking; it has no
   `ACOB_ENDPOINT` override and uses the image default.
-- Ingress `acob.zpaceway.com`: `/mcp/` -> port 58348 (MCP Streamable HTTP),
-  `/` -> port 58347 (API).
+- MCP server: `http://127.0.0.1:58348` (configurable via `ACOB_MCP_HOST` /
+  `ACOB_MCP_PORT`). Its Streamable HTTP endpoint is
+  `http://127.0.0.1:58348/mcp/<bid>`.
 - Media is stored locally by the srv container under its media root and
   served at `/api/media/<filename>`; there is no external storage service.
-  Like the SQLite database, the media files live in the container and are
-  dropped when the pod restarts.
+  Like the SQLite database, the media files live locally and are dropped
+  when the container is removed unless a volume is configured.
 - The srv container runs `make run` on start, which applies migrations.
-- Deploy a component with `make -C srv deploy` and `make -C mcp deploy`
-  (build + push + `kubectl rollout restart deployment/acob -n acob`).
-  Wait for rollout: `kubectl rollout status deployment/acob -n acob`.
+- Run a component locally with `make -C srv run` and `make -C mcp run`, or
+  with Docker Compose: `docker compose -f srv/compose.yaml up --build` and
+  `docker compose -f mcp/compose.yaml up --build`.
 
 ### Deploying a change (workflow)
 
 1. Run the component's checks and tests, and build the extension
    (`npm --prefix extension run build`) before deploying anything.
 2. Bump versions per the Version bumping rules when the protocol changed.
-3. Deploy the changed server components with `make -C srv deploy` and/or
-   `make -C mcp deploy`; wait for
-   `kubectl rollout status deployment/acob -n acob` before testing.
+3. Rebuild and restart the local services with
+   `docker compose -f srv/compose.yaml up --build --detach` and/or
+   `docker compose -f mcp/compose.yaml up --build --detach`, or run them
+   directly with `make -C srv run` / `make -C mcp run`.
 4. Deploy the extension changes with the `reinstall` flow below (never
-   commit `extension/dist/`; the deployed extension reads it from disk).
-5. **After deploying the MCP, restart/reconnect the MCP client** (e.g. the
+   commit `extension/dist/`; the extension reads it from disk).
+5. **After updating the MCP, restart/reconnect the MCP client** (e.g. the
    opencode session that called it). Tool input/output schemas are captured
    at connection time; a stale client rejects responses that no longer match
    (e.g. `Structured content does not match the tool's output schema` after
-   a schema change) even though the deployed server is correct. Verify the
-   deployed schema directly with a `tools/list` request to the MCP URL.
+   a schema change) even though the local server is correct. Verify the
+   schema directly with a `tools/list` request to the local MCP URL
+   (`http://127.0.0.1:58348/mcp/<bid>`).
 6. Verify end-to-end against a live browser (steps below) before considering
    the deploy done.
 
@@ -362,18 +363,19 @@ The deployed environment is Kubernetes (`namespace: acob`, deployment
    `GET /api/browsers/<bid>/settings/` returns fresh `updated_at` after the
    reinstall.
 
-### Debugging the deployed stack
+### Debugging the local stack
 
 - Find the browser ID in the MCP connection URL
-  (`https://acob.zpaceway.com/mcp/<bid>`) or in the MCP client's config
+  (`http://127.0.0.1:58348/mcp/<bid>`) or in the MCP client's config
   (`~/.config/opencode/opencode.json`); each ID targets one browser
   installation and its queue.
-- Server logs: `kubectl logs deployment/acob -n acob -c container-0`
-  (srv) and `-c container-1` (mcp); add `--since=10m` and grep for the
-  action or error of interest. Validation failures log the full rejected
-  input — for `record_stop`/`screenshot` that includes the entire base64
-  payload, so the log lines are huge; grep around the error type
-  (`'type': 'missing'`, `extra_forbidden`, ...) instead of dumping them.
+- Server logs: `docker compose -f srv/compose.yaml logs --follow acob-srv`
+  (srv) and `docker compose -f mcp/compose.yaml logs --follow acob-mcp`;
+  add filtering with grep for the action or error of interest. Validation
+  failures log the full rejected input — for `record_stop`/`screenshot` that
+  includes the entire base64 payload, so the log lines are huge; grep around
+  the error type (`'type': 'missing'`, `extra_forbidden`, ...) instead of
+  dumping them.
 - Inspect queue state through the API (read-only observation):
   `GET /api/browsers/<bid>/instructions/<id>/` shows status/result/error;
   a terminal instruction is consumed (deleted) on first read, so only fetch
@@ -385,14 +387,14 @@ The deployed environment is Kubernetes (`namespace: acob`, deployment
   detail to check `status`; do not resubmit a `record_stop` for the same
   recording — the video is delivered once.
 - A stuck `processing` instruction with a fresh server usually means the
-  deployed server rejected the extension's result (old schema, missing
+  local server rejected the extension's result (old schema, missing
   field, size cap). Check the srv logs for the rejection reason before
   touching the extension.
 - Extension heartbeats are throttled (every 30 s), so after a reinstall or a
   settings change allow up to ~30 s before the settings endpoint reflects
   the worker's new state.
 
-End-to-end browser testing against the deployed stack:
+End-to-end browser testing against the local stack:
 
 1. Rebuild the extension: `npm --prefix extension run build`.
 2. Ask the extension to reload its unpacked build: use the MCP `reinstall`
@@ -405,7 +407,7 @@ End-to-end browser testing against the deployed stack:
    `ffprobe` (`Duration:` must be present) — the old WebM fallback lacks a
    duration element and tools that probe duration (e.g. vsense) reject it.
 4. Browser IDs appear in the MCP connection URLs
-   (`https://acob.zpaceway.com/mcp/<bid>`); each ID targets one browser
+   (`http://127.0.0.1:58348/mcp/<bid>`); each ID targets one browser
    installation and its queue.
 
 Behavior that requires manual browser verification (no automated coverage):
@@ -464,5 +466,5 @@ in the live extension after changes.
   mid-flight.
 - `mcp/uv.lock` must be regenerated with `uv lock` after changing
   `mcp/pyproject.toml` (version or `acob-client>=` constraint).
-- Do not run `make deploy` casually: it rebuilds images and restarts the
-  shared deployment, interrupting any active browser work.
+- Do not run `make deploy` casually: it rebuilds images and restarts local
+  services, interrupting any active browser work.
