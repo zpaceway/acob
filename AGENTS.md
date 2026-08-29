@@ -22,7 +22,7 @@ Python client or MCP host
 ```
 
 Everything is component-owned: each of `client/`, `extension/`, `mcp/`,
-`srv/`, and `web/` keeps its own source, dependencies, tooling, and docs.
+`srv/`, `proxy/`, and `web/` keeps its own source, dependencies, tooling, and docs.
 There is no root dependency manifest or task runner; run commands per
 component with `make -C <dir> ...` or `npm --prefix extension ...`.
 
@@ -38,6 +38,7 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
 | `extension/README.md` | Extension architecture, settings, permissions, typed package API, manual verification steps. | When changing `extension/`. |
 | `srv/README.md` | Server setup, routes table, storage config, development settings. | When changing `srv/`. |
 | `mcp/README.md` | MCP transport, environment variables, Docker. | When changing `mcp/`. |
+| `proxy/README.md` | Unified nginx proxy, single-port routing, compose. | When changing `proxy/`. |
 | `web/README.md` | Static website layout and deployment. | Only for `web/` changes. |
 
 ## Components
@@ -139,6 +140,23 @@ component with `make -C <dir> ...` or `npm --prefix extension ...`.
   `ACOB_MCP_HOST`, `ACOB_MCP_PORT` (default 58348).
 - Tests: `mcp/tests/test_server.py` (auto-specced `ACOBClient`, in-process
   `Client` calls).
+
+### proxy/ — unified nginx proxy
+
+- `proxy/nginx.conf` fronts both services on a single host port
+  (`ACOB_PROXY_PORT`, default `58346`): `/mcp/` -> `acob-mcp:58348`,
+  `/` -> `acob-srv:58347`. `client_max_body_size 1024M` covers recordings
+  and screenshot batches; buffering is disabled and timeouts are 3600s for
+  MCP streaming.
+- `proxy/compose.yaml` is the recommended full-stack entrypoint: it
+  `include`s `../srv/compose.yaml` and `../mcp/compose.yaml` (no service
+  duplication) and adds `acob-proxy` (`nginx:alpine`) on the shared `acob`
+  bridge network (`name: acob`). `srv` and `mcp` `expose` `58347`/`58348`
+  internally only; the proxy is the only host-published port (`58346`).
+- Standalone `srv/compose.yaml` and `mcp/compose.yaml` also use the `acob`
+  bridge network (no `network_mode: host`) and can be run individually for
+  development (internal `expose` only; use `make -C srv run` for host
+  `58347`).
 
 ## The Cross-Component Protocol Contract
 
@@ -313,34 +331,49 @@ same change.
 
 ## Deployment and E2E Testing
 
-The services run locally. Each component can be started with its `make run` /
-`make dev` target or via Docker Compose on the host network.
+The recommended local deployment is the unified proxy (`proxy/`).
 
-- API server: `http://127.0.0.1:58347` (configurable via `ACOB_SRV_HOST` /
-  `ACOB_SRV_PORT`, defaults to `0.0.0.0:58347`). The MCP container reaches the
-  API at `127.0.0.1:58347` when using host networking; it has no
-  `ACOB_ENDPOINT` override and uses the image default.
-- MCP server: `http://127.0.0.1:58348` (configurable via `ACOB_MCP_HOST` /
-  `ACOB_MCP_PORT`). Its Streamable HTTP endpoint is
-  `http://127.0.0.1:58348/mcp/<bid>`.
+- `proxy/compose.yaml` builds and runs all three containers on the `acob`
+  bridge network (`name: acob`):
+  - `acob-proxy` — `nginx:alpine` on `http://127.0.0.1:58346` (configurable
+    via `ACOB_PROXY_PORT`, default `58346`). Routes `/mcp/` ->
+    `acob-mcp:58348` and everything else -> `acob-srv:58347` with
+    `client_max_body_size 1024M`, buffering disabled and 3600s timeouts for
+    MCP streaming.
+  - `acob-srv` — Django API on `acob-srv:58347` (exposed internally only)
+  - `acob-mcp` — MCP Streamable HTTP on `acob-mcp:58348` (exposed internally),
+    with `ACOB_ENDPOINT=http://acob-srv:58347` via Docker DNS.
+- Standalone `srv/compose.yaml` and `mcp/compose.yaml` also use the `acob`
+  bridge network (no `network_mode: host`) and `expose:` instead of
+  host-published ports; they can be run individually for development
+  (`docker compose -f srv/compose.yaml up --build` or `make -C srv run`).
 - Media is stored locally by the srv container under its media root and
   served at `/api/media/<filename>`; there is no external storage service.
   Like the SQLite database, the media files live locally and are dropped
   when the container is removed unless a volume is configured.
 - The srv container runs `make run` on start, which applies migrations.
-- Run a component locally with `make -C srv run` and `make -C mcp run`, or
-  with Docker Compose: `docker compose -f srv/compose.yaml up --build` and
-  `docker compose -f mcp/compose.yaml up --build`.
+- Run the full stack with `docker compose -f proxy/compose.yaml up --build`
+  (or `make -C proxy docker`), or run components natively with
+  `make -C srv run` / `make -C mcp run`.
+
+External URLs via the proxy (single port `58346`):
+
+- API: `http://127.0.0.1:58346/api/browsers/<bid>/...`
+- Media: `http://127.0.0.1:58346/api/media/<file>`
+- MCP Streamable HTTP: `http://127.0.0.1:58346/mcp/<bid>` (standalone direct
+  without proxy remains `http://127.0.0.1:58348/mcp/<bid>`)
 
 ### Deploying a change (workflow)
 
 1. Run the component's checks and tests, and build the extension
    (`npm --prefix extension run build`) before deploying anything.
 2. Bump versions per the Version bumping rules when the protocol changed.
-3. Rebuild and restart the local services with
-   `docker compose -f srv/compose.yaml up --build --detach` and/or
-   `docker compose -f mcp/compose.yaml up --build --detach`, or run them
-   directly with `make -C srv run` / `make -C mcp run`.
+3. Rebuild and restart the local stack with
+   `docker compose -f proxy/compose.yaml up --build --detach` (or
+   `make -C proxy docker`), or rebuild individual services with
+   `docker compose -f srv/compose.yaml up --build --detach` /
+   `docker compose -f mcp/compose.yaml up --build --detach` or natively
+   with `make -C srv run` / `make -C mcp run`.
 4. Deploy the extension changes with the `reinstall` flow below (never
    commit `extension/dist/`; the extension reads it from disk).
 5. **After updating the MCP, restart/reconnect the MCP client** (e.g. the
@@ -349,7 +382,8 @@ The services run locally. Each component can be started with its `make run` /
    (e.g. `Structured content does not match the tool's output schema` after
    a schema change) even though the local server is correct. Verify the
    schema directly with a `tools/list` request to the local MCP URL
-   (`http://127.0.0.1:58348/mcp/<bid>`).
+   (`http://127.0.0.1:58346/mcp/<bid>` via proxy, or
+   `http://127.0.0.1:58348/mcp/<bid>` standalone).
 6. Verify end-to-end against a live browser (steps below) before considering
    the deploy done.
 
@@ -366,16 +400,18 @@ The services run locally. Each component can be started with its `make run` /
 ### Debugging the local stack
 
 - Find the browser ID in the MCP connection URL
-  (`http://127.0.0.1:58348/mcp/<bid>`) or in the MCP client's config
+  (`http://127.0.0.1:58346/mcp/<bid>` via proxy,
+  or `http://127.0.0.1:58348/mcp/<bid>` standalone) or in the MCP client's config
   (`~/.config/opencode/opencode.json`); each ID targets one browser
   installation and its queue.
-- Server logs: `docker compose -f srv/compose.yaml logs --follow acob-srv`
-  (srv) and `docker compose -f mcp/compose.yaml logs --follow acob-mcp`;
-  add filtering with grep for the action or error of interest. Validation
-  failures log the full rejected input — for `record_stop`/`screenshot` that
-  includes the entire base64 payload, so the log lines are huge; grep around
-  the error type (`'type': 'missing'`, `extra_forbidden`, ...) instead of
-  dumping them.
+- Server logs: `docker compose -f proxy/compose.yaml logs --follow acob-proxy`
+  (proxy), `docker compose -f proxy/compose.yaml logs --follow acob-srv`
+  (or `docker compose -f srv/compose.yaml logs --follow acob-srv` when run
+  standalone) and `... logs --follow acob-mcp`; add filtering with grep for the
+  action or error of interest. Validation failures log the full rejected
+  input — for `record_stop`/`screenshot` that includes the entire base64
+  payload, so the log lines are huge; grep around the error type
+  (`'type': 'missing'`, `extra_forbidden`, ...) instead of dumping them.
 - Inspect queue state through the API (read-only observation):
   `GET /api/browsers/<bid>/instructions/<id>/` shows status/result/error;
   a terminal instruction is consumed (deleted) on first read, so only fetch
@@ -407,7 +443,8 @@ End-to-end browser testing against the local stack:
    `ffprobe` (`Duration:` must be present) — the old WebM fallback lacks a
    duration element and tools that probe duration (e.g. vsense) reject it.
 4. Browser IDs appear in the MCP connection URLs
-   (`http://127.0.0.1:58348/mcp/<bid>`); each ID targets one browser
+   (`http://127.0.0.1:58346/mcp/<bid>` via proxy,
+   or `http://127.0.0.1:58348/mcp/<bid>` standalone); each ID targets one browser
    installation and its queue.
 
 Behavior that requires manual browser verification (no automated coverage):

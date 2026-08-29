@@ -7,10 +7,19 @@ services:
     build:
       context: ..
       dockerfile: mcp/Dockerfile
-    network_mode: host
+    ports:
+      - "${ACOB_MCP_PORT:-58348}:58348"
+    expose:
+      - "58348"
     environment:
-      ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://127.0.0.1:58347}
+      ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://acob-srv:58347}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
       ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}
       ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58348}
+    networks:
+      - acob
+
+networks:
+  acob:
+    name: acob

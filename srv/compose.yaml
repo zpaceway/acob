@@ -5,7 +5,16 @@ services:
     image: acob-srv:latest
     container_name: acob-srv
     build: .
-    network_mode: host
+    ports:
+      - "${ACOB_SRV_PORT:-58347}:58347"
+    expose:
+      - "58347"
     environment:
       ACOB_SRV_HOST: ${ACOB_SRV_HOST:-0.0.0.0}
       ACOB_SRV_PORT: ${ACOB_SRV_PORT:-58347}
+    networks:
+      - acob
+
+networks:
+  acob:
+    name: acob

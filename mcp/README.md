@@ -27,13 +27,26 @@ make run
 ```
 
 One process serves connections for multiple browsers. Each Streamable HTTP
-connection supplies its browser ID in the URL path:
+connection supplies its browser ID in the URL path. When run standalone:
 
 ```json
 {
   "mcpServers": {
     "acob": {
       "url": "http://127.0.0.1:58348/mcp/0123456789ab4def8123456789abcdef"
+    }
+  }
+}
+```
+
+When run behind the unified proxy (`../proxy/compose.yaml`), the same
+service is available on the single proxy port (`58346`):
+
+```json
+{
+  "mcpServers": {
+    "acob": {
+      "url": "http://127.0.0.1:58346/mcp/0123456789ab4def8123456789abcdef"
     }
   }
 }
@@ -82,16 +95,23 @@ action.
 ## Docker
 
 The image uses the sibling client project, so its build context is the
-monorepo root. Compose configures this automatically:
+monorepo root. Compose configures this automatically for standalone use:
 
 ```bash
 docker compose -f mcp/compose.yaml up --build
 ```
 
-The Compose service uses the host network, so the container reaches the ACOB
-API at `127.0.0.1:58347` exactly as a locally running service would.
+The standalone compose exposes `58348` on the `acob` bridge network and
+reaches the API at `http://acob-srv:58347` via the shared Docker network.
+For the unified single-port deployment, use the proxy instead:
 
-The Dockerfile starts the service with `make run`. Build it without Compose:
+```bash
+docker compose -f ../proxy/compose.yaml up --build
+```
+
+This builds both `acob-srv` and `acob-mcp` and fronts them with nginx on
+`http://127.0.0.1:58346` (`/mcp/` -> MCP, `/` -> API). The Dockerfile
+starts the service with `make run`. Build it without Compose:
 
 ```bash
 docker build -f mcp/Dockerfile -t acob-mcp .

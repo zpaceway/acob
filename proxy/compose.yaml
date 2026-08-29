@@ -1,0 +1,23 @@
+include:
+  - path: ../srv/compose.yaml
+  - path: ../mcp/compose.yaml
+
+name: acob
+
+services:
+  acob-proxy:
+    image: nginx:alpine
+    container_name: acob-proxy
+    ports:
+      - "${ACOB_PROXY_PORT:-58346}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - acob-srv
+      - acob-mcp
+    networks:
+      - acob
+
+networks:
+  acob:
+    name: acob

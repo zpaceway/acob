@@ -17,6 +17,7 @@ its source, dependencies, tooling, and documentation in its own directory.
 | [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
 | [`mcp/`](mcp/README.md) | Standalone Model Context Protocol service. |
 | [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
+| [`proxy/`](proxy/README.md) | Unified nginx proxy (single-port routing for API + MCP). |
 | [`web/`](web/README.md) | Buildless static marketing website. |
 
 Product direction, accepted non-goals, and future milestones are tracked in
@@ -46,25 +47,41 @@ local development and do not provide API authentication or TLS; review
 
 ## Docker
 
-Build the image and start the server with Docker Compose:
+The recommended way to run the full stack is the unified proxy, which
+fronts both the API and MCP on a single port (`58346` → `/mcp/` for MCP,
+`/` for the API):
+
+```bash
+docker compose -f proxy/compose.yaml up --build
+```
+
+The proxy builds `acob-srv` and `acob-mcp` and runs `nginx:alpine` on
+`http://127.0.0.1:58346` with `client_max_body_size 1024M` and streaming
+timeouts. See [`proxy/README.md`](proxy/README.md) for details.
+
+To run only the API server:
 
 ```bash
 docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose service applies migrations through `make run` and binds
-`0.0.0.0:58347` on the host network. To run it in the background and follow its
-logs:
+That service applies migrations through `make run` and exposes `58347` on
+the `acob` bridge network (or via the proxy). To run it in the background
+and follow its logs:
 
 ```bash
 docker compose -f srv/compose.yaml up --build --detach
 docker compose -f srv/compose.yaml logs --follow acob-srv
+# or via the proxy stack:
+docker compose -f proxy/compose.yaml logs --follow acob-srv
 ```
 
-Stop and remove it with `docker compose -f srv/compose.yaml down`. The SQLite
-database is stored inside the container, so its data is lost when the container
-is removed or replaced. The service binds all host interfaces by default; do
-not run this configuration on an untrusted network.
+Stop and remove it with `docker compose -f proxy/compose.yaml down` (full
+stack) or `docker compose -f srv/compose.yaml down`. The SQLite database
+is stored inside the container, so its data is lost when the container is
+removed or replaced. The proxy setup binds `127.0.0.1:58346` by default
+(API alone binds `127.0.0.1:58347`); do not expose either on an untrusted
+network without additional controls.
 
 ## Browser extension
 
@@ -177,7 +194,20 @@ tests, process, and container, but is not an installable Python package.
 
 The MCP adapter runs as a Streamable HTTP server. Each connection selects its
 browser with the BID path segment. Nothing is configurable per connection: the
-ACOB API origin always comes from the `ACOB_ENDPOINT` environment variable:
+ACOB API origin always comes from the `ACOB_ENDPOINT` environment variable.
+When running via the unified proxy the API and MCP share one port (`58346`):
+
+```json
+{
+  "mcpServers": {
+    "acob": {
+      "url": "http://127.0.0.1:58346/mcp/0123456789ab4def8123456789abcdef"
+    }
+  }
+}
+```
+
+Standalone without the proxy the MCP port is separate:
 
 ```json
 {
@@ -198,8 +228,16 @@ make -C mcp run
 `ACOB_ENDPOINT` is required and has no built-in default; `make -C mcp run`
 supplies a development default of `http://127.0.0.1:58347`. The BID is routing
 configuration and is not authentication.
-The Compose workflow starts only the MCP adapter. Its image includes the adapter
-and `acob-client`; run `acob-srv` or another reachable ACOB API independently:
+
+The recommended Docker workflow is the unified proxy, which runs both
+services together:
+
+```bash
+docker compose -f proxy/compose.yaml up --build
+```
+
+Its image includes the adapter and `acob-client`. For standalone Docker,
+run `acob-srv` or another reachable ACOB API independently:
 
 ```bash
 docker compose -f mcp/compose.yaml up --build

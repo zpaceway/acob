@@ -64,10 +64,12 @@ docker compose -f srv/compose.yaml up --build
 ```
 
 The Compose project, service, image, and container are named `acob-srv`. The
-service uses the host network, binding `0.0.0.0:58347` directly. The SQLite
-database lives inside the container because no volume is configured; removing
-or replacing the container removes queued instructions and other database
-state.
+service exposes `58347` on the `acob` bridge network (see `compose.yaml`);
+when run via `../proxy/compose.yaml` it is reachable internally as
+`http://acob-srv:58347` and publicly through the proxy at
+`http://127.0.0.1:58346`. The SQLite database lives inside the container
+because no volume is configured; removing or replacing the container removes
+queued instructions and other database state.
 
 ## API
 
@@ -134,7 +136,10 @@ The default configuration is for trusted local development only:
   committed as a development value.
 - Queue endpoints have no authentication, and API POST routes are CSRF-exempt.
 - ACOB does not provide TLS, rate limiting, expiry cleanup, or tenant isolation.
-- Compose publishes the API on all host interfaces by default.
+- When run through `../proxy/compose.yaml`, the proxy publishes a single
+  host port (`58346` by default) and routes `/mcp/` to the MCP service and
+  everything else to this API; standalone `srv/compose.yaml` exposes the
+  service only on the internal `acob` network.
 
 Do not expose this configuration directly to an untrusted network. Review
 [`SECURITY.md`](../SECURITY.md) and add authentication, transport security, and
