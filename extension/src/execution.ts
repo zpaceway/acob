@@ -7,6 +7,11 @@ import {
   executeScreenshot,
   executeScroll,
 } from "./actions.js";
+import {
+  executeConsoleCapture,
+  executeConsoleStart,
+  executeConsoleStop,
+} from "./console.js";
 import { executeProxy } from "./proxy.js";
 import { instructionApiUrl } from "./lifecycle.js";
 import { state } from "./state.js";
@@ -149,6 +154,19 @@ async function runInstructionAction(
     }
     await chrome.tabs.get(payload.tid);
     return executeRecordStop(payload.tid, configuration);
+  }
+
+  if (action === "console") {
+    if (payload.method === "start") {
+      await chrome.tabs.get(payload.tid);
+      return executeConsoleStart(payload.tid, configuration);
+    }
+    if (payload.method === "capture") {
+      await chrome.tabs.get(payload.tid);
+      return executeConsoleCapture(payload.tid, configuration);
+    }
+    await chrome.tabs.get(payload.tid);
+    return executeConsoleStop(payload.tid, configuration);
   }
 
   if (action === "batch") {

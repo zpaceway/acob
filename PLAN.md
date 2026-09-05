@@ -60,7 +60,7 @@ Python client or MCP host
 - Configuration, browser identity, and recovery state use local extension
   storage.
 - Supported actions are `list`, `navigate`, `focus`, `close`, `reload`,
-  `scroll`, `click`, `keyboard`, `screenshot`, `record`, `proxy`,
+  `scroll`, `click`, `keyboard`, `screenshot`, `record`, `proxy`, `console`,
   `javascript`, and `batch` (up to 20 actions executed sequentially with one
   result or error entry per action).
 - Targeted operations are serialized per tab while different tabs can run

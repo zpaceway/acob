@@ -20,6 +20,8 @@ from acob import (
     BrowserSettings,
     ClickResult,
     ClosedTab,
+    ConsoleCapture,
+    ConsoleStarted,
     KeyboardKeyResult,
     KeyboardTextResult,
     ListedTab,
@@ -49,6 +51,9 @@ if TYPE_CHECKING:
         _screenshot: Screenshot = await client.screenshot(1)
         _record_started: RecordingStart = await client.record("start", 1)
         _record_stopped: RecordingStop = await client.record("stop", 1)
+        _console_started: ConsoleStarted = await client.console("start", 1)
+        _console_captured: ConsoleCapture = await client.console("capture", 1)
+        _console_stopped: ConsoleCapture = await client.console("stop", 1)
         _proxy_set: ProxySet = await client.proxy("set", proxy="http://127.0.0.1:8080")
         _proxy_unset: ProxyUnset = await client.proxy("unset")
         _settings: BrowserSettings = await client.settings()
@@ -710,6 +715,140 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertRaisesRegex(ACOBProtocolError, "invalid download URL"),
         ):
             await client.record("stop", 12)
+
+    async def test_console_start_returns_started(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 9, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 9,
+                        "status": "completed",
+                        "result": {"started": True},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.console("start", 12)
+
+        self.assertIsInstance(result, ConsoleStarted)
+        self.assertTrue(result.started)
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "console", "method": "start", "tid": 12},
+        )
+
+    async def test_console_capture_returns_media_url(self) -> None:
+        media_url = "http://acob.test/api/media/console-12-abc.json"
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 10, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 10,
+                        "status": "completed",
+                        "result": {
+                            "url": media_url,
+                            "content_type": "application/json",
+                            "entries": 3,
+                            "size_bytes": 1234,
+                            "truncated": False,
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.console("capture", 12)
+
+        self.assertIsInstance(result, ConsoleCapture)
+        self.assertEqual(result.url, media_url)
+        self.assertEqual(result.content_type, "application/json")
+        self.assertEqual(result.entries, 3)
+        self.assertEqual(result.size_bytes, 1234)
+        self.assertFalse(result.truncated)
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "console", "method": "capture", "tid": 12},
+        )
+
+    async def test_console_stop_returns_media_url(self) -> None:
+        media_url = "http://acob.test/api/media/console-12-abc.json"
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 11, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 11,
+                        "status": "completed",
+                        "result": {
+                            "url": media_url,
+                            "content_type": "application/json",
+                            "entries": 5,
+                            "size_bytes": 2048,
+                            "truncated": True,
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.console("stop", 12)
+
+        self.assertIsInstance(result, ConsoleCapture)
+        self.assertEqual(result.url, media_url)
+        self.assertEqual(result.content_type, "application/json")
+        self.assertEqual(result.entries, 5)
+        self.assertEqual(result.size_bytes, 2048)
+        self.assertTrue(result.truncated)
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "console", "method": "stop", "tid": 12},
+        )
+
+    async def test_console_rejects_invalid_arguments(self) -> None:
+        client = self.make_client()
+        invalid_ids: list[Any] = [0, -1, True, "9"]
+
+        for invalid in invalid_ids:
+            with self.subTest(tid=invalid), self.assertRaises(ValueError):
+                await client.console("capture", invalid)
+        with self.assertRaises(ValueError):
+            await client.console("bogus", 12)  # ty: ignore[no-matching-overload]
+
+    async def test_console_capture_rejects_bad_media_url(self) -> None:
+        client = self.make_client()
+        execute = AsyncMock(
+            return_value={
+                "url": "file:///etc/passwd",
+                "content_type": "application/json",
+                "entries": 1,
+                "size_bytes": 100,
+                "truncated": False,
+            },
+        )
+
+        with (
+            patch.object(client, "execute", execute),
+            self.assertRaisesRegex(ACOBProtocolError, "invalid download URL"),
+        ):
+            await client.console("capture", 12)
 
     async def test_proxy_set_returns_the_proxy_status(self) -> None:
         client = self.make_client()

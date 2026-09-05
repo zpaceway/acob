@@ -193,3 +193,77 @@ test("accepts record and proxy inside batches", () => {
 
   assert.equal(isSupportedInstruction(value), true);
 });
+
+test("accepts console start, capture, and stop by tab", () => {
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "start", tid: 12 }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "capture", tid: 12 }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "stop", tid: 12 }),
+    ),
+    true,
+  );
+});
+
+test("rejects invalid console payloads", () => {
+  assert.equal(
+    isSupportedInstruction(instruction("console", { tid: 12 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("console", { method: "begin", tid: 12 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("console", { method: "start" })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("console", { method: "capture", tid: 0 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("console", { method: "stop", tid: 0 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "start", tid: 12, full_page: true }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "capture", tid: 12, extra: 1 }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("console", { method: "stop", tid: 12, full_page: null }),
+    ),
+    false,
+  );
+});
+
+test("accepts console inside batches", () => {
+  const value = instruction("batch", {
+    actions: [
+      { action: "console", method: "start", tid: 12 },
+      { action: "console", method: "capture", tid: 12 },
+      { action: "console", method: "stop", tid: 12 },
+    ],
+  });
+
+  assert.equal(isSupportedInstruction(value), true);
+});

@@ -197,8 +197,8 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
 7. `srv/api/models.py`: add the `Action` choice (no migration for choices;
    migrations only for schema changes).
 8. `srv/api/views.py`: `complete_instruction` result branch (validate,
-   host uploads via `_host_screenshot`/`_host_recording`, build the final
-   result dict).
+    host uploads via `_host_screenshot`/`_host_recording`/`_host_console`,
+    build the final result dict).
 9. `client/acob/client.py`: typed result model(s) + action method; export in
    `__init__.py`.
 10. `mcp/src/server.py`: tool, `TOOL_ARGUMENT_NAMES` entry, instructions text.
@@ -219,7 +219,7 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
 - Strict schemas; reject unknown fields and coercion. Use `Literal` for
   action discriminators and boolean/status fields.
 - Action-specific result validation only where the result has structure
-  (screenshot, scroll, record, proxy); everything else passes
+  (screenshot, scroll, record, proxy, console); everything else passes
   through as JSON.
 - Base64 result payloads are validated and decoded server-side; upload
   failures fail the instruction with `Could not host the <capture>:` + reason.
@@ -448,7 +448,7 @@ End-to-end browser testing against the local stack:
 2. Ask the extension to reload its unpacked build: use the MCP `reinstall`
    tool (or `POST /api/browsers/<bid>/reinstall/`). This interrupts active
    work and reads the latest files from `extension/dist/`.
-3. Use the MCP/client tool surface (e.g. `settings`, `record`,
+3. Use the MCP/client tool surface (e.g. `settings`, `record`, `console`,
     `proxy`, `screenshot`) against a live tab; downloads are public
    media URLs that the ACOB server serves. Recordings should come back
    as `video/mp4` (H.264) on Chromium 126+; verify the returned file with
@@ -504,6 +504,17 @@ in the live extension after changes.
   stopping is delivered through a `record` stop instruction for the same tab.
 - Proxy credentials live only in worker memory, never in storage, heartbeat,
   logs, results, or errors; the proxy string itself is never logged.
+- Console capture is **page-side state with a worker-side session**: `console`
+  `start` installs a shim under `window.__acob__.consoleCapture` that calls
+  through to the real console methods and buffers `{t, level, text}` entries
+  with exact UTF-8 accounting; `capture` uploads a cumulative JSON snapshot
+  through the media pipeline (never clears); `stop` uploads the final snapshot
+  and restores the originals. Deadline (`consoleTimeoutSec`, default 180 s,
+  max 300 s) and size (`consoleMaxSizeMiB`, default 2 MiB, max 10 MiB) are
+  enforced in-page (first-N kept, `truncated` flag); the worker re-truncates
+  defensively and the server caps base64 at 14 MiB (10 MiB raw + overhead).
+  Navigation wipes the buffer (later calls fail "lost" and drop the session);
+  a closed tab drops the session with a "may be closed" error.
 - A recording holds its tab's shared debugger session for its whole lifetime;
   the per-tab execution queue serializes same-tab work, but other
   debugger-backed actions (`click`, `keyboard`, `screenshot`, `scroll`,

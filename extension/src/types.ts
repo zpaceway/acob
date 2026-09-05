@@ -17,6 +17,8 @@ export interface SettingValues {
   maxScreenshotSizeMiB: number;
   maxRecordingDurationSec: number;
   maxRecordingSizeMiB: number;
+  consoleTimeoutSec: number;
+  consoleMaxSizeMiB: number;
   resultRetryAttempts: number;
   resultRetryDelayMs: number;
   popupStatusDurationMs: number;
@@ -102,6 +104,7 @@ export type InstructionAction =
   | "batch"
   | "click"
   | "close"
+  | "console"
   | "focus"
   | "javascript"
   | "keyboard"
@@ -242,6 +245,28 @@ export interface RecordStopPayload {
 
 export type RecordPayload = RecordStartPayload | RecordStopPayload;
 
+export type ConsoleMethod = "start" | "capture" | "stop";
+
+export interface ConsoleStartPayload {
+  method: "start";
+  tid: number;
+}
+
+export interface ConsoleCapturePayload {
+  method: "capture";
+  tid: number;
+}
+
+export interface ConsoleStopPayload {
+  method: "stop";
+  tid: number;
+}
+
+export type ConsolePayload =
+  | ConsoleStartPayload
+  | ConsoleCapturePayload
+  | ConsoleStopPayload;
+
 export interface BatchPayload {
   actions: InstructionRequest[];
 }
@@ -250,6 +275,7 @@ export interface InstructionPayloadMap {
   batch: BatchPayload;
   click: ClickPayload;
   close: CloseTabPayload;
+  console: ConsolePayload;
   focus: FocusTabPayload;
   javascript: JavaScriptPayload;
   keyboard: KeyboardPayload;
@@ -375,6 +401,23 @@ export type RecordInstructionRequest =
       tid: number;
     };
 
+export type ConsoleInstructionRequest =
+  | {
+      action: "console";
+      method: "start";
+      tid: number;
+    }
+  | {
+      action: "console";
+      method: "capture";
+      tid: number;
+    }
+  | {
+      action: "console";
+      method: "stop";
+      tid: number;
+    };
+
 export interface BatchInstructionRequest {
   action: "batch";
   actions: InstructionRequest[];
@@ -383,6 +426,7 @@ export interface BatchInstructionRequest {
 export type InstructionRequest =
   | ClickInstructionRequest
   | CloseTabInstructionRequest
+  | ConsoleInstructionRequest
   | FocusTabInstructionRequest
   | JavaScriptInstructionRequest
   | KeyboardInstructionRequest
@@ -441,6 +485,10 @@ export interface RecordStartResult {
   started: true;
 }
 
+export interface ConsoleStartResult {
+  started: true;
+}
+
 export type RecordingStopReason = "user" | "max_duration";
 
 export type RecordingContentType = "video/mp4" | "video/webm";
@@ -465,6 +513,22 @@ export interface RecordStopUploadResult {
   duration: number;
   stopped_reason: RecordingStopReason;
   message: string;
+}
+
+export interface ConsoleUploadResult {
+  data: string;
+  content_type: "application/json";
+  entries: number;
+  size_bytes: number;
+  truncated: boolean;
+}
+
+export interface ConsoleCaptureResult {
+  url: string;
+  content_type: "application/json";
+  entries: number;
+  size_bytes: number;
+  truncated: boolean;
 }
 
 export interface ScreenshotResult {
@@ -514,7 +578,18 @@ export type InstructionResultFor<
                         ? ProxyUnsetResult
                         : Request extends { action: "proxy" }
                           ? ProxyResult
-                          : Request extends { action: "list" }
+                          : Request extends { action: "console"; method: "start" }
+                            ? ConsoleStartResult
+                            : Request extends {
+                                  action: "console";
+                                  method: "capture";
+                                }
+                              ? ConsoleCaptureResult
+                              : Request extends { action: "console"; method: "stop" }
+                                ? ConsoleCaptureResult
+                                : Request extends { action: "console" }
+                                  ? ConsoleStartResult | ConsoleCaptureResult
+                                  : Request extends { action: "list" }
                 ? ListedTab[]
                 : Request extends { action: "close" }
                   ? ClosedTab
@@ -544,6 +619,9 @@ export type ExtensionInstructionResult =
   | ScreenshotUploadResult
   | RecordStartResult
   | RecordStopUploadResult
+  | ConsoleStartResult
+  | ConsoleUploadResult
+  | ConsoleCaptureResult
   | ProxySetResult
   | ProxyUnsetResult
   | UnserializableJavaScriptResult

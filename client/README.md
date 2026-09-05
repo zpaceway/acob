@@ -167,6 +167,23 @@ video = await client.record("stop", tid)
 print(video.url, video.duration, video.stopped_reason)
 ```
 
+`console()` starts, snapshots, or stops console message capture for a tab,
+keyed by tab (`method` is `"start"`, `"capture"`, or `"stop"`). It returns a
+`ConsoleStarted` (`{started, tid}`) or a `ConsoleCapture` model carrying the
+public JSON download URL served by the ACOB server itself, with `entries`,
+`size_bytes`, and `truncated`. Only one console capture per tab is allowed.
+`capture` returns a cumulative snapshot without stopping, so poll it for
+progress and call `stop` for the final snapshot; the client never transfers
+the JSON bytes:
+
+```python
+await client.console("start", tid)
+snapshot = await client.console("capture", tid)
+print(snapshot.url, snapshot.entries, snapshot.size_bytes, snapshot.truncated)
+final = await client.console("stop", tid)
+print(final.url, final.entries)
+```
+
 `proxy()` sets or unsets the browser-wide egress proxy (`method` is `"set"`
 or `"unset"`). `set` requires a proxy string (`http://`, `https://`, or
 `socks5://` with optional `user:pass@` auth); `unset` restores the system

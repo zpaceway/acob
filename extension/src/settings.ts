@@ -12,6 +12,8 @@ const MEBIBYTE_IN_BYTES = 1024 * 1024;
 const MAX_HTTP_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_JAVASCRIPT_TIMEOUT_MS = 90_000;
 const MAX_RECORDING_DURATION_SECONDS = 300;
+const MAX_CONSOLE_TIMEOUT_SEC = 300;
+const MAX_CONSOLE_SIZE_MIB = 10;
 const MAX_RESULT_RETRY_ATTEMPTS = 3;
 const MAX_RESULT_RETRY_DELAY_MS = 30_000;
 const MAX_TAB_LOAD_TIMEOUT_MS = 90_000;
@@ -142,6 +144,30 @@ const definitions: SettingDefinitions = {
     hint: "Maximum encoded recording size accepted by the server.",
     min: 1,
     max: 512,
+    step: 1,
+    editable: true,
+    visible: true,
+  },
+  consoleTimeoutSec: {
+    defaultValue: 180,
+    valueType: "integer",
+    inputType: "number",
+    label: "Console timeout (s)",
+    hint: "Maximum console capture length in seconds; captures stop collecting entries at this limit.",
+    min: 10,
+    max: MAX_CONSOLE_TIMEOUT_SEC,
+    step: 1,
+    editable: true,
+    visible: true,
+  },
+  consoleMaxSizeMiB: {
+    defaultValue: 2,
+    valueType: "integer",
+    inputType: "number",
+    label: "Console limit (MiB)",
+    hint: "Maximum encoded console capture size accepted by the server.",
+    min: 1,
+    max: MAX_CONSOLE_SIZE_MIB,
     step: 1,
     editable: true,
     visible: true,

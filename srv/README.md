@@ -91,7 +91,7 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 | `GET` | `media/<name>` | Serve a stored screenshot or recording. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record`, `proxy`, and
+`click`, `keyboard`, `screenshot`, `record`, `proxy`, `console`, and
 `javascript`. See the root [API guide](../README.md#api) for payload examples.
 
 `POST instructions/batch/` accepts `{"action": "batch", "actions": [...]}`
@@ -114,7 +114,14 @@ this server itself. Recordings use the same pipeline: `record` with
 scrollable page) and `method: stop` for the same `tid` are instructions
 whose stop result carries the final video URL, and the extension-side
 session is keyed by tab (one recording per tab) and not tracked by the
-server. The `proxy` action (`method: set` with a proxy string like
+server. Console captures use the same local media pipeline: `console` with
+`method: start` begins collection for a `tid` and completes with
+`{started}`, while `method: capture` and `method: stop` for the same `tid`
+upload a base64 JSON document (`application/json` with `entries`,
+`size_bytes`, and `truncated`, up to 10 MiB base64) that the server decodes
+and stores as `console-{tid}-<uuid>.json` and returns as an absolute
+`/api/media/` URL; the extension-side session is keyed by tab and not
+tracked by the server. The `proxy` action (`method: set` with a proxy string like
 `http://host:port`, `method: unset`) is browser-global and carries only
 redacted results. Like the SQLite
 database, the media directory lives on the local filesystem; a fresh

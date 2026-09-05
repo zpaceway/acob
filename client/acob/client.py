@@ -27,6 +27,7 @@ KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
 ProxyMethod: TypeAlias = Literal["set", "unset"]
 ProxyScheme: TypeAlias = Literal["http", "https", "socks5"]
 RecordMethod: TypeAlias = Literal["start", "stop"]
+ConsoleMethod: TypeAlias = Literal["start", "capture", "stop"]
 MAX_PROXY_LENGTH = 2048
 
 
@@ -102,6 +103,32 @@ class RecordingStop(_ResultModel):
     stopped_reason: Literal["user", "max_duration"]
     message: str
     tid: int
+
+
+class ConsoleStarted(_ResultModel):
+    started: Literal[True]
+    tid: int
+
+
+class _ConsoleStartedMetadata(_ResultModel):
+    started: Literal[True]
+
+
+class ConsoleCapture(_ResultModel):
+    url: str = Field(min_length=1)
+    content_type: Literal["application/json"]
+    entries: int
+    size_bytes: int
+    truncated: bool
+    tid: int
+
+
+class _ConsoleCaptureMetadata(_ResultModel):
+    url: str = Field(min_length=1)
+    content_type: Literal["application/json"]
+    entries: int
+    size_bytes: int
+    truncated: bool
 
 
 class ProxySet(_ResultModel):
@@ -646,6 +673,73 @@ class ACOBClient:
             duration=result_stop.duration,
             stopped_reason=result_stop.stopped_reason,
             message=result_stop.message,
+            tid=tid,
+        )
+
+    @overload
+    async def console(
+        self,
+        method: Literal["start"],
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> ConsoleStarted: ...
+
+    @overload
+    async def console(
+        self,
+        method: Literal["capture", "stop"],
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> ConsoleCapture: ...
+
+    async def console(
+        self,
+        method: ConsoleMethod,
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> ConsoleStarted | ConsoleCapture:
+        """Start, snapshot, or stop console message capture for a tab.
+
+        Only one console capture per tab is allowed. ``start`` begins
+        buffering console messages in the background; ``capture`` returns
+        a cumulative snapshot without stopping; ``stop`` ends the session
+        and delivers the final snapshot through the public download URL.
+        """
+        self._validate_tid(tid)
+        if method not in ("start", "capture", "stop"):
+            raise ValueError("method must be 'start', 'capture' or 'stop'")
+        if method == "start":
+            result = self._expect_model(
+                await self.execute(
+                    "console",
+                    method="start",
+                    tid=tid,
+                    timeout=timeout,
+                ),
+                _ConsoleStartedMetadata,
+                "console",
+            )
+            return ConsoleStarted(started=result.started, tid=tid)
+        result_capture = self._expect_model(
+            await self.execute(
+                "console",
+                method=method,
+                tid=tid,
+                timeout=timeout,
+            ),
+            _ConsoleCaptureMetadata,
+            "console",
+        )
+        self._validate_media_url(result_capture.url, "Console")
+        return ConsoleCapture(
+            url=result_capture.url,
+            content_type=result_capture.content_type,
+            entries=result_capture.entries,
+            size_bytes=result_capture.size_bytes,
+            truncated=result_capture.truncated,
             tid=tid,
         )
 

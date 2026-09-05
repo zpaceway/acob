@@ -121,6 +121,21 @@ function isSupportedActionPayload(
     }
     return false;
   }
+  if (action === "console") {
+    if (
+      payload.method === "start" ||
+      payload.method === "capture" ||
+      payload.method === "stop"
+    ) {
+      return (
+        isPositiveInteger(payload.tid) &&
+        Object.keys(payload).every(
+          (key) => key === "method" || key === "tid",
+        )
+      );
+    }
+    return false;
+  }
   if (action === "click") {
     return (
       isPositiveInteger(payload.tid) && typeof payload.selector === "string"

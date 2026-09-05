@@ -25,6 +25,8 @@ from .schemas import (
     ApiModel,
     BatchInstructionRequest,
     BrowserSettingsResponse,
+    ConsoleCaptureUploadResult,
+    ConsoleStartResult,
     ErrorResponse,
     HeartbeatRequest,
     InstructionResponse,
@@ -325,6 +327,7 @@ ACTION_RESULT_PROCESSED = frozenset(
         Instruction.Action.RECORD,
         Instruction.Action.PROXY,
         Instruction.Action.SCROLL,
+        Instruction.Action.CONSOLE,
     }
 )
 
@@ -469,6 +472,52 @@ def _prepare_proxy_result(
     raise InvalidResultDataError("Proxy payload is invalid")
 
 
+def _prepare_console_result(
+    result_value: JsonValue,
+    payload: dict[str, JsonValue],
+    request: HttpRequest,
+) -> tuple[JsonValue | None, str | None]:
+    """Validate and transform one console action's submitted result."""
+    method = payload.get("method") if isinstance(payload, dict) else None
+    if method == "start":
+        try:
+            return (
+                ConsoleStartResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid console result",
+                validation_error=error,
+            ) from error
+    if method in ("capture", "stop"):
+        try:
+            captured = ConsoleCaptureUploadResult.model_validate(result_value)
+            console_data = base64.b64decode(captured.data, validate=True)
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid console result",
+                validation_error=error,
+            ) from error
+        except binascii.Error, ValueError:
+            raise InvalidResultDataError("Invalid console data") from None
+        try:
+            url = _host_console(console_data, payload, request)
+        except StorageError as error:
+            return None, f"Could not host the console capture: {error}"
+        return (
+            {
+                "url": url,
+                "content_type": captured.content_type,
+                "entries": captured.entries,
+                "size_bytes": captured.size_bytes,
+                "truncated": captured.truncated,
+            },
+            None,
+        )
+    raise InvalidResultDataError("Console payload is invalid")
+
+
 def _prepare_action_result(
     action: str,
     result_value: JsonValue,
@@ -509,6 +558,9 @@ def _prepare_action_result(
 
     if action == Instruction.Action.PROXY:
         return _prepare_proxy_result(result_value, payload)
+
+    if action == Instruction.Action.CONSOLE:
+        return _prepare_console_result(result_value, payload, request)
 
     if action == Instruction.Action.SCROLL:
         try:
@@ -555,6 +607,21 @@ def _host_recording(
         else f"recording-{uuid.uuid4().hex}{extension}"
     )
     return request.build_absolute_uri(store_media(recording, name))
+
+
+def _host_console(
+    console_data: bytes,
+    payload: dict[str, Any],
+    request: HttpRequest,
+) -> str:
+    """Store console capture bytes locally and return their served URL."""
+    tid = payload.get("tid")
+    name = (
+        f"console-{tid}-{uuid.uuid4().hex}.json"
+        if isinstance(tid, int)
+        else f"console-{uuid.uuid4().hex}.json"
+    )
+    return request.build_absolute_uri(store_media(console_data, name))
 
 
 @require_http_methods(["GET"])

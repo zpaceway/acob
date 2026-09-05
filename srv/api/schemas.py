@@ -24,6 +24,8 @@ Tid = Annotated[int, Field(gt=0)]
 ScrollY = Annotated[float, Field(allow_inf_nan=False)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
+# Console buffers are capped raw (10 MiB max setting); base64 inflates by 4/3.
+MAX_CONSOLE_BASE64_LENGTH = 14 * 1024 * 1024
 MAX_RECORDING_DURATION_SECONDS = 300
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 MAX_BATCH_ACTIONS = 20
@@ -174,6 +176,12 @@ class RecordInstruction(ApiModel):
         return self
 
 
+class ConsoleInstruction(ApiModel):
+    action: Literal["console"]
+    method: Literal["start", "capture", "stop"]
+    tid: Tid
+
+
 class ListInstruction(ApiModel):
     action: Literal["list"]
 
@@ -208,6 +216,7 @@ class ScrollInstruction(ApiModel):
 InstructionRequest = Annotated[
     CloseInstruction
     | ClickInstruction
+    | ConsoleInstruction
     | FocusInstruction
     | JavaScriptInstruction
     | KeyboardInstruction
@@ -246,6 +255,25 @@ class ScreenshotResult(ApiModel):
 
 class RecordStartResult(ApiModel):
     started: Literal[True]
+
+
+class ConsoleStartResult(ApiModel):
+    started: Literal[True]
+
+
+class ConsoleCaptureUploadResult(ApiModel):
+    data: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=MAX_CONSOLE_BASE64_LENGTH,
+        ),
+    ]
+    content_type: Literal["application/json"]
+    entries: Annotated[int, Field(ge=0)]
+    size_bytes: Annotated[int, Field(ge=0)]
+    truncated: bool
 
 
 class ProxySetResult(ApiModel):

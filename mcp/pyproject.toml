@@ -1,11 +1,11 @@
 [project]
 name = "acob-mcp"
-version = "0.11.0"
+version = "0.12.0"
 description = "MCP server for controlling a user's existing Chromium session with ACOB"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "acob-client>=0.13.0",
+    "acob-client>=0.14.0",
     "mcp==2.0.0",
 ]
 
@@ -50,7 +50,12 @@ ignore = [
 [tool.ruff.lint.mccabe]
 # Tool registrations all live inside create_server, so its complexity is
 # proportional to the number of tools, not to any single function's logic.
-max-complexity = 22
+max-complexity = 23
+
+[tool.ruff.lint.pylint]
+# Tool registrations all live inside create_server, so its statement count is
+# proportional to the number of tools, not to any single function's logic.
+max-statements = 60
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [

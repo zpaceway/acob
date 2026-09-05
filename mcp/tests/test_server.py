@@ -8,6 +8,8 @@ from acob import (
     BrowserSettings,
     ClickResult,
     ClosedTab,
+    ConsoleCapture,
+    ConsoleStarted,
     KeyboardKeyResult,
     ListedTab,
     ProxySet,
@@ -233,6 +235,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {
                 "click",
                 "close",
+                "console",
                 "execute_batch",
                 "focus",
                 "javascript",
@@ -277,6 +280,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["record"].input_schema["required"]),
+            {"method", "tid"},
+        )
+        self.assertEqual(
+            set(tools["console"].input_schema["properties"]),
+            {"method", "tid", "timeout"},
+        )
+        self.assertEqual(
+            set(tools["console"].input_schema["required"]),
             {"method", "tid"},
         )
         self.assertEqual(
@@ -514,6 +525,99 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(invalid.is_error)
         self.acob.record.assert_not_awaited()
+
+    async def test_starts_console_capture_through_the_client(self) -> None:
+        self.acob.console.return_value = ConsoleStarted(
+            started=True,
+            tid=12,
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            started = await client.call_tool(
+                "console",
+                {"method": "start", "tid": 12},
+            )
+
+        self.assertFalse(started.is_error)
+        self.assertEqual(
+            started.structured_content,
+            {"result": {"started": True, "tid": 12}},
+        )
+        self.acob.console.assert_awaited_once_with(
+            "start",
+            12,
+            timeout=None,
+        )
+
+    async def test_captures_console_snapshot_through_the_client(self) -> None:
+        self.acob.console.return_value = ConsoleCapture(
+            url="http://acob.test/api/media/console-12-abc.json",
+            content_type="application/json",
+            entries=3,
+            size_bytes=1234,
+            truncated=False,
+            tid=12,
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            captured = await client.call_tool(
+                "console", {"method": "capture", "tid": 12}
+            )
+
+        self.assertFalse(captured.is_error)
+        self.assertEqual(
+            captured.structured_content,
+            {
+                "result": {
+                    "url": "http://acob.test/api/media/console-12-abc.json",
+                    "content_type": "application/json",
+                    "entries": 3,
+                    "size_bytes": 1234,
+                    "truncated": False,
+                    "tid": 12,
+                }
+            },
+        )
+        self.acob.console.assert_awaited_once_with("capture", 12, timeout=None)
+
+    async def test_stops_console_capture_through_the_client(self) -> None:
+        self.acob.console.return_value = ConsoleCapture(
+            url="http://acob.test/api/media/console-12-abc.json",
+            content_type="application/json",
+            entries=5,
+            size_bytes=2048,
+            truncated=True,
+            tid=12,
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            stopped = await client.call_tool("console", {"method": "stop", "tid": 12})
+
+        self.assertFalse(stopped.is_error)
+        self.assertEqual(
+            stopped.structured_content,
+            {
+                "result": {
+                    "url": "http://acob.test/api/media/console-12-abc.json",
+                    "content_type": "application/json",
+                    "entries": 5,
+                    "size_bytes": 2048,
+                    "truncated": True,
+                    "tid": 12,
+                }
+            },
+        )
+        self.acob.console.assert_awaited_once_with("stop", 12, timeout=None)
+
+    async def test_console_rejects_invalid_method(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            invalid = await client.call_tool(
+                "console",
+                {"method": "bogus", "tid": 12},
+            )
+
+        self.assertTrue(invalid.is_error)
+        self.acob.console.assert_not_awaited()
 
     async def test_sets_and_unsets_proxy_through_the_client(self) -> None:
         self.acob.proxy.return_value = ProxySet(

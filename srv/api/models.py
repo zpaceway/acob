@@ -13,6 +13,7 @@ class Instruction(models.Model):
         BATCH = "batch"
         CLICK = "click"
         CLOSE = "close"
+        CONSOLE = "console"
         FOCUS = "focus"
         JAVASCRIPT = "javascript"
         KEYBOARD = "keyboard"

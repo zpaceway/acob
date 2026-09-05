@@ -245,7 +245,7 @@ docker compose -f mcp/compose.yaml up --build
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
-`record`, `proxy`, `settings`, `javascript`, and `reinstall`.
+`record`, `proxy`, `console`, `settings`, `javascript`, and `reinstall`.
 Structured results use SDK-generated output schemas. `screenshot` always
 returns the public download URL served by the ACOB server itself; neither the
 client nor the MCP server downloads the image, so the agent fetches the
@@ -294,6 +294,9 @@ Supported instructions:
 {"action":"record","method":"stop","tid":123}
 {"action":"proxy","method":"set","proxy":"http://127.0.0.1:8080"}
 {"action":"proxy","method":"unset"}
+{"action":"console","method":"start","tid":123}
+{"action":"console","method":"capture","tid":123}
+{"action":"console","method":"stop","tid":123}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
@@ -416,6 +419,37 @@ The proxy is global to the whole browser profile, not per-tab: setting it
 affects every tab and window. Results never echo credentials (`authenticated`
 is boolean-only). Quiesce other work around proxy changes and verify with a
 navigation afterwards.
+
+`console` captures the page's console output per tab. `method: start`
+installs a shim that calls through to the real `console.debug/log/info/warn/error`
+and buffers serialized entries in the page; `method: capture` returns a
+cumulative snapshot without stopping; `method: stop` ends the session,
+restores the original console methods, and delivers the final snapshot.
+Only one session per tab is allowed. Snapshots go through the same storage
+pipeline as screenshots, so the full log arrives as a download URL instead
+of filling the agent's context:
+
+```json
+{"action":"console","method":"capture","tid":123}
+```
+
+```json
+{
+  "url": "https://acob.example/api/media/console-123-<id>.json",
+  "content_type": "application/json",
+  "entries": 42,
+  "size_bytes": 4096,
+  "truncated": false
+}
+```
+
+The downloaded document is a JSON array of `{t, level, text}` entries.
+Collection stops automatically at the `consoleTimeoutSec` deadline (default
+180 s, at most 300 s) or when the buffer reaches `consoleMaxSizeMiB`
+(default 2 MiB, at most 10 MiB); both are extension settings readable via
+`settings`. A snapshot then carries `truncated: true`. The buffer lives in
+the page, so navigation wipes it (a later capture fails with a "lost" hint
+and the session is dropped) and only entries logged after `start` are kept.
 
 The browser's configured limits and other settings are not an instruction:
 the extension reports them periodically to

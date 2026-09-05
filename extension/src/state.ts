@@ -20,6 +20,11 @@ export interface ActiveRecording {
   finished: Promise<RecordingOutcome>;
 }
 
+export interface ConsoleSession {
+  tid: number;
+  deadlineMs: number;
+}
+
 export interface ProxyCredentials {
   username: string;
   password: string;
@@ -33,6 +38,7 @@ export const state = {
   pollInProgress: false,
   recordings: new Map<number, ActiveRecording>(),
   recordingChunks: new Map<number, string[]>(),
+  consoleSessions: new Map<number, ConsoleSession>(),
   reinstallScheduled: false,
   tabCreationQueue: Promise.resolve() as Promise<void>,
   tabExecutionQueues: new Map<number, Promise<void>>(),

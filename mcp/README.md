@@ -76,7 +76,7 @@ sets `ACOB_MCP_HOST` to `0.0.0.0` and provides a development default for
 `ACOB_ENDPOINT`; override any value with Make variables when needed.
 
 The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record`, `proxy`, `settings`,
+`click`, `keyboard`, `screenshot`, `record`, `console`, `proxy`, `settings`,
 `javascript`, `execute_batch`, and `reinstall`. The `screenshot` tool always
 returns the
 public download URL for the capture; it never streams the image, so the agent
@@ -85,7 +85,12 @@ downloads the capture itself when it needs the pixels. `record` with
 set `full_page` to record the whole scrollable page instead of the visible
 viewport. `record` with `method: stop` for the same `tid` delivers the
 recording's public download URL with a `stopped_reason` and message when the
-extension's maximum duration was reached first. `proxy` with `method: set`
+extension's maximum duration was reached first. `console` with
+`method: start`, `method: capture`, and `method: stop` for the same `tid`
+captures console messages keyed by tab (one per tab); `capture` returns a
+cumulative snapshot as a public JSON download URL without stopping, and
+`stop` delivers the final snapshot URL, so the agent downloads the file
+itself when it needs the entries. `proxy` with `method: set`
 (`http://`, `https://`, or `socks5://` with optional auth) or `method: unset`
 controls the browser-wide egress proxy; it is global, not per-tab, and
 results never echo credentials. `settings` returns the browser's reported configuration

@@ -15,6 +15,8 @@ from acob import (
     BrowserSettings,
     ClickResult,
     ClosedTab,
+    ConsoleCapture,
+    ConsoleStarted,
     KeyboardKeyResult,
     KeyboardModifier,
     KeyboardTextResult,
@@ -47,12 +49,13 @@ from pydantic import (
     StringConstraints,
 )
 
-SERVER_VERSION = "0.11.0"
+SERVER_VERSION = "0.12.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
-    "management, real mouse and keyboard input, screenshots and recordings, "
-    "browser proxy control, JavaScript, browser settings, and extension recovery."
+    "management, real mouse and keyboard input, screenshots, recordings, and "
+    "console captures, browser proxy control, JavaScript, browser settings, "
+    "and extension recovery."
 )
 SERVER_INSTRUCTIONS = (
     "ACOB controls one existing Chromium session selected by the browser ID in "
@@ -74,6 +77,11 @@ SERVER_INSTRUCTIONS = (
     "ends at the extension's maximum duration even when the stop call is late, "
     "and the stop result reports stopped_reason and a message when that "
     "happens.\n\n"
+    "Capture console messages with console method=start, method=capture, and "
+    "method=stop for the same tid. Only one console capture per tab is "
+    "allowed. Capture returns a cumulative snapshot as a public JSON download "
+    "URL served by the ACOB server to protect context, so download the file "
+    "yourself when you need its entries; stop delivers the final snapshot.\n\n"
     "The proxy tool sets or unsets the browser-wide egress proxy "
     "(http, https, socks5, e.g. http://user:pass@host:port). It is global to "
     "the whole browser profile, not per-tab: quiesce other work, never log "
@@ -120,6 +128,7 @@ TOOL_ARGUMENT_NAMES = {
     "keyboard": frozenset({"tid", "text", "key", "modifiers", "timeout"}),
     "screenshot": frozenset({"tid", "full_page", "timeout"}),
     "record": frozenset({"method", "tid", "full_page", "timeout"}),
+    "console": frozenset({"method", "tid", "timeout"}),
     "proxy": frozenset({"method", "proxy", "timeout"}),
     "settings": frozenset({"timeout"}),
     "javascript": frozenset({"tid", "script", "timeout"}),
@@ -129,6 +138,7 @@ TOOL_ARGUMENT_NAMES = {
 
 PositiveTid = Annotated[StrictInt, Field(gt=0, description="Chromium tab ID.")]
 RecordMethod = Literal["start", "stop"]
+ConsoleMethod = Literal["start", "capture", "stop"]
 ProxyMethod = Literal["set", "unset"]
 ProxyString = Annotated[
     str,
@@ -424,6 +434,28 @@ def create_server(
         return await _client(ctx).record("stop", tid, timeout=timeout)
 
     @server.tool(
+        annotations=ToolAnnotations(open_world_hint=True),
+    )
+    async def console(
+        method: ConsoleMethod,
+        tid: PositiveTid,
+        *,
+        ctx: Context[AppContext],
+        timeout: ToolTimeout | None = None,
+    ) -> ConsoleStarted | ConsoleCapture:
+        """Start, snapshot, or stop console message capture for a tab.
+
+        Only one console capture per tab is allowed. Start begins buffering
+        console messages in the background; capture returns a cumulative
+        snapshot as a public JSON download URL served by the ACOB server
+        without stopping; stop ends the session and delivers the final
+        snapshot URL."""
+        _validate_console(method)
+        if method == "start":
+            return await _client(ctx).console("start", tid, timeout=timeout)
+        return await _client(ctx).console(method, tid, timeout=timeout)
+
+    @server.tool(
         annotations=ToolAnnotations(
             destructive_hint=True,
             idempotent_hint=False,
@@ -638,6 +670,11 @@ def _validate_record(method: str, *, full_page: bool) -> None:
         raise ValueError("method must be 'start' or 'stop'")
     if method == "stop" and full_page:
         raise ValueError("full_page is only valid when method is 'start'")
+
+
+def _validate_console(method: str) -> None:
+    if method not in ("start", "capture", "stop"):
+        raise ValueError("method must be 'start', 'capture' or 'stop'")
 
 
 def _validate_proxy(method: str, proxy: str | None) -> None:

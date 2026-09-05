@@ -87,6 +87,19 @@ refcounted debugger session per tab (`src/cdp.ts`), so a recording holding
 its tab's debugger does not block `click`, `keyboard`, `screenshot`, `scroll`,
 or `javascript` on that tab. Recordings do not survive extension reloads.
 
+`console` with `method: start` (`{tid}`) installs a page shim under
+`window.__acob__.consoleCapture` that mirrors `debug/log/info/warn/error`
+(always calling through to the originals first) into
+`{t, level, text}` entries bounded by `consoleTimeoutSec` (default 180 s)
+and `consoleMaxSizeMiB` (default 2 MiB, exact UTF-8 accounting via
+`TextEncoder`, first-N kept with `truncated: true`). `console` with
+`method: capture` (`{tid}`) returns the full cumulative snapshot without
+clearing, and `method: stop` (`{tid}`) returns the final snapshot, restores
+the originals, and ends the session. Snapshots are delivered as base64 JSON
+(`content_type: "application/json"` with `entries`, `size_bytes`,
+`truncated`); one session per tab. Console capture runs worker-only via
+`debugger`, so no new manifest permissions were needed.
+
 The `proxy` action (`method: set` with `proxy: "http://host:port"`,
 `https://...`, or `socks5://...` including optional `user:pass@` auth;
 `method: unset`) controls the browser-wide egress proxy via

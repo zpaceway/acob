@@ -1396,6 +1396,311 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
+    def test_accepts_console_instructions(self) -> None:
+        started = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "start", "tid": 12},
+        )
+        captured = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "capture", "tid": 12},
+        )
+        stopped = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "stop", "tid": 12},
+        )
+
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(started.json()["payload"], {"method": "start", "tid": 12})
+        self.assertEqual(captured.status_code, 201)
+        self.assertEqual(captured.json()["payload"], {"method": "capture", "tid": 12})
+        self.assertEqual(stopped.status_code, 201)
+        self.assertEqual(stopped.json()["payload"], {"method": "stop", "tid": 12})
+
+    def test_console_instructions_require_valid_arguments(self) -> None:
+        missing_method = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "tid": 12},
+        )
+        missing_tid = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "start"},
+        )
+        invalid_tid = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "capture", "tid": 0},
+        )
+        bad_method = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "begin", "tid": 12},
+        )
+        extra_field = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "start", "tid": 12, "full_page": True},
+        )
+
+        self.assertEqual(missing_method.status_code, 400)
+        self.assertEqual(missing_tid.status_code, 400)
+        self.assertEqual(invalid_tid.status_code, 400)
+        self.assertEqual(bad_method.status_code, 400)
+        self.assertEqual(extra_field.status_code, 400)
+
+    def test_console_start_result_validated(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "start", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"started": True}},
+        )
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["result"], {"started": True})
+
+        invalid = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "start", "tid": 12},
+        )
+        invalid_id = invalid.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        rejected = self.post_result(
+            invalid_id,
+            {"result": {"started": "yes"}},
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+    def test_console_capture_result_stored_locally(self) -> None:
+        document = b'[{"type":"log","text":"hello"}]'
+        encoded = base64.b64encode(document).decode()
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "capture", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
+        ):
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": encoded,
+                        "content_type": "application/json",
+                        "entries": 1,
+                        "size_bytes": len(document),
+                        "truncated": False,
+                    }
+                },
+            )
+            stored = list(Path(media_dir).glob("console-12-*.json"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, document)
+        result = completed.json()["result"]
+        self.assertEqual(
+            result,
+            {
+                "url": f"http://testserver/api/media/{stored_name}",
+                "content_type": "application/json",
+                "entries": 1,
+                "size_bytes": len(document),
+                "truncated": False,
+            },
+        )
+
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["result"], result)
+        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+
+    def test_console_stop_result_stored_locally(self) -> None:
+        document = b'[{"type":"error","text":"boom"}]'
+        encoded = base64.b64encode(document).decode()
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "stop", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
+        ):
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": encoded,
+                        "content_type": "application/json",
+                        "entries": 1,
+                        "size_bytes": len(document),
+                        "truncated": True,
+                    }
+                },
+            )
+            stored = list(Path(media_dir).glob("console-12-*.json"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, document)
+        result = completed.json()["result"]
+        self.assertEqual(
+            result,
+            {
+                "url": f"http://testserver/api/media/{stored_name}",
+                "content_type": "application/json",
+                "entries": 1,
+                "size_bytes": len(document),
+                "truncated": True,
+            },
+        )
+
+    def test_console_capture_fails_when_media_unstorable(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "capture", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with patch(
+            "api.views.store_media",
+            side_effect=StorageError("disk is full"),
+        ):
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": {
+                        "data": base64.b64encode(b"[]").decode(),
+                        "content_type": "application/json",
+                        "entries": 0,
+                        "size_bytes": 2,
+                        "truncated": False,
+                    }
+                },
+            )
+
+        self.assertEqual(completed.status_code, 200)
+        response = completed.json()
+        self.assertEqual(response["status"], "failed")
+        self.assertIn("Could not host the console capture", response["error"])
+        self.assertIn("disk is full", response["error"])
+
+    def test_rejects_invalid_console_capture_upload(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "capture", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        bad_base64 = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "data": "not base64!",
+                    "content_type": "application/json",
+                    "entries": 0,
+                    "size_bytes": 0,
+                    "truncated": False,
+                }
+            },
+        )
+        self.assertEqual(bad_base64.status_code, 400)
+        self.assertEqual(bad_base64.json()["error"], "Invalid console data")
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "console", "method": "stop", "tid": 12},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        bad_type = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "data": base64.b64encode(b"[]").decode(),
+                    "content_type": "text/plain",
+                    "entries": 0,
+                    "size_bytes": 2,
+                    "truncated": False,
+                }
+            },
+        )
+        self.assertEqual(bad_type.status_code, 400)
+
+    def test_batch_console_entries_are_validated(self) -> None:
+        document = b'[{"type":"log","text":"hello"}]'
+        encoded = base64.b64encode(document).decode()
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "console", "method": "start", "tid": 12},
+                    {"action": "console", "method": "capture", "tid": 12},
+                ],
+            },
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        with (
+            tempfile.TemporaryDirectory() as media_dir,
+            override_settings(MEDIA_ROOT=Path(media_dir)),
+        ):
+            completed = self.post_result(
+                instruction_id,
+                {
+                    "result": [
+                        {"result": {"started": True}},
+                        {
+                            "result": {
+                                "data": encoded,
+                                "content_type": "application/json",
+                                "entries": 1,
+                                "size_bytes": len(document),
+                                "truncated": False,
+                            }
+                        },
+                    ]
+                },
+            )
+            stored = list(Path(media_dir).glob("console-12-*.json"))
+            stored_bytes = stored[0].read_bytes() if stored else b""
+            stored_name = stored[0].name if stored else ""
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored_bytes, document)
+        self.assertEqual(
+            completed.json()["result"],
+            [
+                {"result": {"started": True}},
+                {
+                    "result": {
+                        "url": f"http://testserver/api/media/{stored_name}",
+                        "content_type": "application/json",
+                        "entries": 1,
+                        "size_bytes": len(document),
+                        "truncated": False,
+                    }
+                },
+            ],
+        )
+
     def test_heartbeat_stores_and_returns_browser_settings(self) -> None:
         settings_url = f"/api/browsers/{self.BID}/settings/"
         not_reported = self.client.get(settings_url)

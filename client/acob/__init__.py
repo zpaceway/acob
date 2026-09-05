@@ -11,6 +11,9 @@ from .client import (
     BrowserSettings,
     ClickResult,
     ClosedTab,
+    ConsoleCapture,
+    ConsoleMethod,
+    ConsoleStarted,
     KeyboardKeyResult,
     KeyboardModifier,
     KeyboardTextResult,
@@ -27,7 +30,7 @@ from .client import (
     Tab,
 )
 
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -42,6 +45,9 @@ __all__ = [
     "BrowserSettings",
     "ClickResult",
     "ClosedTab",
+    "ConsoleCapture",
+    "ConsoleMethod",
+    "ConsoleStarted",
     "KeyboardKeyResult",
     "KeyboardModifier",
     "KeyboardTextResult",

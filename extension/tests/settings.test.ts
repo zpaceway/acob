@@ -20,6 +20,8 @@ test("normalizes a complete default configuration", () => {
     maxScreenshotSizeMiB: 30,
     maxRecordingDurationSec: 300,
     maxRecordingSizeMiB: 512,
+    consoleTimeoutSec: 180,
+    consoleMaxSizeMiB: 2,
     resultRetryAttempts: 3,
     resultRetryDelayMs: 1000,
     popupStatusDurationMs: 2500,
@@ -41,6 +43,8 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
     maxScreenshotSizeMiB: 12,
     maxRecordingDurationSec: 60,
     maxRecordingSizeMiB: 12,
+    consoleTimeoutSec: 60,
+    consoleMaxSizeMiB: 5,
     resultRetryAttempts: 2,
     resultRetryDelayMs: 500,
     popupStatusDurationMs: 4000,
@@ -55,6 +59,8 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
   assert.equal(configuration.javascriptTimeoutMs, 45000);
   assert.equal(configuration.maxRecordingDurationSec, 60);
   assert.equal(configuration.maxRecordingSizeMiB, 12);
+  assert.equal(configuration.consoleTimeoutSec, 60);
+  assert.equal(configuration.consoleMaxSizeMiB, 5);
   assert.equal(configuration.resultRetryAttempts, 2);
   assert.equal(configuration.debuggerProtocolVersion, "1.4");
 });
@@ -73,6 +79,8 @@ test("replaces invalid values with their centralized defaults", () => {
     maxScreenshotSizeMiB: 31,
     maxRecordingDurationSec: 301,
     maxRecordingSizeMiB: 513,
+    consoleTimeoutSec: 301,
+    consoleMaxSizeMiB: 11,
     resultRetryAttempts: 4,
     resultRetryDelayMs: 30001,
     popupStatusDurationMs: -1,
@@ -90,6 +98,8 @@ test("replaces invalid values with their centralized defaults", () => {
   assert.equal(configuration.maxScreenshotSizeMiB, 30);
   assert.equal(configuration.maxRecordingDurationSec, 300);
   assert.equal(configuration.maxRecordingSizeMiB, 512);
+  assert.equal(configuration.consoleTimeoutSec, 180);
+  assert.equal(configuration.consoleMaxSizeMiB, 2);
   assert.equal(configuration.resultRetryAttempts, 3);
   assert.equal(configuration.resultRetryDelayMs, 1000);
   assert.equal(configuration.popupStatusDurationMs, 2500);
