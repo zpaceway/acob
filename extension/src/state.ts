@@ -20,6 +20,11 @@ export interface ActiveRecording {
   finished: Promise<RecordingOutcome>;
 }
 
+export interface ProxyCredentials {
+  username: string;
+  password: string;
+}
+
 export const state = {
   activeExecutions: 0,
   activeJavaScriptExecutions: new Set<ActiveJavaScriptExecution>(),
@@ -31,4 +36,6 @@ export const state = {
   reinstallScheduled: false,
   tabCreationQueue: Promise.resolve() as Promise<void>,
   tabExecutionQueues: new Map<number, Promise<void>>(),
+  proxyQueue: Promise.resolve() as Promise<void>,
+  proxyCredentials: null as ProxyCredentials | null,
 };

@@ -107,8 +107,8 @@ export type InstructionAction =
   | "keyboard"
   | "list"
   | "navigate"
-  | "record_start"
-  | "record_stop"
+  | "proxy"
+  | "record"
   | "reload"
   | "screenshot"
   | "scroll";
@@ -213,14 +213,34 @@ export interface ScreenshotPayload {
   full_page?: boolean;
 }
 
+export type ProxyMethod = "set" | "unset";
+export type ProxyScheme = "http" | "https" | "socks5";
+
+export interface ProxySetPayload {
+  method: "set";
+  proxy: string;
+}
+
+export interface ProxyUnsetPayload {
+  method: "unset";
+}
+
+export type ProxyPayload = ProxySetPayload | ProxyUnsetPayload;
+
+export type RecordMethod = "start" | "stop";
+
 export interface RecordStartPayload {
+  method: "start";
   tid: number;
   full_page?: boolean;
 }
 
 export interface RecordStopPayload {
-  recording_id: number;
+  method: "stop";
+  tid: number;
 }
+
+export type RecordPayload = RecordStartPayload | RecordStopPayload;
 
 export interface BatchPayload {
   actions: InstructionRequest[];
@@ -235,8 +255,8 @@ export interface InstructionPayloadMap {
   keyboard: KeyboardPayload;
   list: ListTabsPayload;
   navigate: NavigateTabPayload;
-  record_start: RecordStartPayload;
-  record_stop: RecordStopPayload;
+  proxy: ProxyPayload;
+  record: RecordPayload;
   reload: ReloadTabPayload;
   screenshot: ScreenshotPayload;
   scroll: ScrollPayload;
@@ -331,16 +351,29 @@ export interface ScreenshotInstructionRequest {
   full_page?: boolean;
 }
 
-export interface RecordStartInstructionRequest {
-  action: "record_start";
-  tid: number;
-  full_page?: boolean;
-}
+export type ProxyInstructionRequest =
+  | {
+      action: "proxy";
+      method: "set";
+      proxy: string;
+    }
+  | {
+      action: "proxy";
+      method: "unset";
+    };
 
-export interface RecordStopInstructionRequest {
-  action: "record_stop";
-  recording_id: number;
-}
+export type RecordInstructionRequest =
+  | {
+      action: "record";
+      method: "start";
+      tid: number;
+      full_page?: boolean;
+    }
+  | {
+      action: "record";
+      method: "stop";
+      tid: number;
+    };
 
 export interface BatchInstructionRequest {
   action: "batch";
@@ -355,8 +388,8 @@ export type InstructionRequest =
   | KeyboardInstructionRequest
   | ListTabsInstructionRequest
   | NavigateTabInstructionRequest
-  | RecordStartInstructionRequest
-  | RecordStopInstructionRequest
+  | ProxyInstructionRequest
+  | RecordInstructionRequest
   | ReloadTabInstructionRequest
   | ScreenshotInstructionRequest
   | ScrollInstructionRequest;
@@ -405,13 +438,26 @@ export interface ScreenshotUploadResult {
 }
 
 export interface RecordStartResult {
-  recording_id: number;
   started: true;
 }
 
 export type RecordingStopReason = "user" | "max_duration";
 
 export type RecordingContentType = "video/mp4" | "video/webm";
+
+export interface ProxySetResult {
+  proxied: true;
+  scheme: ProxyScheme;
+  host: string;
+  port: number;
+  authenticated: boolean;
+}
+
+export interface ProxyUnsetResult {
+  proxied: false;
+}
+
+export type ProxyResult = ProxySetResult | ProxyUnsetResult;
 
 export interface RecordStopUploadResult {
   data: string;
@@ -456,11 +502,19 @@ export type InstructionResultFor<
             ? KeyboardKeyResult
             : Request extends { action: "screenshot" }
               ? ScreenshotResult
-              : Request extends { action: "record_start" }
+              : Request extends { action: "record"; method: "start" }
                 ? RecordStartResult
-                : Request extends { action: "record_stop" }
+                : Request extends { action: "record"; method: "stop" }
                   ? RecordStopResult
-                  : Request extends { action: "list" }
+                  : Request extends { action: "record" }
+                    ? RecordStartResult | RecordStopResult
+                    : Request extends { action: "proxy"; method: "set" }
+                      ? ProxySetResult
+                      : Request extends { action: "proxy"; method: "unset" }
+                        ? ProxyUnsetResult
+                        : Request extends { action: "proxy" }
+                          ? ProxyResult
+                          : Request extends { action: "list" }
                 ? ListedTab[]
                 : Request extends { action: "close" }
                   ? ClosedTab
@@ -490,6 +544,8 @@ export type ExtensionInstructionResult =
   | ScreenshotUploadResult
   | RecordStartResult
   | RecordStopUploadResult
+  | ProxySetResult
+  | ProxyUnsetResult
   | UnserializableJavaScriptResult
   | BatchSubmissionResult;
 
@@ -507,7 +563,6 @@ export interface PollMessage {
 
 export interface StartRecordingMessage {
   type: "startRecording";
-  recordingId: number;
   tid: number;
   fullPage: boolean;
   // Full-page recordings carry the measured content size so the sink can
@@ -521,19 +576,19 @@ export interface StartRecordingMessage {
 
 export interface RecordingFrameMessage {
   type: "recordingFrame";
-  recordingId: number;
+  tid: number;
   data: string;
 }
 
 export interface RecordingChunkMessage {
   type: "recordingChunk";
-  recordingId: number;
+  tid: number;
   data: string;
 }
 
 export interface FinalizeRecordingMessage {
   type: "finalizeRecording";
-  recordingId: number;
+  tid: number;
   maxRecordingSizeMiB: number;
 }
 
@@ -564,7 +619,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   }
   if (message.type === "startRecording") {
     return (
-      typeof message.recordingId === "number" &&
       typeof message.tid === "number" &&
       typeof message.fullPage === "boolean" &&
       typeof message.width === "number" &&
@@ -575,19 +629,17 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   }
   if (message.type === "recordingFrame") {
     return (
-      typeof message.recordingId === "number" &&
-      typeof message.data === "string"
+      typeof message.tid === "number" && typeof message.data === "string"
     );
   }
   if (message.type === "recordingChunk") {
     return (
-      typeof message.recordingId === "number" &&
-      typeof message.data === "string"
+      typeof message.tid === "number" && typeof message.data === "string"
     );
   }
   return (
     message.type === "finalizeRecording" &&
-    typeof message.recordingId === "number" &&
+    typeof message.tid === "number" &&
     typeof message.maxRecordingSizeMiB === "number"
   );
 }

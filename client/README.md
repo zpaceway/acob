@@ -39,10 +39,14 @@ async def main() -> None:
         screenshot = await client.screenshot(tid, full_page=True)
         print(screenshot.url)
 
-        recording = await client.record_start(tid)
+        recording = await client.record("start", tid)
         await asyncio.sleep(10)
-        video = await client.record_stop(recording.recording_id)
+        video = await client.record("stop", tid)
         print(video.url, video.stopped_reason)
+
+        proxied = await client.proxy("set", proxy="socks5://127.0.0.1:1080")
+        print(proxied.scheme, proxied.host, proxied.port)
+        await client.proxy("unset")
 
 
 asyncio.run(main())
@@ -147,20 +151,31 @@ screenshot = await client.screenshot(tid, full_page=True)
 print(screenshot.url, screenshot.content_type, screenshot.tid)
 ```
 
-`record_start()` starts a video recording of a tab and returns a
-`RecordingStart` model with its tracking ID; the recording runs in the
-background until `record_stop()` or the extension's maximum recording
-duration. Pass `full_page=True` to record the tab's whole scrollable content
-instead of only the visible viewport. `record_stop()` returns a
-`RecordingStop` model with the public download URL, duration, and
-`stopped_reason` (`"user"` or `"max_duration"` — a late stop delivers the
-maximum-duration video with an explanatory message instead of failing):
+`record()` starts or stops a video recording of a tab, keyed by tab
+(`method` is `"start"` or `"stop"`). It returns a `RecordingStart`
+(`{started, tid}`) or `RecordingStop` model with the public download URL,
+duration, and `stopped_reason` (`"user"` or `"max_duration"` — a late stop
+delivers the maximum-duration video with an explanatory message instead of
+failing). Only one recording per tab is allowed. Pass `full_page=True` with
+`method="start"` to record the tab's whole scrollable content instead of
+only the visible viewport:
 
 ```python
-recording = await client.record_start(tid, full_page=True)
+recording = await client.record("start", tid, full_page=True)
 await asyncio.sleep(10)
-video = await client.record_stop(recording.recording_id)
+video = await client.record("stop", tid)
 print(video.url, video.duration, video.stopped_reason)
+```
+
+`proxy()` sets or unsets the browser-wide egress proxy (`method` is `"set"`
+or `"unset"`). `set` requires a proxy string (`http://`, `https://`, or
+`socks5://` with optional `user:pass@` auth); `unset` restores the system
+proxy. Results are redacted (`authenticated` is boolean-only):
+
+```python
+proxied = await client.proxy("set", proxy="http://127.0.0.1:8080")
+print(proxied.scheme, proxied.host, proxied.port, proxied.authenticated)
+await client.proxy("unset")
 ```
 
 Recordings need a timeout that covers the intended recording time, and the
@@ -169,7 +184,7 @@ recorded its other actions (`click`, `keyboard`, `screenshot`, `scroll`,
 `javascript`) keep working, since the extension shares one debugger session
 per tab.
 
-`screenshot()` and `record_stop()` return the same public media URL pattern.
+`screenshot()` and `record(method="stop")` return the same public media URL pattern.
 `settings()` returns the browser's reported configuration (limits such as
 `maxRecordingDurationSec`, polling, timeouts) so callers can plan bounded work:
 

@@ -24,6 +24,10 @@ UUIDV4_VERSION = 4
 
 JsonObject: TypeAlias = dict[str, JsonValue]
 KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
+ProxyMethod: TypeAlias = Literal["set", "unset"]
+ProxyScheme: TypeAlias = Literal["http", "https", "socks5"]
+RecordMethod: TypeAlias = Literal["start", "stop"]
+MAX_PROXY_LENGTH = 2048
 
 
 class _ResultModel(BaseModel):
@@ -83,13 +87,11 @@ class BrowserSettings(_ResultModel):
 
 
 class RecordingStart(_ResultModel):
-    recording_id: int = Field(gt=0)
     started: Literal[True]
     tid: int
 
 
 class _RecordingStartMetadata(_ResultModel):
-    recording_id: int = Field(gt=0)
     started: Literal[True]
 
 
@@ -99,7 +101,31 @@ class RecordingStop(_ResultModel):
     duration: float
     stopped_reason: Literal["user", "max_duration"]
     message: str
-    recording_id: int
+    tid: int
+
+
+class ProxySet(_ResultModel):
+    proxied: Literal[True]
+    scheme: ProxyScheme
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    authenticated: bool
+
+
+class _ProxySetMetadata(_ResultModel):
+    proxied: Literal[True]
+    scheme: ProxyScheme
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    authenticated: bool
+
+
+class ProxyUnset(_ResultModel):
+    proxied: Literal[False]
+
+
+class _ProxyUnsetMetadata(_ResultModel):
+    proxied: Literal[False]
 
 
 class _ScreenshotMetadata(_ResultModel):
@@ -557,72 +583,130 @@ class ACOBClient:
             tid=tid,
         )
 
-    async def record_start(
+    @overload
+    async def record(
         self,
+        method: Literal["start"],
         tid: int,
         *,
         full_page: bool = False,
         timeout: float | None = None,
-    ) -> RecordingStart:
-        """Start recording a tab and return its tracking ID.
+    ) -> RecordingStart: ...
 
-        The recording continues in the background until ``record_stop`` is
-        called or the extension's maximum recording duration is reached.
-        ``full_page`` records the tab's whole scrollable content instead of
-        only the visible viewport.
+    @overload
+    async def record(
+        self,
+        method: Literal["stop"],
+        tid: int,
+        *,
+        timeout: float | None = None,
+    ) -> RecordingStop: ...
+
+    async def record(
+        self,
+        method: RecordMethod,
+        tid: int,
+        *,
+        full_page: bool = False,
+        timeout: float | None = None,
+    ) -> RecordingStart | RecordingStop:
+        """Start or stop a video recording of a tab, keyed by tab.
+
+        Only one recording per tab is allowed. ``start`` accepts
+        ``full_page`` to record the whole scrollable content; ``stop``
+        delivers the finalized video URL.
         """
-        result = self._expect_model(
-            await self.execute(
-                "record_start",
-                tid=tid,
-                full_page=full_page,
-                timeout=timeout,
-            ),
-            _RecordingStartMetadata,
-            "record_start",
+        self._validate_tid(tid)
+        if method not in ("start", "stop"):
+            raise ValueError("method must be 'start' or 'stop'")
+        if method == "stop" and full_page:
+            raise ValueError("full_page is only valid when method is 'start'")
+        if method == "start":
+            result = self._expect_model(
+                await self.execute(
+                    "record",
+                    method="start",
+                    tid=tid,
+                    full_page=full_page,
+                    timeout=timeout,
+                ),
+                _RecordingStartMetadata,
+                "record",
+            )
+            return RecordingStart(started=result.started, tid=tid)
+        result_stop = self._expect_model(
+            await self.execute("record", method="stop", tid=tid, timeout=timeout),
+            _RecordingStopMetadata,
+            "record",
         )
-        return RecordingStart(
-            recording_id=result.recording_id,
-            started=result.started,
+        self._validate_media_url(result_stop.url, "Recording")
+        return RecordingStop(
+            url=result_stop.url,
+            content_type=result_stop.content_type,
+            duration=result_stop.duration,
+            stopped_reason=result_stop.stopped_reason,
+            message=result_stop.message,
             tid=tid,
         )
 
-    async def record_stop(
+    @overload
+    async def proxy(
         self,
-        recording_id: int,
+        method: Literal["set"],
+        *,
+        proxy: str,
+        timeout: float | None = None,
+    ) -> ProxySet: ...
+
+    @overload
+    async def proxy(
+        self,
+        method: Literal["unset"],
         *,
         timeout: float | None = None,
-    ) -> RecordingStop:
-        """Stop a recording and return its public download URL.
+    ) -> ProxyUnset: ...
 
-        When the extension's maximum duration was reached before this call,
-        the returned capture covers the maximum duration and ``stopped_reason``
-        is ``"max_duration"`` instead of ``"user"``.
+    async def proxy(
+        self,
+        method: ProxyMethod,
+        *,
+        proxy: str | None = None,
+        timeout: float | None = None,
+    ) -> ProxySet | ProxyUnset:
+        """Set or unset the browser-wide egress proxy.
+
+        ``set`` requires a proxy string like
+        ``http://user:pass@host:port`` (schemes http, https, socks5).
+        ``unset`` restores the system proxy. The proxy is browser-global,
+        not per-tab.
         """
-        if (
-            isinstance(recording_id, bool)
-            or not isinstance(recording_id, int)
-            or recording_id <= 0
-        ):
-            raise ValueError("recording_id must be a positive integer")
-        result = self._expect_model(
-            await self.execute(
-                "record_stop",
-                recording_id=recording_id,
-                timeout=timeout,
-            ),
-            _RecordingStopMetadata,
-            "record_stop",
+        if method not in ("set", "unset"):
+            raise ValueError("method must be 'set' or 'unset'")
+        if method == "set":
+            if not isinstance(proxy, str) or not proxy.strip():
+                raise ValueError("proxy is required when method is 'set'")
+            if len(proxy) > MAX_PROXY_LENGTH:
+                raise ValueError("proxy string is too long")
+            result = self._expect_model(
+                await self.execute("proxy", method="set", proxy=proxy, timeout=timeout),
+                _ProxySetMetadata,
+                "proxy",
+            )
+            return ProxySet(
+                proxied=result.proxied,
+                scheme=result.scheme,
+                host=result.host,
+                port=result.port,
+                authenticated=result.authenticated,
+            )
+        if proxy is not None:
+            raise ValueError("proxy must not be provided when method is 'unset'")
+        result_unset = self._expect_model(
+            await self.execute("proxy", method="unset", timeout=timeout),
+            _ProxyUnsetMetadata,
+            "proxy",
         )
-        self._validate_media_url(result.url, "Recording")
-        return RecordingStop(
-            url=result.url,
-            content_type=result.content_type,
-            duration=result.duration,
-            stopped_reason=result.stopped_reason,
-            message=result.message,
-            recording_id=recording_id,
-        )
+        return ProxyUnset(proxied=result_unset.proxied)
 
     async def settings(
         self,
@@ -737,6 +821,11 @@ class ACOBClient:
     async def _close_http_client(self) -> None:
         if self._http_client is not None:
             await self._http_client.aclose()
+
+    @staticmethod
+    def _validate_tid(tid: int) -> None:
+        if isinstance(tid, bool) or not isinstance(tid, int) or tid <= 0:
+            raise ValueError("tid must be a positive integer")
 
     @staticmethod
     def _expect_model(

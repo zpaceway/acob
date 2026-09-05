@@ -81,8 +81,8 @@ async function drawFrame(
   sink.framesDrawn += 1;
 }
 
-function discardSink(recordingId: number): void {
-  const sink = sinks.get(recordingId);
+function discardSink(tid: number): void {
+  const sink = sinks.get(tid);
   if (sink === undefined || sink.finalized) {
     return;
   }
@@ -92,14 +92,14 @@ function discardSink(recordingId: number): void {
   } catch {
     // The recorder may already be stopped.
   }
-  sinks.delete(recordingId);
+  sinks.delete(tid);
 }
 
 export async function startRecordingSink(
   message: StartRecordingMessage,
 ): Promise<void> {
-  if (sinks.has(message.recordingId)) {
-    throw new Error(`A recording with id ${message.recordingId} already exists`);
+  if (sinks.has(message.tid)) {
+    throw new Error(`A recording for tab ${message.tid} already exists`);
   }
   const canvas = document.createElement("canvas");
   canvas.width = message.width > 0 ? message.width : 0;
@@ -137,7 +137,7 @@ export async function startRecordingSink(
     framesDrawn: 0,
     finalized: false,
     discardTimer: window.setTimeout(
-      () => discardSink(message.recordingId),
+      () => discardSink(message.tid),
       message.maxRecordingDurationSec * 1000 + RECORDING_DISCARD_GRACE_MS,
     ),
   };
@@ -147,13 +147,13 @@ export async function startRecordingSink(
     }
   };
   recorder.start(1000);
-  sinks.set(message.recordingId, sink);
+  sinks.set(message.tid, sink);
 }
 
 export async function handleRecordingFrame(
   message: RecordingFrameMessage,
 ): Promise<void> {
-  const sink = sinks.get(message.recordingId);
+  const sink = sinks.get(message.tid);
   if (sink === undefined || sink.finalized) {
     return;
   }
@@ -173,12 +173,12 @@ export async function handleRecordingFrame(
 export async function handleFinalizeRecording(
   message: FinalizeRecordingMessage,
 ): Promise<{ contentType: RecordingContentType }> {
-  const sink = sinks.get(message.recordingId);
+  const sink = sinks.get(message.tid);
   if (sink === undefined) {
-    throw new Error(`No active recording with id ${message.recordingId}`);
+    throw new Error(`No active recording for tab ${message.tid}`);
   }
   if (sink.finalized) {
-    throw new Error(`Recording ${message.recordingId} was already finalized`);
+    throw new Error(`Recording for tab ${message.tid} was already finalized`);
   }
   sink.finalized = true;
   if (sink.discardTimer !== undefined) {
@@ -215,13 +215,13 @@ export async function handleFinalizeRecording(
     for (let offset = 0; offset < data.length; offset += RECORDING_CHUNK_LENGTH) {
       const chunk: RecordingChunkMessage = {
         type: "recordingChunk",
-        recordingId: message.recordingId,
+        tid: message.tid,
         data: data.slice(offset, offset + RECORDING_CHUNK_LENGTH),
       };
       await chrome.runtime.sendMessage<RecordingChunkMessage, void>(chunk);
     }
     return { contentType: containerTypeForMime(sink.mimeType) };
   } finally {
-    sinks.delete(message.recordingId);
+    sinks.delete(message.tid);
   }
 }

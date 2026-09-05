@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -20,13 +21,18 @@ NonEmptyString = Annotated[
 ]
 NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
-RecordingId = Annotated[int, Field(gt=0)]
 ScrollY = Annotated[float, Field(allow_inf_nan=False)]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
 MAX_RECORDING_DURATION_SECONDS = 300
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 MAX_BATCH_ACTIONS = 20
+MAX_PROXY_LENGTH = 2048
+MAX_PROXY_HOST_LENGTH = 253
+MAX_PROXY_PORT = 65535
+MIN_PROXY_PORT = 1
+MAX_PROXY_CREDENTIAL_LENGTH = 255
+PROXY_SCHEMES = {"http", "https", "socks5"}
 
 KEYBOARD_KEYS = {
     "ArrowDown",
@@ -94,15 +100,78 @@ class ScreenshotInstruction(ApiModel):
     full_page: bool = True
 
 
-class RecordStartInstruction(ApiModel):
-    action: Literal["record_start"]
+def _parse_proxy_string(value: str) -> tuple[str, str, int, bool]:
+    """Parse and validate a proxy string, returning scheme/host/port/auth.
+
+    Accepted format: ``scheme://[user[:password]@]host:port`` where scheme is
+    one of http, https, or socks5. The port is always required.
+    """
+    try:
+        parsed = urlsplit(value)
+    except ValueError as error:
+        raise ValueError(f"Invalid proxy string: {error}") from error
+    scheme = parsed.scheme.lower()
+    if scheme not in PROXY_SCHEMES:
+        raise ValueError(
+            "Invalid proxy string: scheme must be one of http, https, socks5"
+        )
+    host = parsed.hostname
+    if not host or len(host) > MAX_PROXY_HOST_LENGTH:
+        raise ValueError("Invalid proxy string: host is required")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError(f"Invalid proxy string: {error}") from error
+    if port is None or not MIN_PROXY_PORT <= port <= MAX_PROXY_PORT:
+        raise ValueError("Invalid proxy string: port must be 1-65535")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Invalid proxy string: query and fragment are not allowed")
+    path = parsed.path
+    if path not in ("", "/"):
+        raise ValueError("Invalid proxy string: path is not allowed")
+    username = parsed.username
+    password = parsed.password
+    if username is not None and not 1 <= len(username) <= MAX_PROXY_CREDENTIAL_LENGTH:
+        raise ValueError("Invalid proxy string: invalid credentials")
+    if password is not None and not len(password) <= MAX_PROXY_CREDENTIAL_LENGTH:
+        raise ValueError("Invalid proxy string: invalid credentials")
+    authenticated = username is not None
+    return scheme, host, port, authenticated
+
+
+ProxyString = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_PROXY_LENGTH),
+]
+
+
+class ProxyInstruction(ApiModel):
+    action: Literal["proxy"]
+    method: Literal["set", "unset"]
+    proxy: ProxyString | None = None
+
+    @model_validator(mode="after")
+    def validate_proxy(self) -> Self:
+        if self.method == "set":
+            if self.proxy is None:
+                raise ValueError("proxy is required when method is 'set'")
+            _parse_proxy_string(self.proxy)
+        elif self.proxy is not None:
+            raise ValueError("proxy must not be provided when method is 'unset'")
+        return self
+
+
+class RecordInstruction(ApiModel):
+    action: Literal["record"]
+    method: Literal["start", "stop"]
     tid: Tid
     full_page: bool = False
 
-
-class RecordStopInstruction(ApiModel):
-    action: Literal["record_stop"]
-    recording_id: RecordingId
+    @model_validator(mode="after")
+    def validate_record(self) -> Self:
+        if self.method == "stop" and self.full_page:
+            raise ValueError("full_page is only valid when method is 'start'")
+        return self
 
 
 class ListInstruction(ApiModel):
@@ -144,8 +213,8 @@ InstructionRequest = Annotated[
     | KeyboardInstruction
     | ListInstruction
     | NavigateInstruction
-    | RecordStartInstruction
-    | RecordStopInstruction
+    | ProxyInstruction
+    | RecordInstruction
     | ReloadInstruction
     | ScreenshotInstruction
     | ScrollInstruction,
@@ -176,8 +245,19 @@ class ScreenshotResult(ApiModel):
 
 
 class RecordStartResult(ApiModel):
-    recording_id: RecordingId
     started: Literal[True]
+
+
+class ProxySetResult(ApiModel):
+    proxied: Literal[True]
+    scheme: Literal["http", "https", "socks5"]
+    host: NonEmptyString
+    port: Annotated[int, Field(ge=MIN_PROXY_PORT, le=MAX_PROXY_PORT)]
+    authenticated: bool
+
+
+class ProxyUnsetResult(ApiModel):
+    proxied: Literal[False]
 
 
 class RecordStopUploadResult(ApiModel):

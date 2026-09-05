@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "acob-client"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "../client" }
 dependencies = [
     { name = "httpx" },
@@ -31,7 +31,7 @@ dev = [
 
 [[package]]
 name = "acob-mcp"
-version = "0.10.0"
+version = "0.11.0"
 source = { virtual = "." }
 dependencies = [
     { name = "acob-client" },

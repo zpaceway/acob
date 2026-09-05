@@ -91,7 +91,7 @@ All routes are scoped by a lowercase dashless UUIDv4 browser ID under
 | `GET` | `media/<name>` | Serve a stored screenshot or recording. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record_start`, `record_stop`, and
+`click`, `keyboard`, `screenshot`, `record`, `proxy`, and
 `javascript`. See the root [API guide](../README.md#api) for payload examples.
 
 `POST instructions/batch/` accepts `{"action": "batch", "actions": [...]}`
@@ -109,10 +109,14 @@ instruction returns its terminal response and deletes the row.
 Screenshots and recordings are stored locally by this server under
 `media/` (`MEDIA_ROOT`, created on first use) and served at
 `/api/media/<filename>`; the instruction result carries the absolute URL on
-this server itself. Recordings use the same pipeline: `record_start` (with an
-optional `full_page` flag to record the whole scrollable page) and
-`record_stop` are instructions whose results carry the final video URL, and
-the extension-side session is not tracked by the server. Like the SQLite
+this server itself. Recordings use the same pipeline: `record` with
+`method: start` (with an optional `full_page` flag to record the whole
+scrollable page) and `method: stop` for the same `tid` are instructions
+whose stop result carries the final video URL, and the extension-side
+session is keyed by tab (one recording per tab) and not tracked by the
+server. The `proxy` action (`method: set` with a proxy string like
+`http://host:port`, `method: unset`) is browser-global and carries only
+redacted results. Like the SQLite
 database, the media directory lives on the local filesystem; a fresh
 container starts with an empty media root.
 

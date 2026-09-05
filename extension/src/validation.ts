@@ -58,10 +58,69 @@ export function isClaimedInstruction(value: unknown): value is ClaimedInstructio
   );
 }
 
+function isProxyString(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+    if (scheme !== "http" && scheme !== "https" && scheme !== "socks5") {
+      return false;
+    }
+    if (!parsed.hostname) {
+      return false;
+    }
+    const port = parsed.port ? Number(parsed.port) : NaN;
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      return false;
+    }
+    if (parsed.search || parsed.hash) {
+      return false;
+    }
+    if (parsed.pathname !== "" && parsed.pathname !== "/") {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isSupportedActionPayload(
   action: string,
   payload: Record<string, unknown>,
 ): boolean {
+  if (action === "proxy") {
+    if (payload.method === "set") {
+      return (
+        isProxyString(payload.proxy) &&
+        Object.keys(payload).every((key) => key === "method" || key === "proxy")
+      );
+    }
+    if (payload.method === "unset") {
+      return payload.proxy === undefined || payload.proxy === null;
+    }
+    return false;
+  }
+  if (action === "record") {
+    if (payload.method === "start") {
+      return (
+        isPositiveInteger(payload.tid) &&
+        (payload.full_page === undefined ||
+          typeof payload.full_page === "boolean")
+      );
+    }
+    if (payload.method === "stop") {
+      return (
+        isPositiveInteger(payload.tid) &&
+        (payload.full_page === undefined ||
+          payload.full_page === false ||
+          payload.full_page === null)
+      );
+    }
+    return false;
+  }
   if (action === "click") {
     return (
       isPositiveInteger(payload.tid) && typeof payload.selector === "string"
@@ -88,16 +147,6 @@ function isSupportedActionPayload(
       (payload.full_page === undefined ||
         typeof payload.full_page === "boolean")
     );
-  }
-  if (action === "record_start") {
-    return (
-      isPositiveInteger(payload.tid) &&
-      (payload.full_page === undefined ||
-        typeof payload.full_page === "boolean")
-    );
-  }
-  if (action === "record_stop") {
-    return isPositiveInteger(payload.recording_id);
   }
   if (action === "list") {
     return true;

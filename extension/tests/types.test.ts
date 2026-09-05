@@ -8,6 +8,8 @@ import type {
   InstructionRequest,
   InstructionResultFor,
   ListedTab,
+  ProxySetResult,
+  ProxyUnsetResult,
   RecordStartResult,
   RecordStopResult,
   ScrollResult,
@@ -48,18 +50,28 @@ type ScrollResultIsTyped = Expect<
 >;
 type RecordStartResultIsTyped = Expect<
   Equal<
-    InstructionResultFor<{ action: "record_start"; tid: number }>,
+    InstructionResultFor<{ action: "record"; method: "start"; tid: number }>,
     RecordStartResult
   >
 >;
 type RecordStopResultIsTyped = Expect<
   Equal<
-    InstructionResultFor<{
-      action: "record_stop";
-      recording_id: number;
-    }>,
+    InstructionResultFor<{ action: "record"; method: "stop"; tid: number }>,
     RecordStopResult
   >
+>;
+type ProxySetResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{
+      action: "proxy";
+      method: "set";
+      proxy: string;
+    }>,
+    ProxySetResult
+  >
+>;
+type ProxyUnsetResultIsTyped = Expect<
+  Equal<InstructionResultFor<{ action: "proxy"; method: "unset" }>, ProxyUnsetResult>
 >;
 type BatchResultIsTyped = Expect<
   Equal<
@@ -157,5 +169,9 @@ const recordStartResultIsTyped: RecordStartResultIsTyped = true;
 void recordStartResultIsTyped;
 const recordStopResultIsTyped: RecordStopResultIsTyped = true;
 void recordStopResultIsTyped;
+const proxySetResultIsTyped: ProxySetResultIsTyped = true;
+void proxySetResultIsTyped;
+const proxyUnsetResultIsTyped: ProxyUnsetResultIsTyped = true;
+void proxyUnsetResultIsTyped;
 const batchResultIsTyped: BatchResultIsTyped = true;
 void batchResultIsTyped;

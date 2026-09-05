@@ -15,15 +15,19 @@ from .client import (
     KeyboardModifier,
     KeyboardTextResult,
     ListedTab,
+    ProxyMethod,
+    ProxySet,
+    ProxyUnset,
     RecordingStart,
     RecordingStop,
+    RecordMethod,
     ReinstallResult,
     Screenshot,
     ScrollResult,
     Tab,
 )
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -42,6 +46,10 @@ __all__ = [
     "KeyboardModifier",
     "KeyboardTextResult",
     "ListedTab",
+    "ProxyMethod",
+    "ProxySet",
+    "ProxyUnset",
+    "RecordMethod",
     "RecordingStart",
     "RecordingStop",
     "ReinstallResult",

@@ -33,6 +33,33 @@ make -C proxy logs     # follow acob-proxy
 make -C proxy down
 ```
 
+## MCP client installers
+
+The installer targets bring up the full stack (`docker compose up -d --build`)
+and register the MCP server with the chosen client. `BID` is required: copy
+the browser ID from the ACOB extension popup.
+
+```bash
+make -C proxy install-opencode BID=0123456789ab4def8123456789abcdef
+make -C proxy install-claude BID=0123456789ab4def8123456789abcdef
+```
+
+- `install-opencode` registers `acob` via `opencode mcp add --url
+  http://127.0.0.1:58346/mcp/<bid>`. Restart/reconnect the opencode session
+  afterwards so it picks up the new tools.
+- `install-claude` registers `acob` via `claude mcp add --transport http -s
+  user` (user scope, re-runnable). Start a new Claude Code session to use the
+  tools.
+
+Overrides:
+
+```bash
+make -C proxy install-opencode BID=<bid> ACOB_PROXY_PORT=8000
+make -C proxy install-claude BID=<bid> OPENCODE_BIN=/path/to/opencode CLAUDE_BIN=/path/to/claude
+```
+
+Verify the registration with `opencode mcp list` or `claude mcp list`.
+
 Override the unified host port:
 
 ```bash

@@ -347,7 +347,6 @@ interface RecordingPipeline {
 }
 
 function startRecordingPipeline(
-  recordingId: number,
   tid: number,
   fullPage: boolean,
   configuration: Configuration,
@@ -395,7 +394,7 @@ function startRecordingPipeline(
       const sendFrame = async (data: string): Promise<void> => {
         const message: RecordingFrameMessage = {
           type: "recordingFrame",
-          recordingId,
+          tid,
           data,
         };
         await withTimeout(
@@ -476,7 +475,7 @@ function startRecordingPipeline(
         }
         const message: FinalizeRecordingMessage = {
           type: "finalizeRecording",
-          recordingId,
+          tid,
           maxRecordingSizeMiB: configuration.maxRecordingSizeMiB,
         };
         let response: FinalizeRecordingResponse;
@@ -490,17 +489,17 @@ function startRecordingPipeline(
             "Timed out finalizing the recording",
           );
         } catch (error) {
-          state.recordingChunks.delete(recordingId);
+          state.recordingChunks.delete(tid);
           throw error;
         }
         if ("error" in response) {
-          state.recordingChunks.delete(recordingId);
+          state.recordingChunks.delete(tid);
           throw new Error(
             `${response.error} (${captures} screenshots captured)`,
           );
         }
-        const chunks = state.recordingChunks.get(recordingId) ?? [];
-        state.recordingChunks.delete(recordingId);
+        const chunks = state.recordingChunks.get(tid) ?? [];
+        state.recordingChunks.delete(tid);
         const stoppedReason: RecordingStopReason = stoppedByTimer
           ? "max_duration"
           : "user";
@@ -556,18 +555,16 @@ async function measurePageSize(
 
 export async function executeRecordStart(
   tid: number,
-  recordingId: number,
   fullPage: boolean,
   configuration: Configuration,
 ): Promise<RecordStartResult> {
-  if (state.recordings.has(recordingId)) {
-    throw new Error(`A recording with id ${recordingId} is already active`);
+  if (state.recordings.has(tid)) {
+    throw new Error(`A recording for tab ${tid} is already active`);
   }
   await ensureOffscreenDocument();
   const size = fullPage ? await measurePageSize(tid, configuration) : null;
   const message: StartRecordingMessage = {
     type: "startRecording",
-    recordingId,
     tid,
     fullPage,
     width: size?.width ?? 0,
@@ -586,36 +583,31 @@ export async function executeRecordStart(
     throw new Error(response.error);
   }
 
-  const pipeline = startRecordingPipeline(
-    recordingId,
-    tid,
-    fullPage,
-    configuration,
-  );
+  const pipeline = startRecordingPipeline(tid, fullPage, configuration);
   const session = {
     tid,
     requestStop: pipeline.requestStop,
     finished: pipeline.finished,
   };
-  state.recordings.set(recordingId, session);
+  state.recordings.set(tid, session);
   void pipeline.finished.catch(() => {
-    state.recordings.delete(recordingId);
+    state.recordings.delete(tid);
   });
   await withTimeout(
     pipeline.ready,
     configuration.httpRequestTimeoutMs,
     "Timed out starting the recording",
   );
-  return { recording_id: recordingId, started: true };
+  return { started: true };
 }
 
 export async function executeRecordStop(
-  recordingId: number,
+  tid: number,
   configuration: Configuration,
 ): Promise<RecordStopUploadResult> {
-  const session = state.recordings.get(recordingId);
+  const session = state.recordings.get(tid);
   if (session === undefined) {
-    throw new Error(`No active recording with id ${recordingId}`);
+    throw new Error(`No active recording for tab ${tid}`);
   }
   session.requestStop();
   let outcome: RecordingOutcome;
@@ -626,7 +618,7 @@ export async function executeRecordStop(
       "Timed out stopping the recording",
     );
   } finally {
-    state.recordings.delete(recordingId);
+    state.recordings.delete(tid);
   }
   return {
     data: outcome.data,

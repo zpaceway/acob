@@ -23,6 +23,8 @@ from acob import (
     KeyboardKeyResult,
     KeyboardTextResult,
     ListedTab,
+    ProxySet,
+    ProxyUnset,
     RecordingStart,
     RecordingStop,
     ReinstallResult,
@@ -45,8 +47,10 @@ if TYPE_CHECKING:
         _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
         _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
         _screenshot: Screenshot = await client.screenshot(1)
-        _record_start: RecordingStart = await client.record_start(1)
-        _record_stop: RecordingStop = await client.record_stop(1)
+        _record_started: RecordingStart = await client.record("start", 1)
+        _record_stopped: RecordingStop = await client.record("stop", 1)
+        _proxy_set: ProxySet = await client.proxy("set", proxy="http://127.0.0.1:8080")
+        _proxy_unset: ProxyUnset = await client.proxy("unset")
         _settings: BrowserSettings = await client.settings()
         _javascript: JsonValue = await client.javascript(1, "1")
         _reinstall: ReinstallResult = await client.reinstall()
@@ -551,7 +555,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         ):
             await client.screenshot(12)
 
-    async def test_record_start_returns_the_tracking_id(self) -> None:
+    async def test_record_start_returns_started(self) -> None:
         client = self.make_client()
         requests = self.add_responses(
             client,
@@ -562,25 +566,24 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "id": 9,
                         "status": "completed",
-                        "result": {"recording_id": 9, "started": True},
+                        "result": {"started": True},
                     },
                 ),
             ],
         )
 
-        result = await client.record_start(12)
+        result = await client.record("start", 12)
 
         self.assertIsInstance(result, RecordingStart)
-        self.assertEqual(result.recording_id, 9)
         self.assertTrue(result.started)
         self.assertEqual(result.tid, 12)
         self.assertEqual(len(requests), 2)
         self.assertEqual(
             json.loads(requests[0].content),
-            {"action": "record_start", "tid": 12, "full_page": False},
+            {"action": "record", "method": "start", "tid": 12, "full_page": False},
         )
 
-    async def test_record_start_sends_the_full_page_flag(self) -> None:
+    async def test_record_start_sends_full_page(self) -> None:
         client = self.make_client()
         requests = self.add_responses(
             client,
@@ -591,21 +594,21 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "id": 9,
                         "status": "completed",
-                        "result": {"recording_id": 9, "started": True},
+                        "result": {"started": True},
                     },
                 ),
             ],
         )
 
-        result = await client.record_start(12, full_page=True)
+        result = await client.record("start", 12, full_page=True)
 
         self.assertIsInstance(result, RecordingStart)
         self.assertEqual(
             json.loads(requests[0].content),
-            {"action": "record_start", "tid": 12, "full_page": True},
+            {"action": "record", "method": "start", "tid": 12, "full_page": True},
         )
 
-    async def test_record_stop_returns_the_media_url(self) -> None:
+    async def test_record_stop_returns_media_url(self) -> None:
         media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         client = self.make_client()
         requests = self.add_responses(
@@ -632,7 +635,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        result = await client.record_stop(9)
+        result = await client.record("stop", 12)
 
         self.assertIsInstance(result, RecordingStop)
         self.assertEqual(result.url, media_url)
@@ -640,14 +643,14 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.duration, 300.0)
         self.assertEqual(result.stopped_reason, "max_duration")
         self.assertIn("maximum duration", result.message)
-        self.assertEqual(result.recording_id, 9)
+        self.assertEqual(result.tid, 12)
         self.assertEqual(len(requests), 2)
         self.assertEqual(
             json.loads(requests[0].content),
-            {"action": "record_stop", "recording_id": 9},
+            {"action": "record", "method": "stop", "tid": 12},
         )
 
-    async def test_record_stop_accepts_an_mp4_recording(self) -> None:
+    async def test_record_stop_accepts_mp4(self) -> None:
         media_url = "http://acob.test/api/media/screenshot-12-abc.png"
         client = self.make_client()
         requests = self.add_responses(
@@ -671,22 +674,26 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        result = await client.record_stop(11)
+        result = await client.record("stop", 12)
 
         self.assertIsInstance(result, RecordingStop)
         self.assertEqual(result.content_type, "video/mp4")
         self.assertEqual(result.duration, 12.0)
         self.assertEqual(len(requests), 2)
 
-    async def test_record_stop_rejects_invalid_recording_id(self) -> None:
+    async def test_record_rejects_invalid_arguments(self) -> None:
         client = self.make_client()
         invalid_ids: list[Any] = [0, -1, True, "9"]
 
         for invalid in invalid_ids:
-            with self.subTest(recording_id=invalid), self.assertRaises(ValueError):
-                await client.record_stop(invalid)
+            with self.subTest(tid=invalid), self.assertRaises(ValueError):
+                await client.record("stop", invalid)
+        with self.assertRaises(ValueError):
+            await client.record("stop", 12, full_page=True)  # ty: ignore[invalid-argument-type]
+        with self.assertRaises(ValueError):
+            await client.record("bogus", 12)  # ty: ignore[no-matching-overload]
 
-    async def test_record_stop_rejects_an_invalid_media_url(self) -> None:
+    async def test_record_stop_rejects_bad_media_url(self) -> None:
         client = self.make_client()
         execute = AsyncMock(
             return_value={
@@ -702,7 +709,76 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             patch.object(client, "execute", execute),
             self.assertRaisesRegex(ACOBProtocolError, "invalid download URL"),
         ):
-            await client.record_stop(9)
+            await client.record("stop", 12)
+
+    async def test_proxy_set_returns_the_proxy_status(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 20, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 20,
+                        "status": "completed",
+                        "result": {
+                            "proxied": True,
+                            "scheme": "http",
+                            "host": "127.0.0.1",
+                            "port": 8080,
+                            "authenticated": False,
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.proxy("set", proxy="http://127.0.0.1:8080")
+
+        self.assertIsInstance(result, ProxySet)
+        self.assertTrue(result.proxied)
+        self.assertEqual(result.scheme, "http")
+        self.assertEqual(result.host, "127.0.0.1")
+        self.assertEqual(result.port, 8080)
+        self.assertFalse(result.authenticated)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "proxy", "method": "set", "proxy": "http://127.0.0.1:8080"},
+        )
+
+    async def test_proxy_unset_returns_unproxied(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 21, "status": "pending"}),
+                (
+                    200,
+                    {"id": 21, "status": "completed", "result": {"proxied": False}},
+                ),
+            ],
+        )
+
+        result = await client.proxy("unset")
+
+        self.assertIsInstance(result, ProxyUnset)
+        self.assertFalse(result.proxied)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "proxy", "method": "unset"},
+        )
+
+    async def test_proxy_rejects_invalid_arguments(self) -> None:
+        client = self.make_client()
+        with self.assertRaises(ValueError):
+            await client.proxy("set")  # ty: ignore[invalid-argument-type]
+        with self.assertRaises(ValueError):
+            await client.proxy("set", proxy="")
+        with self.assertRaises(ValueError):
+            await client.proxy("unset", proxy="http://127.0.0.1:8080")  # ty: ignore[invalid-argument-type]
+        with self.assertRaises(ValueError):
+            await client.proxy("bogus", proxy="http://127.0.0.1:8080")  # ty: ignore[invalid-argument-type]
 
     async def test_settings_returns_the_reported_browser_settings(self) -> None:
         client = self.make_client()

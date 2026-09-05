@@ -245,7 +245,7 @@ docker compose -f mcp/compose.yaml up --build
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
-`record_start`, `record_stop`, `settings`, `javascript`, and `reinstall`.
+`record`, `proxy`, `settings`, `javascript`, and `reinstall`.
 Structured results use SDK-generated output schemas. `screenshot` always
 returns the public download URL served by the ACOB server itself; neither the
 client nor the MCP server downloads the image, so the agent fetches the
@@ -290,8 +290,10 @@ Supported instructions:
 {"action":"keyboard","tid":123,"text":"ACOB"}
 {"action":"keyboard","tid":123,"key":"Enter","modifiers":[]}
 {"action":"screenshot","tid":123,"full_page":false}
-{"action":"record_start","tid":123}
-{"action":"record_stop","recording_id":45}
+{"action":"record","method":"start","tid":123}
+{"action":"record","method":"stop","tid":123}
+{"action":"proxy","method":"set","proxy":"http://127.0.0.1:8080"}
+{"action":"proxy","method":"unset"}
 {"action":"javascript","tid":123,"script":"document.title"}
 ```
 
@@ -342,16 +344,18 @@ storing the capture fails, the instruction completes as failed with a clear
 error. Encoded captures are limited to 30 MiB; larger captures complete as
 failed instructions rather than being submitted.
 
-`record_start` requires a positive `tid` and starts a video recording of that
-tab. It completes almost immediately with a tracking ID; the recording
-continues in the background until `record_stop` or the extension's maximum
-recording duration (default 5 minutes) is reached. Set `full_page` to `true`
-to record the tab's whole scrollable content instead of only the visible
-viewport:
+`record` with `method: start` requires a positive `tid` and starts a video
+recording of that tab. It completes almost immediately with `{started}`;
+the recording continues in the background until `record` with `method: stop`
+for the same `tid` or the extension's maximum recording duration (default
+5 minutes) is reached. Only one recording per tab is allowed. Set
+`full_page` to `true` to record the tab's whole scrollable content instead
+of only the visible viewport:
 
 ```json
 {
-  "action": "record_start",
+  "action": "record",
+  "method": "start",
   "tid": 123,
   "full_page": false
 }
@@ -359,12 +363,11 @@ viewport:
 
 ```json
 {
-  "recording_id": 45,
   "started": true
 }
 ```
 
-`record_stop` requires the positive `recording_id` returned by `record_start`
+`record` with `method: stop` requires the `tid` of the recording tab
 and delivers the finalized video through the same storage pipeline as
 screenshots. Recordings are encoded as MP4 (H.264) when the browser's
 `MediaRecorder` supports it, otherwise as WebM (VP9):
@@ -379,16 +382,40 @@ screenshots. Recordings are encoded as MP4 (H.264) when the browser's
 }
 ```
 
-`stopped_reason` is `"user"` when `record_stop` stopped an active recording and
+`stopped_reason` is `"user"` when the stop call stopped an active recording and
 `"max_duration"` when the recording reached the extension's limit first; a late
-`record_stop` then delivers the maximum-duration video instead of failing.
+stop then delivers the maximum-duration video instead of failing.
 Recordings are video-only, roughly 2-5 fps at about 1 Mbps (scaled up for
 full-page frames), and work best when the tab's window is focused (an
 unfocused or hidden tab can fail the first capture with a focus hint). The
 extension holds one shared debugger session per tab, so other actions — `click`,
 `keyboard`, `screenshot`, `scroll`, and `javascript` — keep working on the
 recording tab while it records. Recordings do not survive extension reloads,
-and each `record_stop` delivers its video once.
+and each stop delivers its video once.
+
+`proxy` sets or unsets the browser-wide egress proxy so traffic is protected.
+It takes a `method` (`set` or `unset`); `set` also requires a `proxy` string
+(`http://host:port`, `https://host:port`, or `socks5://host:port`, with
+optional `user:pass@` auth), while `unset` takes no proxy field and restores
+the system proxy:
+
+```json
+{"action":"proxy","method":"set","proxy":"socks5://127.0.0.1:1080"}
+{"action":"proxy","method":"unset"}
+```
+
+```json
+{"proxied": true, "scheme": "socks5", "host": "127.0.0.1", "port": 1080, "authenticated": false}
+```
+
+```json
+{"proxied": false}
+```
+
+The proxy is global to the whole browser profile, not per-tab: setting it
+affects every tab and window. Results never echo credentials (`authenticated`
+is boolean-only). Quiesce other work around proxy changes and verify with a
+navigation afterwards.
 
 The browser's configured limits and other settings are not an instruction:
 the extension reports them periodically to
@@ -484,9 +511,8 @@ entries contain the served download URL in their final result:
 
 The batch instruction itself is claimed and completed like any other
 instruction, so actions submitted outside a batch still run in parallel with
-each other. `record_start` inside a batch uses the batch instruction's ID as
-the recording ID, so a batch can contain at most one `record_start`; two would
-fail the second with a duplicate-ID error.
+each other. Recordings are keyed by tab, so a batch can start recordings on
+different tabs; starting twice on the same tab fails the second entry.
 
 The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`. While a reinstall is pending, the response is a single `reinstall` command instead of queued work.
 

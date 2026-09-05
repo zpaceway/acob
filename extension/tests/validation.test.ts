@@ -81,3 +81,115 @@ test("reports malformed batch entries", () => {
     ),
   );
 });
+
+test("accepts proxy set and unset", () => {
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", { method: "set", proxy: "http://127.0.0.1:8080" }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", {
+        method: "set",
+        proxy: "socks5://user:pass@127.0.0.1:1080",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("proxy", { method: "unset" })),
+    true,
+  );
+});
+
+test("rejects invalid proxy payloads", () => {
+  assert.equal(
+    isSupportedInstruction(instruction("proxy", { method: "set" })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", { method: "set", proxy: "ftp://127.0.0.1:21" }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", { method: "set", proxy: "http://127.0.0.1" }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", {
+        method: "unset",
+        proxy: "http://127.0.0.1:8080",
+      }),
+    ),
+    false,
+  );
+  assert.equal(isSupportedInstruction(instruction("proxy", {})), false);
+});
+
+test("accepts record start and stop by tab", () => {
+  assert.equal(
+    isSupportedInstruction(
+      instruction("record", { method: "start", tid: 12 }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("record", { method: "start", tid: 12, full_page: true }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("record", { method: "stop", tid: 12 })),
+    true,
+  );
+});
+
+test("rejects invalid record payloads", () => {
+  assert.equal(
+    isSupportedInstruction(instruction("record", { tid: 12 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("record", { method: "start" })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("record", { method: "stop", tid: 0 }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("record", { method: "stop", tid: 12, full_page: true }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("record", { method: "start", tid: 12, full_page: "yes" }),
+    ),
+    false,
+  );
+});
+
+test("accepts record and proxy inside batches", () => {
+  const value = instruction("batch", {
+    actions: [
+      { action: "record", method: "start", tid: 12 },
+      { action: "record", method: "stop", tid: 12 },
+      { action: "proxy", method: "set", proxy: "https://proxy.example:8443" },
+      { action: "proxy", method: "unset" },
+    ],
+  });
+
+  assert.equal(isSupportedInstruction(value), true);
+});

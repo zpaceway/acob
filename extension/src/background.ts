@@ -122,9 +122,9 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     return true;
   }
   if (message.type === "recordingChunk") {
-    const chunks = state.recordingChunks.get(message.recordingId) ?? [];
+    const chunks = state.recordingChunks.get(message.tid) ?? [];
     chunks.push(message.data);
-    state.recordingChunks.set(message.recordingId, chunks);
+    state.recordingChunks.set(message.tid, chunks);
     sendResponse({ ok: true });
     return;
   }

@@ -428,8 +428,8 @@ class InstructionApiTests(TestCase):
             {
                 "action": "batch",
                 "actions": [
-                    {"action": "record_start", "tid": 12},
-                    {"action": "record_stop", "recording_id": 42},
+                    {"action": "record", "method": "start", "tid": 12},
+                    {"action": "record", "method": "stop", "tid": 12},
                 ],
             },
         )
@@ -444,7 +444,7 @@ class InstructionApiTests(TestCase):
                 instruction_id,
                 {
                     "result": [
-                        {"result": {"recording_id": 42, "started": True}},
+                        {"result": {"started": True}},
                         {
                             "result": {
                                 "data": encoded,
@@ -457,7 +457,7 @@ class InstructionApiTests(TestCase):
                     ]
                 },
             )
-            stored = list(Path(media_dir).glob("recording-42-*.webm"))
+            stored = list(Path(media_dir).glob("recording-12-*.webm"))
             stored_bytes = stored[0].read_bytes() if stored else b""
             stored_name = stored[0].name if stored else ""
 
@@ -467,7 +467,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(
             completed.json()["result"],
             [
-                {"result": {"recording_id": 42, "started": True}},
+                {"result": {"started": True}},
                 {
                     "result": {
                         "url": f"http://testserver/api/media/{stored_name}",
@@ -502,14 +502,14 @@ class InstructionApiTests(TestCase):
             self.batch_path(),
             {
                 "action": "batch",
-                "actions": [{"action": "record_start", "tid": 12}],
+                "actions": [{"action": "record", "method": "start", "tid": 12}],
             },
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
         invalid_result = self.post_result(
             instruction_id,
-            {"result": [{"result": {"recording_id": 0, "started": True}}]},
+            {"result": [{"result": {"started": "yes"}}]},
         )
         self.assertEqual(invalid_result.status_code, 400)
 
@@ -998,105 +998,105 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid screenshot data")
 
-    def test_accepts_record_start_and_record_stop_instructions(self) -> None:
+    def test_accepts_record_instructions(self) -> None:
         started = self.post_json(
             self.instruction_path(),
-            {"action": "record_start", "tid": 12},
+            {"action": "record", "method": "start", "tid": 12},
         )
         stopped = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
 
         self.assertEqual(started.status_code, 201)
         self.assertEqual(
             started.json()["payload"],
-            {"tid": 12, "full_page": False},
+            {"method": "start", "tid": 12, "full_page": False},
         )
         self.assertEqual(stopped.status_code, 201)
-        self.assertEqual(stopped.json()["payload"], {"recording_id": 42})
+        self.assertEqual(
+            stopped.json()["payload"],
+            {"method": "stop", "tid": 12, "full_page": False},
+        )
 
-    def test_record_start_accepts_full_page_flag(self) -> None:
+    def test_record_accepts_full_page_flag(self) -> None:
         response = self.post_json(
             self.instruction_path(),
-            {"action": "record_start", "tid": 12, "full_page": True},
+            {"action": "record", "method": "start", "tid": 12, "full_page": True},
         )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
             response.json()["payload"],
-            {"tid": 12, "full_page": True},
+            {"method": "start", "tid": 12, "full_page": True},
         )
 
         invalid = self.post_json(
             self.instruction_path(),
-            {"action": "record_start", "tid": 12, "full_page": "yes"},
+            {"action": "record", "method": "start", "tid": 12, "full_page": "yes"},
         )
         self.assertEqual(invalid.status_code, 400)
 
     def test_record_instructions_require_valid_arguments(self) -> None:
+        missing_method = self.post_json(
+            self.instruction_path(),
+            {"action": "record", "tid": 12},
+        )
         missing_tid = self.post_json(
             self.instruction_path(),
-            {"action": "record_start"},
+            {"action": "record", "method": "start"},
         )
-        missing_recording_id = self.post_json(
+        invalid_tid = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop"},
+            {"action": "record", "method": "stop", "tid": 0},
         )
-        invalid_recording_id = self.post_json(
+        stop_with_full_page = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 0},
+            {"action": "record", "method": "stop", "tid": 12, "full_page": True},
         )
 
+        self.assertEqual(missing_method.status_code, 400)
         self.assertEqual(missing_tid.status_code, 400)
-        self.assertEqual(
-            missing_tid.json()["details"][0]["field"],
-            "record_start.tid",
-        )
-        self.assertEqual(missing_recording_id.status_code, 400)
-        self.assertEqual(
-            missing_recording_id.json()["details"][0]["field"],
-            "record_stop.recording_id",
-        )
-        self.assertEqual(invalid_recording_id.status_code, 400)
+        self.assertEqual(invalid_tid.status_code, 400)
+        self.assertEqual(stop_with_full_page.status_code, 400)
 
-    def test_record_start_result_is_validated(self) -> None:
+    def test_record_start_result_validated(self) -> None:
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_start", "tid": 12},
+            {"action": "record", "method": "start", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
 
         completed = self.post_result(
             instruction_id,
-            {"result": {"recording_id": 42, "started": True}},
+            {"result": {"started": True}},
         )
 
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(
             completed.json()["result"],
-            {"recording_id": 42, "started": True},
+            {"started": True},
         )
 
         invalid = self.post_json(
             self.instruction_path(),
-            {"action": "record_start", "tid": 12},
+            {"action": "record", "method": "start", "tid": 12},
         )
         invalid_id = invalid.json()["id"]
         self.client.get(self.instruction_path("next/"))
         rejected = self.post_result(
             invalid_id,
-            {"result": {"recording_id": 0, "started": True}},
+            {"result": {"started": "yes"}},
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_record_stop_result_is_stored_locally(self) -> None:
+    def test_record_stop_result_stored_locally(self) -> None:
         recording = b"0\x9awEBMACOB"
         encoded = base64.b64encode(recording).decode()
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1119,7 +1119,7 @@ class InstructionApiTests(TestCase):
                     }
                 },
             )
-            stored = list(Path(media_dir).glob("recording-42-*.webm"))
+            stored = list(Path(media_dir).glob("recording-12-*.webm"))
             stored_bytes = stored[0].read_bytes() if stored else b""
             stored_name = stored[0].name if stored else ""
 
@@ -1144,10 +1144,10 @@ class InstructionApiTests(TestCase):
         self.assertEqual(detail.json()["result"], result)
         self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
 
-    def test_record_stop_fails_when_media_cannot_be_stored(self) -> None:
+    def test_record_stop_fails_when_media_unstorable(self) -> None:
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1175,10 +1175,10 @@ class InstructionApiTests(TestCase):
         self.assertIn("Could not host the recording", response["error"])
         self.assertIn("disk is full", response["error"])
 
-    def test_rejects_invalid_record_stop_result(self) -> None:
+    def test_rejects_invalid_record_stop_upload(self) -> None:
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1200,7 +1200,7 @@ class InstructionApiTests(TestCase):
 
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1218,12 +1218,12 @@ class InstructionApiTests(TestCase):
         )
         self.assertEqual(bad_reason.status_code, 400)
 
-    def test_record_stop_result_accepts_mp4_content_type(self) -> None:
+    def test_record_stop_accepts_mp4(self) -> None:
         recording = b"0\x9awMP4ACOB"
         encoded = base64.b64encode(recording).decode()
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1244,7 +1244,7 @@ class InstructionApiTests(TestCase):
                     }
                 },
             )
-            stored = list(Path(media_dir).glob("recording-42-*.mp4"))
+            stored = list(Path(media_dir).glob("recording-12-*.mp4"))
             stored_bytes = stored[0].read_bytes() if stored else b""
             stored_name = stored[0].name if stored else ""
 
@@ -1257,10 +1257,10 @@ class InstructionApiTests(TestCase):
         self.assertEqual(result["stopped_reason"], "user")
         self.assertEqual(result["url"], f"http://testserver/api/media/{stored_name}")
 
-    def test_rejects_unknown_record_stop_content_type(self) -> None:
+    def test_rejects_unknown_record_content_type(self) -> None:
         created = self.post_json(
             self.instruction_path(),
-            {"action": "record_stop", "recording_id": 42},
+            {"action": "record", "method": "stop", "tid": 12},
         )
         instruction_id = created.json()["id"]
         self.client.get(self.instruction_path("next/"))
@@ -1278,6 +1278,123 @@ class InstructionApiTests(TestCase):
             },
         )
         self.assertEqual(bad_type.status_code, 400)
+
+    def test_accepts_proxy_set_and_unset_instructions(self) -> None:
+        set_response = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set", "proxy": "http://127.0.0.1:8080"},
+        )
+        unset_response = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "unset"},
+        )
+
+        self.assertEqual(set_response.status_code, 201)
+        self.assertEqual(
+            set_response.json()["payload"],
+            {"method": "set", "proxy": "http://127.0.0.1:8080"},
+        )
+        self.assertEqual(unset_response.status_code, 201)
+        self.assertEqual(unset_response.json()["payload"], {"method": "unset"})
+
+    def test_proxy_instructions_require_valid_arguments(self) -> None:
+        missing_proxy = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set"},
+        )
+        proxy_on_unset = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "unset", "proxy": "http://127.0.0.1:8080"},
+        )
+        bad_scheme = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set", "proxy": "ftp://127.0.0.1:21"},
+        )
+        missing_port = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set", "proxy": "http://127.0.0.1"},
+        )
+        missing_method = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "proxy": "http://127.0.0.1:8080"},
+        )
+
+        self.assertEqual(missing_proxy.status_code, 400)
+        self.assertEqual(proxy_on_unset.status_code, 400)
+        self.assertEqual(bad_scheme.status_code, 400)
+        self.assertEqual(missing_port.status_code, 400)
+        self.assertEqual(missing_method.status_code, 400)
+
+    def test_proxy_accepts_all_schemes_and_auth(self) -> None:
+        for proxy in (
+            "http://127.0.0.1:8080",
+            "https://proxy.example:8443",
+            "socks5://127.0.0.1:1080",
+            "http://user:pass@127.0.0.1:8080",
+            "socks5://user@127.0.0.1:1080",
+        ):
+            response = self.post_json(
+                self.instruction_path(),
+                {"action": "proxy", "method": "set", "proxy": proxy},
+            )
+            self.assertEqual(response.status_code, 201, proxy)
+
+    def test_proxy_result_is_validated(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set", "proxy": "http://127.0.0.1:8080"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {
+                "result": {
+                    "proxied": True,
+                    "scheme": "http",
+                    "host": "127.0.0.1",
+                    "port": 8080,
+                    "authenticated": False,
+                }
+            },
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(
+            completed.json()["result"],
+            {
+                "proxied": True,
+                "scheme": "http",
+                "host": "127.0.0.1",
+                "port": 8080,
+                "authenticated": False,
+            },
+        )
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "unset"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"proxied": False}},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["result"], {"proxied": False})
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "proxy", "method": "set", "proxy": "http://127.0.0.1:8080"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        rejected = self.post_result(
+            instruction_id,
+            {"result": {"proxied": True, "scheme": "ftp", "host": "x", "port": 1}},
+        )
+        self.assertEqual(rejected.status_code, 400)
 
     def test_heartbeat_stores_and_returns_browser_settings(self) -> None:
         settings_url = f"/api/browsers/{self.BID}/settings/"

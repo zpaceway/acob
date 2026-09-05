@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ACOB",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "minimum_chrome_version": "116",
   "description": "Runs browser instructions received from the ACOB server.",
   "icons": {
@@ -10,7 +10,7 @@
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
-  "permissions": ["debugger", "offscreen", "storage", "tabs"],
+  "permissions": ["debugger", "offscreen", "proxy", "storage", "tabs", "webRequest", "webRequestAuthProvider"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",

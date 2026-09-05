@@ -10,6 +10,8 @@ from acob import (
     ClosedTab,
     KeyboardKeyResult,
     ListedTab,
+    ProxySet,
+    ProxyUnset,
     RecordingStart,
     RecordingStop,
     ReinstallResult,
@@ -237,8 +239,8 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "keyboard",
                 "list",
                 "navigate",
-                "record_start",
-                "record_stop",
+                "proxy",
+                "record",
                 "reinstall",
                 "reload",
                 "screenshot",
@@ -270,20 +272,20 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {"tid"},
         )
         self.assertEqual(
-            set(tools["record_start"].input_schema["properties"]),
-            {"tid", "full_page", "timeout"},
+            set(tools["record"].input_schema["properties"]),
+            {"method", "tid", "full_page", "timeout"},
         )
         self.assertEqual(
-            set(tools["record_start"].input_schema["required"]),
-            {"tid"},
+            set(tools["record"].input_schema["required"]),
+            {"method", "tid"},
         )
         self.assertEqual(
-            set(tools["record_stop"].input_schema["properties"]),
-            {"recording_id", "timeout"},
+            set(tools["proxy"].input_schema["properties"]),
+            {"method", "proxy", "timeout"},
         )
         self.assertEqual(
-            set(tools["record_stop"].input_schema["required"]),
-            {"recording_id"},
+            set(tools["proxy"].input_schema["required"]),
+            {"method"},
         )
         self.assertEqual(
             set(tools["settings"].input_schema["properties"]),
@@ -450,52 +452,121 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_starts_and_stops_recordings_through_the_client(self) -> None:
-        self.acob.record_start.return_value = RecordingStart(
-            recording_id=42,
+        self.acob.record.return_value = RecordingStart(
             started=True,
             tid=12,
         )
-        self.acob.record_stop.return_value = RecordingStop(
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            started = await client.call_tool(
+                "record",
+                {"method": "start", "tid": 12, "full_page": True},
+            )
+
+        self.assertFalse(started.is_error)
+        self.assertEqual(
+            started.structured_content,
+            {"result": {"started": True, "tid": 12}},
+        )
+        self.acob.record.assert_awaited_once_with(
+            "start",
+            12,
+            full_page=True,
+            timeout=None,
+        )
+
+    async def test_stops_recordings_through_the_client(self) -> None:
+        self.acob.record.return_value = RecordingStop(
             url="http://acob.test/api/media/screenshot-12-abc.png",
             content_type="video/webm",
             duration=300.0,
             stopped_reason="max_duration",
             message="Recording stopped because the maximum duration was reached",
-            recording_id=42,
+            tid=12,
         )
 
         async with Client(self.server, raise_exceptions=True) as client:
-            started = await client.call_tool(
-                "record_start",
-                {"tid": 12, "full_page": True},
-            )
-            stopped = await client.call_tool("record_stop", {"recording_id": 42})
+            stopped = await client.call_tool("record", {"method": "stop", "tid": 12})
 
-        self.assertFalse(started.is_error)
-        self.assertEqual(
-            started.structured_content,
-            {"recording_id": 42, "started": True, "tid": 12},
-        )
         self.assertFalse(stopped.is_error)
         self.assertEqual(
             stopped.structured_content,
             {
-                "url": "http://acob.test/api/media/screenshot-12-abc.png",
-                "content_type": "video/webm",
-                "duration": 300.0,
-                "stopped_reason": "max_duration",
-                "message": (
-                    "Recording stopped because the maximum duration was reached"
-                ),
-                "recording_id": 42,
+                "result": {
+                    "url": "http://acob.test/api/media/screenshot-12-abc.png",
+                    "content_type": "video/webm",
+                    "duration": 300.0,
+                    "stopped_reason": "max_duration",
+                    "message": (
+                        "Recording stopped because the maximum duration was reached"
+                    ),
+                    "tid": 12,
+                }
             },
         )
-        self.acob.record_start.assert_awaited_once_with(
-            12,
-            full_page=True,
-            timeout=None,
+        self.acob.record.assert_awaited_once_with("stop", 12, timeout=None)
+
+    async def test_record_rejects_stop_with_full_page(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            invalid = await client.call_tool(
+                "record", {"method": "stop", "tid": 12, "full_page": True}
+            )
+
+        self.assertTrue(invalid.is_error)
+        self.acob.record.assert_not_awaited()
+
+    async def test_sets_and_unsets_proxy_through_the_client(self) -> None:
+        self.acob.proxy.return_value = ProxySet(
+            proxied=True,
+            scheme="http",
+            host="127.0.0.1",
+            port=8080,
+            authenticated=False,
         )
-        self.acob.record_stop.assert_awaited_once_with(42, timeout=None)
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            set_result = await client.call_tool(
+                "proxy", {"method": "set", "proxy": "http://127.0.0.1:8080"}
+            )
+
+        self.assertFalse(set_result.is_error)
+        self.assertEqual(
+            set_result.structured_content,
+            {
+                "result": {
+                    "proxied": True,
+                    "scheme": "http",
+                    "host": "127.0.0.1",
+                    "port": 8080,
+                    "authenticated": False,
+                }
+            },
+        )
+        self.acob.proxy.assert_awaited_once_with(
+            "set", proxy="http://127.0.0.1:8080", timeout=None
+        )
+
+    async def test_unsets_proxy_through_the_client(self) -> None:
+        self.acob.proxy.return_value = ProxyUnset(proxied=False)
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            unset_result = await client.call_tool("proxy", {"method": "unset"})
+
+        self.assertFalse(unset_result.is_error)
+        self.assertEqual(
+            unset_result.structured_content, {"result": {"proxied": False}}
+        )
+        self.acob.proxy.assert_awaited_once_with("unset", timeout=None)
+
+    async def test_proxy_rejects_unset_with_proxy_string(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            invalid = await client.call_tool(
+                "proxy",
+                {"method": "unset", "proxy": "http://127.0.0.1:8080"},
+            )
+
+        self.assertTrue(invalid.is_error)
+        self.acob.proxy.assert_not_awaited()
 
     async def test_returns_reported_browser_settings_from_the_client(self) -> None:
         self.acob.settings.return_value = BrowserSettings(

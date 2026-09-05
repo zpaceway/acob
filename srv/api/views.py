@@ -30,6 +30,8 @@ from .schemas import (
     InstructionResponse,
     InstructionResultRequest,
     NextInstructionsQuery,
+    ProxySetResult,
+    ProxyUnsetResult,
     RecordStartResult,
     RecordStopUploadResult,
     ReinstallAcknowledgement,
@@ -320,8 +322,8 @@ def _invalid_result_response(error: InvalidResultDataError) -> JsonResponse:
 ACTION_RESULT_PROCESSED = frozenset(
     {
         Instruction.Action.SCREENSHOT,
-        Instruction.Action.RECORD_START,
-        Instruction.Action.RECORD_STOP,
+        Instruction.Action.RECORD,
+        Instruction.Action.PROXY,
         Instruction.Action.SCROLL,
     }
 )
@@ -380,6 +382,93 @@ def _process_batch_result(
     return processed
 
 
+def _prepare_record_result(
+    result_value: JsonValue,
+    payload: dict[str, JsonValue],
+    request: HttpRequest,
+) -> tuple[JsonValue | None, str | None]:
+    """Validate and transform one record action's submitted result."""
+    method = payload.get("method") if isinstance(payload, dict) else None
+    if method == "start":
+        try:
+            return (
+                RecordStartResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid record result",
+                validation_error=error,
+            ) from error
+    if method == "stop":
+        try:
+            captured_recording = RecordStopUploadResult.model_validate(result_value)
+            recording = base64.b64decode(captured_recording.data, validate=True)
+        except ValidationError as error:
+            logger.warning(
+                "record result rejected: %s",
+                error.errors(include_url=False, include_context=False),
+            )
+            raise InvalidResultDataError(
+                "Invalid record result",
+                validation_error=error,
+            ) from error
+        except binascii.Error, ValueError:
+            logger.warning("record base64 rejected")
+            raise InvalidResultDataError("Invalid recording data") from None
+        try:
+            url = _host_recording(
+                recording,
+                payload,
+                captured_recording.content_type,
+                request,
+            )
+        except StorageError as error:
+            return None, f"Could not host the recording: {error}"
+        return (
+            {
+                "url": url,
+                "content_type": captured_recording.content_type,
+                "duration": captured_recording.duration,
+                "stopped_reason": captured_recording.stopped_reason,
+                "message": captured_recording.message,
+            },
+            None,
+        )
+    raise InvalidResultDataError("Record payload is invalid")
+
+
+def _prepare_proxy_result(
+    result_value: JsonValue,
+    payload: dict[str, JsonValue],
+) -> tuple[JsonValue | None, str | None]:
+    """Validate one proxy action's submitted result (redacted, no hosting)."""
+    method = payload.get("method") if isinstance(payload, dict) else None
+    if method == "set":
+        try:
+            return (
+                ProxySetResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid proxy result",
+                validation_error=error,
+            ) from error
+    if method == "unset":
+        try:
+            return (
+                ProxyUnsetResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid proxy result",
+                validation_error=error,
+            ) from error
+    raise InvalidResultDataError("Proxy payload is invalid")
+
+
 def _prepare_action_result(
     action: str,
     result_value: JsonValue,
@@ -415,53 +504,11 @@ def _prepare_action_result(
             None,
         )
 
-    if action == Instruction.Action.RECORD_START:
-        try:
-            return (
-                RecordStartResult.model_validate(result_value).model_dump(mode="json"),
-                None,
-            )
-        except ValidationError as error:
-            raise InvalidResultDataError(
-                "Invalid record_start result",
-                validation_error=error,
-            ) from error
+    if action == Instruction.Action.RECORD:
+        return _prepare_record_result(result_value, payload, request)
 
-    if action == Instruction.Action.RECORD_STOP:
-        try:
-            captured_recording = RecordStopUploadResult.model_validate(result_value)
-            recording = base64.b64decode(captured_recording.data, validate=True)
-        except ValidationError as error:
-            logger.warning(
-                "record_stop result rejected: %s",
-                error.errors(include_url=False, include_context=False),
-            )
-            raise InvalidResultDataError(
-                "Invalid record_stop result",
-                validation_error=error,
-            ) from error
-        except binascii.Error, ValueError:
-            logger.warning("record_stop base64 rejected")
-            raise InvalidResultDataError("Invalid recording data") from None
-        try:
-            url = _host_recording(
-                recording,
-                payload,
-                captured_recording.content_type,
-                request,
-            )
-        except StorageError as error:
-            return None, f"Could not host the recording: {error}"
-        return (
-            {
-                "url": url,
-                "content_type": captured_recording.content_type,
-                "duration": captured_recording.duration,
-                "stopped_reason": captured_recording.stopped_reason,
-                "message": captured_recording.message,
-            },
-            None,
-        )
+    if action == Instruction.Action.PROXY:
+        return _prepare_proxy_result(result_value, payload)
 
     if action == Instruction.Action.SCROLL:
         try:
@@ -501,10 +548,10 @@ def _host_recording(
 ) -> str:
     """Store recording bytes locally and return their served URL."""
     extension = ".mp4" if content_type == "video/mp4" else ".webm"
-    recording_id = payload.get("recording_id")
+    tid = payload.get("tid")
     name = (
-        f"recording-{recording_id}-{uuid.uuid4().hex}{extension}"
-        if isinstance(recording_id, int)
+        f"recording-{tid}-{uuid.uuid4().hex}{extension}"
+        if isinstance(tid, int)
         else f"recording-{uuid.uuid4().hex}{extension}"
     )
     return request.build_absolute_uri(store_media(recording, name))

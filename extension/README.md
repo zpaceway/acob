@@ -62,20 +62,21 @@ sub-action still routes through the per-tab execution queue, so a batch keeps
 its order relative to other instructions on the same tab while other tabs run
 concurrently. The batch completes with one result or error entry per action;
 a failed action does not stop the rest of the batch. The worker holds a
-keep-alive timer for the whole batch. A batch uses the batch instruction's ID
-as the recording ID for any `record_start` sub-action, so a batch can contain
-at most one `record_start` (a duplicate fails with a clear error).
+keep-alive timer for the whole batch. Recordings are keyed by tab, so a
+batch can start and stop recordings on different tabs; starting twice on the
+same tab fails the second entry with a clear error.
 
-## Recordings And Browser Settings
+## Recordings, Proxy, And Browser Settings
 
-`record_start` (`{tid}`, optional `full_page`) starts a video recording of the
-tab and completes immediately with `{recording_id, started}`; the recording
-continues in the background until `record_stop` (`{recording_id}`) or
-`maxRecordingDurationSec` (default 300 s, 5 minutes). `full_page: true`
+`record` with `method: start` (`{tid}`, optional `full_page`) starts a video
+recording of the tab and completes immediately with `{started}`; the recording
+continues in the background until `record` with `method: stop` (`{tid}`) for
+the same tab or `maxRecordingDurationSec` (default 300 s, 5 minutes). Only one
+recording per tab is allowed. `full_page: true`
 records the whole scrollable content instead of the viewport: the worker
 measures the content size up front and re-measures it each frame so growing
 pages stay covered, and the sink sizes its canvas and bitrate accordingly. A
-late `record_stop` delivers the maximum-duration video with
+late stop delivers the maximum-duration video with
 `stopped_reason: "max_duration"` and a message instead of failing. Recordings
 are encoded in the offscreen document (MP4/H.264 when `MediaRecorder` supports
 it, falling back to WebM/VP9, ~1 Mbps scaled up for
@@ -85,6 +86,17 @@ hidden tab fails the first capture with a focus hint. The worker shares one
 refcounted debugger session per tab (`src/cdp.ts`), so a recording holding
 its tab's debugger does not block `click`, `keyboard`, `screenshot`, `scroll`,
 or `javascript` on that tab. Recordings do not survive extension reloads.
+
+The `proxy` action (`method: set` with `proxy: "http://host:port"`,
+`https://...`, or `socks5://...` including optional `user:pass@` auth;
+`method: unset`) controls the browser-wide egress proxy via
+`chrome.proxy.settings` (`fixed_servers` + `singleProxy`, bypassing
+localhost). It is global to the whole profile, not per-tab, and runs through
+a dedicated proxy queue. Auth credentials live only in worker memory and are
+supplied via `webRequest.onAuthRequired`; results are redacted
+(`{proxied, scheme, host, port, authenticated}` for set, `{proxied: false}`
+for unset) and never echo secrets. Requires the `proxy`, `webRequest`, and
+`webRequestAuthProvider` permissions.
 
 The extension reports its normalized configuration to the server's heartbeat
 route from the poll loop (throttled to 30 s, immediate on setting changes) so

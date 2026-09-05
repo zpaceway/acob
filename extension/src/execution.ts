@@ -7,6 +7,7 @@ import {
   executeScreenshot,
   executeScroll,
 } from "./actions.js";
+import { executeProxy } from "./proxy.js";
 import { instructionApiUrl } from "./lifecycle.js";
 import { state } from "./state.js";
 import {
@@ -133,18 +134,21 @@ async function runInstructionAction(
     );
   }
 
-  if (action === "record_start") {
-    await chrome.tabs.get(payload.tid);
-    return executeRecordStart(
-      payload.tid,
-      instruction.id,
-      payload.full_page ?? false,
-      configuration,
-    );
+  if (action === "proxy") {
+    return executeProxy(payload, configuration);
   }
 
-  if (action === "record_stop") {
-    return executeRecordStop(payload.recording_id, configuration);
+  if (action === "record") {
+    if (payload.method === "start") {
+      await chrome.tabs.get(payload.tid);
+      return executeRecordStart(
+        payload.tid,
+        payload.full_page ?? false,
+        configuration,
+      );
+    }
+    await chrome.tabs.get(payload.tid);
+    return executeRecordStop(payload.tid, configuration);
   }
 
   if (action === "batch") {
