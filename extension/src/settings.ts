@@ -19,12 +19,12 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const definitions: SettingDefinitions = {
   baseUrl: {
-    defaultValue: "http://127.0.0.1:58347",
+    defaultValue: "http://127.0.0.1:58346",
     valueType: "url",
     inputType: "url",
     label: "Server URL",
     hint: "The extension polls this server for instructions.",
-    placeholder: "http://127.0.0.1:58347",
+    placeholder: "http://127.0.0.1:58346",
     editable: true,
     visible: true,
   },

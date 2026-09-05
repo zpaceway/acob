@@ -9,7 +9,7 @@ test("normalizes a complete default configuration", () => {
 
   assert.deepEqual(configuration, {
     bid: BID,
-    baseUrl: "http://127.0.0.1:58347",
+    baseUrl: "http://127.0.0.1:58346",
     instructionsPerPoll: 4,
     maxConcurrentExecutions: 8,
     maxTabs: 20,
@@ -79,7 +79,7 @@ test("replaces invalid values with their centralized defaults", () => {
     debuggerProtocolVersion: "latest",
   });
 
-  assert.equal(configuration.baseUrl, "http://127.0.0.1:58347");
+  assert.equal(configuration.baseUrl, "http://127.0.0.1:58346");
   assert.equal(configuration.instructionsPerPoll, 4);
   assert.equal(configuration.maxConcurrentExecutions, 8);
   assert.equal(configuration.maxTabs, 20);

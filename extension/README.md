@@ -109,10 +109,11 @@ Chromium process requires an external browser supervisor or user action.
 ## Runtime Configuration
 
 The popup displays the generated browser ID and controls defined centrally in
-`src/settings.ts`. Defaults include the local server at
-`http://127.0.0.1:58347`, one-second polling, a batch size of four, and up to
-eight concurrent executions. The same settings module owns validation and the
-remaining tab, timeout, screenshot, and retry limits.
+`src/settings.ts`. Defaults include the unified proxy at
+`http://127.0.0.1:58346` (MCP at `/mcp/<bid>`), one-second polling, a batch size
+of four, and up to eight concurrent executions. The same settings module owns
+validation and the remaining tab, timeout, screenshot, and retry limits. A
+read-only MCP URL derived from the Server URL is shown directly beneath it.
 
 Each installation uses a lowercase dashless UUIDv4 as its browser ID. The ID
 selects a queue; it is not an authentication secret. Rotating it moves the
