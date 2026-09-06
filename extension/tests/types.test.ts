@@ -3,6 +3,7 @@ import { keyboardCharacter } from "../src/types.js";
 import type {
   BatchInstructionRequest,
   BatchResult,
+  CleanupResult,
   ClosedTab,
   Configuration,
   ConsoleCaptureResult,
@@ -92,6 +93,9 @@ type ProxySetResultIsTyped = Expect<
 >;
 type ProxyUnsetResultIsTyped = Expect<
   Equal<InstructionResultFor<{ action: "proxy"; method: "unset" }>, ProxyUnsetResult>
+>;
+type CleanupResultIsTyped = Expect<
+  Equal<InstructionResultFor<{ action: "cleanup" }>, CleanupResult>
 >;
 type BatchResultIsTyped = Expect<
   Equal<
@@ -199,5 +203,7 @@ const proxySetResultIsTyped: ProxySetResultIsTyped = true;
 void proxySetResultIsTyped;
 const proxyUnsetResultIsTyped: ProxyUnsetResultIsTyped = true;
 void proxyUnsetResultIsTyped;
+const cleanupResultIsTyped: CleanupResultIsTyped = true;
+void cleanupResultIsTyped;
 const batchResultIsTyped: BatchResultIsTyped = true;
 void batchResultIsTyped;

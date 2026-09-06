@@ -8,7 +8,7 @@ from .client import (
     ACOBProtocolError,
     ACOBTimeoutError,
     BatchResultEntry,
-    BrowserSettings,
+    CleanupResult,
     ClickResult,
     ClosedTab,
     ConsoleCapture,
@@ -30,7 +30,7 @@ from .client import (
     Tab,
 )
 
-__version__ = "0.14.0"
+__version__ = "0.17.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -42,7 +42,7 @@ __all__ = [
     "ACOBProtocolError",
     "ACOBTimeoutError",
     "BatchResultEntry",
-    "BrowserSettings",
+    "CleanupResult",
     "ClickResult",
     "ClosedTab",
     "ConsoleCapture",

@@ -16,6 +16,7 @@ body:
         - Django server or API
         - Chromium extension
         - Python client
+        - MCP adapter
         - Website
         - Build or packaging
         - Documentation
@@ -36,12 +37,15 @@ body:
     attributes:
       label: Environment
       description: >-
-        Include relevant OS, Python, Node.js, Chromium, and deployment details.
+        Include relevant OS, Python, Node.js, Chromium, deployment mode, and
+        proxy PORT. Do not include credentials or sensitive page data.
       placeholder: |
         OS: Ubuntu 24.04
         Python: 3.14
         Node.js: 22
         Chromium: 126
+        Install: make install PORT=58346
+        Extension path: .local/acob-58346/extension
     validations:
       required: true
   - type: textarea
@@ -74,8 +78,7 @@ body:
     attributes:
       label: Logs or additional context
       description: >-
-        Remove browser IDs, credentials, cookies, screenshots, and sensitive
-        page content.
+        Remove credentials, cookies, screenshots, and sensitive page content.
       render: shell
   - type: checkboxes
     id: checks

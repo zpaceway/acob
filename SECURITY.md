@@ -28,7 +28,7 @@ Include the following when available:
 - Relevant configuration and environment details.
 - Any suggested mitigation.
 
-Remove browser IDs, cookies, credentials, page content, screenshots, and other
+Remove stack URLs, cookies, credentials, page content, screenshots, and other
 sensitive data from reports unless they are essential to the finding. The
 maintainers will investigate, coordinate remediation and disclosure with the
 reporter, and credit reporters who want public attribution.
@@ -39,16 +39,31 @@ ACOB is a browser-control system with intentionally powerful access. The
 extension uses Chromium's debugger API and host access for all URLs. The HTTP
 API can enqueue JavaScript, input, navigation, and screenshot instructions.
 
-The checked-in server configuration is for trusted local development. It has
-no API authentication or TLS, uses a committed development secret, enables
-Django debug mode, accepts every host, and exempts API POST routes from CSRF
-protection. The Compose configuration publishes the API port on all host
-interfaces.
+The shipped architecture is local-only. It has no API authentication, executor
+identity, queue affinity, or claim leases. A stack has one global promiscuous
+queue, so any extension polling it may claim any pending instruction. It must
+not be exposed to a network or treated as an enterprise control plane without
+adapting the architecture.
 
-- Bind the server to a trusted interface unless network access is explicitly
-  secured by authentication and transport controls outside ACOB.
-- Treat browser IDs as routing identifiers, not authentication secrets.
+Root `make install PORT=<port> NAME=<name>` creates a named, port-specific
+Compose project, network, volume, and extension build. `NAME` is required, and
+the resulting context is `acob-<port>-<name>`. Only the proxy publishes the
+selected port, bound to localhost (`58346` by default). Separate trusted
+extensions with separate stack instances and proxy ports; a second extension
+on the same endpoint is not an isolation boundary.
+
+The native development server has no API authentication or TLS, uses a
+committed development secret, enables Django debug mode, accepts every host,
+and exempts API POST routes from CSRF protection. Native ports `58347` and
+`58348` are for local development only.
+
+- Keep installed proxy ports and native development services on loopback or an
+  equivalently trusted local boundary.
 - Do not expose the development server directly to untrusted networks.
+- Enterprise or network use requires authentication and authorization, secure
+  transport, explicit executor identity and affinity, claim leases, scoped
+  policy, auditing, and operational hardening; a reverse proxy alone is not
+  sufficient.
 - Run the extension in a dedicated browser profile without unrelated accounts
   or sensitive sessions.
 - Review scripts and automation clients before allowing them to enqueue work.

@@ -15,7 +15,7 @@ to controllers.
 
 The intended product shape is:
 
-- A user explicitly pairs a Chromium installation with a local controller.
+- A user runs one local stack and its matching Chromium extension.
 - Controllers request typed, bounded browser operations.
 - The extension evaluates local policy before touching a tab or page.
 - Common workflows use semantic inspection and deterministic interactions.
@@ -23,7 +23,7 @@ The intended product shape is:
 - Arbitrary JavaScript is an explicitly enabled expert capability.
 - Every accepted operation has a deadline and an honest terminal outcome.
 - Results and artifacts remain transient, bounded, and locally controlled.
-- Browser health and supported capabilities are known before work is accepted.
+- Extension-local policy and limits are user-known before work is requested.
 - Page content is always treated as untrusted data.
 
 ACOB is not a hosted browser farm, a stealth automation framework, or a general
@@ -34,7 +34,7 @@ workflow language.
 ```text
 Python client or MCP host
     -> Django instruction API
-    -> browser-scoped SQLite queue
+    -> one global SQLite queue per local stack
     -> polling Manifest V3 extension
     -> Chrome tabs APIs and Chromium DevTools Protocol
     -> structured result or transient screenshot or recording
@@ -43,12 +43,13 @@ Python client or MCP host
 ### Server
 
 - Strict Pydantic request models reject unknown fields and coercion.
-- Browser queues are scoped by lowercase dashless UUIDv4 identifiers.
+- Each stack has one global promiscuous queue; any polling extension can claim
+  any pending instruction.
 - Instructions move through `pending`, `processing`, `completed`, and `failed`.
 - Claims use conditional pending-to-processing updates and bounded batches.
 - Completions use conditional processing-to-terminal updates.
 - Terminal instruction responses are consumed on the first terminal read.
-- Screenshots use browser-scoped download records that are deleted when served.
+- Screenshots use local download records that are deleted when served.
 - Screenshot payloads and scroll results receive action-specific validation.
 - Extension recovery delivers its reinstall command through the instruction
   queue with a token and acknowledgement handshake.
@@ -57,12 +58,11 @@ Python client or MCP host
 ### Extension
 
 - The service worker polls through an offscreen document.
-- Configuration, browser identity, and recovery state use local extension
-  storage.
+- Configuration and recovery state use local extension storage.
 - Supported actions are `list`, `navigate`, `focus`, `close`, `reload`,
-  `scroll`, `click`, `keyboard`, `screenshot`, `record`, `proxy`, `console`,
-  `javascript`, and `batch` (up to 20 actions executed sequentially with one
-  result or error entry per action).
+  `scroll`, `click`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`,
+  `console`, `javascript`, and `batch` (up to 20 actions executed sequentially
+  with one result or error entry per action).
 - Targeted operations are serialized per tab while different tabs can run
   concurrently.
 - New-tab creation is serialized and bounded by the configured tab limit.
@@ -80,6 +80,8 @@ Python client or MCP host
   the worker, and acknowledges startup.
 - Centralized settings define polling, capacity, tab, timeout, screenshot, and
   retry limits.
+- Settings remain extension-local and user-known; the server does not publish
+  them.
 
 ### Python Client
 
@@ -95,8 +97,8 @@ Python client or MCP host
 
 ### MCP Adapter
 
-- One MCP process serves multiple browser connections.
-- Stateless Streamable HTTP uses the connection URL for browser and API routing.
+- Each stack exposes its MCP process at `/mcp` with no selector in the URL.
+- Separate stack instances and proxy ports provide execution isolation.
 - Tool schemas are derived from typed functions and reject unknown arguments.
 - The tool set mirrors the high-level Python client action set.
 - Screenshots and recordings are returned to MCP as public download URLs.
@@ -116,8 +118,12 @@ Python client or MCP host
 ## Engineering Principles
 
 - Safe local operation is the default configuration.
-- Browser IDs, tab IDs, operation IDs, and element references are routing
-  identifiers, not credentials.
+- Local-only operation is required by the shipped architecture; network or
+  enterprise use requires adaptation rather than configuration alone.
+- Tab IDs, operation IDs, and element references are routing identifiers, not
+  credentials.
+- A stack has no executor selection or affinity; isolation is a deployment
+  boundary created by separate stack instances and proxy ports.
 - Controller, executor, and operator authority are separate.
 - Extension-owned policy cannot be relaxed by an instruction.
 - GET requests are observational and repeatable.
@@ -177,7 +183,8 @@ Python client or MCP host
 | Priority | Gap | Consequence |
 | --- | --- | --- |
 | P0 | No API authentication or role separation | Any network caller that reaches the server can request browser actions. |
-| P0 | Development network and Django defaults | Debug responses, an embedded secret, broad hosts, and all-interface publication are unsafe outside a trusted workstation. |
+| P0 | Local-only protocol has no executor identity, affinity, or leases | Multiple polling extensions can claim each other's work; network or enterprise use is unsafe without architectural adaptation. |
+| P0 | Development network and Django defaults | Debug responses, an embedded secret, and broad hosts are unsafe outside a trusted workstation even though installed stacks bind only the proxy to loopback. |
 | P0 | GET routes claim or consume state | Retries, previews, concurrent readers, and interrupted transfers can mutate or lose data. |
 | P0 | No claim leases, cancellation, acknowledgement, or expiry | Processing work can remain stuck and terminal delivery can be lost. |
 | P0 | No durable extension result outbox | A worker restart can lose an executed result. |
@@ -186,7 +193,7 @@ Python client or MCP host
 | P0 | Incomplete result validation | Most action completions accept arbitrary JSON at the server boundary. |
 | P0 | Missing input, result, queue, and error limits | Large requests or aggressive settings can exhaust local resources. |
 | P0 | No real-Chromium integration suite or CI | Browser behavior, worker recovery, packaging, and interoperability are not continuously verified. |
-| P1 | No browser heartbeat or capability handshake | Controllers can enqueue work for an offline or incompatible browser. |
+| P1 | No executor capability handshake | Controllers can enqueue work when no compatible extension is polling. |
 | P1 | Per-tab backlog consumes global capacity | Repeated work for one tab can delay independent tabs. |
 | P1 | Browser-global focus can race across tab lanes | Concurrent focus actions can produce nondeterministic user-visible state. |
 | P1 | No extension-owned origin or action policy | Broad host and debugger authority has no local allowlist, pause, or approval gate. |
@@ -212,8 +219,6 @@ An instruction envelope should contain:
 instruction_id
 request_id
 idempotency_key
-browser_id
-browser_session_id
 action
 parameters
 created_at
@@ -294,13 +299,15 @@ user-owned policy.
 ### Work
 
 - Add controller, executor, and operator credentials with distinct scopes.
-- Bind executor credentials to browser identity and session.
+- Introduce explicit executor identity and bind executor credentials to its
+  session.
 - Add one-time local pairing, credential rotation, and revocation.
 - Add scoped credential configuration to the Python client and MCP adapter
   without embedding credentials in endpoint URLs.
 - Keep credentials out of URLs, logs, page data, and diagnostics.
 - Require independent authentication for MCP Streamable HTTP.
-- Bind server and MCP containers to loopback by default.
+- Keep the proxy bound to loopback and leave server and MCP containers
+  unpublished by default.
 - Add validated environment settings for secret key, debug mode, hosts, data
   directory, and trusted proxies.
 - Refuse unsafe plaintext network configurations unless explicitly enabled.
@@ -352,6 +359,8 @@ queued
 - Make GET routes observational and move claiming, consumption,
   acknowledgement, cancellation, and deletion to explicit mutation routes.
 - Issue claim tokens, executor sessions, lease deadlines, and attempt numbers.
+- Add explicit executor affinity before supporting multiple executors on one
+  queue.
 - Require the claim token for start, renewal, completion, and cancellation.
 - Make completion idempotent for the same result digest.
 - Keep terminal results readable until acknowledgement or expiry.
@@ -372,8 +381,10 @@ queued
   remaining budget with a local monotonic clock in each component.
 - Bound debugger attach, each CDP command, detach, Chrome API calls, and final
   result submission.
-- Add browser heartbeat, session epoch, last-seen state, and capability data.
-- Add server liveness, readiness, browser status, and capability endpoints.
+- Add authenticated executor presence, session epoch, last-seen state, and
+  capability data for adapted network deployments.
+- Add server liveness, readiness, executor status, and capability endpoints for
+  those deployments without exposing extension-local settings.
 - Add fair lane-aware claiming so one tab cannot occupy every execution slot.
 - Add a browser-focus lane and keep tab creation serialized.
 - Add deterministic cleanup for expired queue, result, recovery, and artifact
@@ -395,8 +406,8 @@ queued
 - Client and MCP deadlines exceed requested duration only by bounded cleanup.
 - Same-tab work stays ordered while independent tabs use available capacity.
 - Concurrent focus requests execute in deterministic order.
-- Browser readiness becomes false within the documented heartbeat interval.
-- Liveness, readiness, and browser capability endpoints report distinct states.
+- Executor readiness becomes false within the documented presence interval.
+- Liveness, readiness, and executor capability endpoints report distinct states.
 
 ## Milestone 3: Semantic Inspection
 
@@ -542,7 +553,7 @@ artifacts without exposing arbitrary filesystem paths.
 
 - Extend the transient artifact channel to controller uploads and
   browser-produced files.
-- Enforce per-file, per-browser, and total quotas.
+- Enforce per-file, per-executor, and total quotas.
 - Sanitize display filenames and use generated storage names.
 - Add `set_files` for inspected file inputs using artifact IDs.
 - Validate target type, `accept`, `multiple`, file count, policy, and approval.
@@ -557,7 +568,7 @@ artifacts without exposing arbitrary filesystem paths.
 
 ### Acceptance
 
-- Artifact IDs cannot access another browser's data.
+- Artifact IDs cannot access another executor's data.
 - Filenames cannot escape managed storage.
 - Interrupted transfers clean up partial state.
 - Expired or acknowledged artifacts become unavailable and are deleted.
@@ -580,7 +591,8 @@ MCP, documentation, containers, and release artifacts.
 - Validate media types, checksums, structured errors, and capability metadata.
 - Retry only requests proven safe by lifecycle and idempotency state.
 - Keep `Any` limited to explicitly arbitrary JavaScript results.
-- Expose browser readiness, capabilities, policy, pause state, and active lanes.
+- Expose executor readiness, capabilities, policy, pause state, and active lanes
+  only through authenticated adapted deployments.
 - Add MCP progress for waits, uploads, downloads, and traces.
 - Generate MCP annotations from action metadata.
 - Gate tool availability by browser capability and extension policy.
@@ -630,7 +642,7 @@ websites.
 ## Operational Signals
 
 - Server liveness is independent from browser readiness.
-- Browser status includes last-seen time, session epoch, compatibility, pause
+- Executor status includes last-seen time, session epoch, compatibility, pause
   state, capacity, busy lanes, and supported capabilities.
 - Queue status includes depth, oldest age, claim delay, execution duration,
   delivery duration, retries, lease expiry, cancellation, unknown outcomes,
@@ -657,10 +669,30 @@ A root task runner should execute component checks, builds, protocol
 conformance, and smoke tests without introducing a root runtime dependency
 graph.
 
+The root installation workflow requires `NAME`; for example,
+`make install PORT=58346 NAME=default` builds a matching extension at
+`.local/acob-58346-default/extension` and starts an isolated Compose project,
+network, and volume. Only that instance's proxy binds its localhost port; native
+server and MCP development ports remain `58347` and `58348`.
+
+`NAME` distinguishes user or work contexts. For example,
+`make install PORT=61554 NAME=alexandro` uses installation context and Compose
+project `acob-61554-alexandro`, writes the extension to
+`.local/acob-61554-alexandro/extension`, prefixes that project's network,
+volume, container, and image resources, and becomes the default MCP registration
+name for the root OpenCode and Claude installers. The context is always
+`acob-<port>-<name>`. Names allow lowercase letters, digits, and internal hyphens
+and cannot start or end with a hyphen. Lifecycle commands must receive the same
+`PORT` and `NAME`. Distinct installations still require distinct ports
+because a host port can have only one listener. A name is a local resource and
+registration label, not protocol routing or executor identity; each stack keeps
+one promiscuous queue.
+
 ## Non-Goals
 
 - Hosted multi-tenant browser infrastructure.
 - Internet exposure by default.
+- Multiple executors sharing one shipped local stack as an isolation mechanism.
 - Exactly-once browser side effects.
 - Automatic replay of uncertain clicks, keys, submissions, navigation, or
   JavaScript.
@@ -744,8 +776,8 @@ graph.
 5. Idempotency keys, claim leases, durable result outbox, transient artifacts,
    and cleanup.
 6. End-to-end deadlines across server, extension, client, and MCP.
-7. Browser heartbeat, capability negotiation, pause state, and fair lane-aware
-   claiming.
+7. Authenticated executor presence, capability negotiation, affinity, pause
+   state, and fair lane-aware claiming for adapted network deployments.
 8. Semantic inspection, document identity, accessibility data, and stable
    references.
 9. Deterministic forms, pointer actions, waits, navigation synchronization, and

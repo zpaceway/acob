@@ -21,7 +21,7 @@ test:
 
 run:
 	@echo "Starting ACOB MCP server..."
-	ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server
+	ACOB_ENDPOINT=$(ACOB_ENDPOINT) ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server
 
 docker:
 	@echo "Building Docker image..."

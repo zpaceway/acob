@@ -34,7 +34,6 @@ export const state = {
   activeExecutions: 0,
   activeJavaScriptExecutions: new Set<ActiveJavaScriptExecution>(),
   backendUnavailable: false,
-  lastSettingsReportAt: 0,
   pollInProgress: false,
   recordings: new Map<number, ActiveRecording>(),
   recordingChunks: new Map<number, string[]>(),

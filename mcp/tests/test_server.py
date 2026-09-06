@@ -1,11 +1,10 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import Mock, create_autospec, patch
 
 from acob import (
     ACOBClient,
     BatchResultEntry,
-    BrowserSettings,
+    CleanupResult,
     ClickResult,
     ClosedTab,
     ConsoleCapture,
@@ -49,6 +48,7 @@ class SettingsTests(unittest.TestCase):
 
         security = server.run.call_args.kwargs["transport_security"]
         self.assertFalse(security.enable_dns_rebinding_protection)
+        self.assertEqual(server.run.call_args.kwargs["streamable_http_path"], "/mcp")
 
     def test_loads_settings_from_env(self) -> None:
         settings = Settings.from_env(
@@ -113,90 +113,16 @@ class SettingsTests(unittest.TestCase):
 
 
 class AppContextTests(unittest.IsolatedAsyncioTestCase):
-    BID = "0123456789ab4def8123456789abcdef"
-    ENDPOINT = "http://acob.test:8000"
-
-    def context(
-        self,
-        *,
-        default_client: ACOBClient | None = None,
-    ) -> AppContext:
-        return AppContext(
-            timeout=12.5,
-            poll_interval=0.1,
-            endpoint=self.ENDPOINT,
-            default_client=default_client,
-        )
-
-    @staticmethod
-    def request(bid: str | None) -> SimpleNamespace:
-        return SimpleNamespace(
-            path_params={} if bid is None else {"bid": bid},
-        )
-
-    def test_builds_and_caches_one_client_per_bid(self) -> None:
-        context = self.context()
-
-        first = context.client_for(self.request(self.BID))
-        second = context.client_for(self.request(self.BID))
-        other = context.client_for(self.request("deadbeefdead4bef8123456789abcdef"))
-
-        self.assertIs(first, second)
-        self.assertIsNot(first, other)
-        self.assertEqual(first.bid, self.BID)
-        self.assertEqual(first.endpoint, self.ENDPOINT)
-        self.assertEqual(first.timeout, 12.5)
-        self.assertEqual(first.poll_interval, 0.1)
-
-    def test_ignores_the_connection_query_parameters(self) -> None:
-        context = self.context()
-
-        client = context.client_for(
-            SimpleNamespace(
-                path_params={"bid": self.BID},
-                query_params={"endpoint": "http://evil.test:9999"},
-            )
-        )
-
-        self.assertEqual(client.endpoint, self.ENDPOINT)
-
-    def test_requires_a_valid_bid(self) -> None:
-        context = self.context()
-
-        with self.assertRaisesRegex(ValueError, "browser ID"):
-            context.client_for(self.request(None))
-        with self.assertRaisesRegex(ValueError, "browser ID"):
-            context.client_for(self.request(""))
-        with self.assertRaisesRegex(ValueError, "bid"):
-            context.client_for(self.request("not-a-bid"))
-
-    def test_requires_an_http_request_without_a_default_client(self) -> None:
-        context = self.context()
-
-        with self.assertRaisesRegex(ValueError, "URL path"):
-            context.client_for(None)
-
-    def test_default_client_ignores_the_connection_url(self) -> None:
-        default_client = create_autospec(ACOBClient, instance=True)
-        context = self.context(default_client=default_client)
-
-        self.assertIs(context.client_for(None), default_client)
-
-    async def test_aclose_closes_default_and_cached_clients(self) -> None:
-        default_client = create_autospec(ACOBClient, instance=True)
-        context = self.context(default_client=default_client)
-        cached = create_autospec(ACOBClient, instance=True)
-        context.clients[self.BID] = cached
+    async def test_aclose_closes_the_installation_client(self) -> None:
+        client = create_autospec(ACOBClient, instance=True)
+        context = AppContext(client=client)
 
         await context.aclose()
 
-        default_client.aclose.assert_awaited_once_with()
-        cached.aclose.assert_awaited_once_with()
+        client.aclose.assert_awaited_once_with()
 
 
 class MCPServerTests(unittest.IsolatedAsyncioTestCase):
-    BID = "0123456789ab4def8123456789abcdef"
-
     @override
     async def asyncSetUp(self) -> None:
         self.acob = create_autospec(ACOBClient, instance=True)
@@ -233,6 +159,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {tool.name for tool in result.tools},
             {
+                "cleanup",
                 "click",
                 "close",
                 "console",
@@ -248,13 +175,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "reload",
                 "screenshot",
                 "scroll",
-                "settings",
             },
         )
         tools = {tool.name: tool for tool in result.tools}
         for name, tool in tools.items():
             with self.subTest(tool=name):
-                self.assertNotIn("bid", tool.input_schema["properties"])
                 self.assertFalse(tool.input_schema["additionalProperties"])
         self.assertEqual(set(tools["list"].input_schema["properties"]), {"timeout"})
         self.assertEqual(
@@ -299,9 +224,10 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {"method"},
         )
         self.assertEqual(
-            set(tools["settings"].input_schema["properties"]),
+            set(tools["cleanup"].input_schema["properties"]),
             {"timeout"},
         )
+        self.assertEqual(tools["cleanup"].input_schema.get("required", []), [])
         self.assertEqual(
             set(tools["execute_batch"].input_schema["properties"]),
             {"actions", "timeout"},
@@ -672,32 +598,25 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(invalid.is_error)
         self.acob.proxy.assert_not_awaited()
 
-    async def test_returns_reported_browser_settings_from_the_client(self) -> None:
-        self.acob.settings.return_value = BrowserSettings(
-            settings={
-                "pollIntervalMs": 1000,
-                "maxRecordingDurationSec": 300,
-                "maxRecordingSizeMiB": 512,
-            },
-            updated_at="2026-08-12T00:00:00Z",
-        )
+    async def test_cleans_up_through_the_client(self) -> None:
+        self.acob.cleanup.return_value = CleanupResult(cleaned=True)
 
         async with Client(self.server, raise_exceptions=True) as client:
-            result = await client.call_tool("settings", {})
+            result = await client.call_tool("cleanup", {})
 
         self.assertFalse(result.is_error)
-        self.assertEqual(
-            result.structured_content,
-            {
-                "settings": {
-                    "pollIntervalMs": 1000,
-                    "maxRecordingDurationSec": 300,
-                    "maxRecordingSizeMiB": 512,
-                },
-                "updated_at": "2026-08-12T00:00:00Z",
-            },
-        )
-        self.acob.settings.assert_awaited_once_with(timeout=None)
+        self.assertEqual(result.structured_content, {"cleaned": True})
+        self.acob.cleanup.assert_awaited_once_with(timeout=None)
+
+    async def test_cleanup_rejects_unknown_arguments(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            with self.assertRaisesRegex(MCPError, "Unexpected argument"):
+                await client.call_tool(
+                    "cleanup",
+                    {"unexpected": True},
+                )
+
+        self.acob.cleanup.assert_not_awaited()
 
     async def test_returns_javascript_json_values(self) -> None:
         self.acob.javascript.return_value = {"title": "Example", "count": 2}

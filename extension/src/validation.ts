@@ -166,6 +166,9 @@ function isSupportedActionPayload(
   if (action === "list") {
     return true;
   }
+  if (action === "cleanup") {
+    return Object.keys(payload).length === 0;
+  }
   if (action === "close" || action === "focus" || action === "reload") {
     return isPositiveInteger(payload.tid);
   }

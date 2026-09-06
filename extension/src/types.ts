@@ -7,6 +7,7 @@ export interface JsonObject {
 
 export interface SettingValues {
   baseUrl: string;
+  allowCleanup: boolean;
   instructionsPerPoll: number;
   maxConcurrentExecutions: number;
   maxTabs: number;
@@ -25,14 +26,12 @@ export interface SettingValues {
   debuggerProtocolVersion: string;
 }
 
-export interface Configuration extends SettingValues {
-  bid: string;
-}
+export type Configuration = SettingValues;
 
 export type SettingName = keyof SettingValues;
 export type StorageKey = keyof Configuration;
 export type SettingValue = SettingValues[SettingName];
-export type SettingValueType = "integer" | "string" | "url";
+export type SettingValueType = "boolean" | "integer" | "string" | "url";
 
 interface BaseSettingDefinition<
   Value extends SettingValue,
@@ -57,6 +56,11 @@ export interface IntegerSettingDefinition
   readonly inputType: "number";
 }
 
+export interface BooleanSettingDefinition
+  extends BaseSettingDefinition<boolean, "boolean"> {
+  readonly inputType: "checkbox";
+}
+
 export interface StringSettingDefinition
   extends BaseSettingDefinition<string, "string"> {
   readonly inputType: "text";
@@ -72,7 +76,9 @@ export type SettingDefinition<Name extends SettingName = SettingName> =
     ? UrlSettingDefinition
     : SettingValues[Name] extends number
       ? IntegerSettingDefinition
-      : StringSettingDefinition;
+      : SettingValues[Name] extends boolean
+        ? BooleanSettingDefinition
+        : StringSettingDefinition;
 
 export type SettingDefinitions = {
   readonly [Name in SettingName]: SettingDefinition<Name>;
@@ -82,8 +88,6 @@ export interface SettingsApi {
   readonly definitions: SettingDefinitions;
   readonly settingNames: readonly SettingName[];
   readonly storageKeys: readonly StorageKey[];
-  generateBrowserId(): string;
-  isValidBrowserId(value: unknown): value is string;
   isValidSetting<Name extends SettingName>(
     name: Name,
     value: unknown,
@@ -102,6 +106,7 @@ export interface SettingsApi {
 
 export type InstructionAction =
   | "batch"
+  | "cleanup"
   | "click"
   | "close"
   | "console"
@@ -164,6 +169,8 @@ export function keyboardCharacter(value: string): KeyboardCharacter {
 }
 
 export type ListTabsPayload = Record<string, never>;
+
+export type CleanupPayload = Record<string, never>;
 
 export interface CloseTabPayload {
   tid: number;
@@ -273,6 +280,7 @@ export interface BatchPayload {
 
 export interface InstructionPayloadMap {
   batch: BatchPayload;
+  cleanup: CleanupPayload;
   click: ClickPayload;
   close: CloseTabPayload;
   console: ConsolePayload;
@@ -313,7 +321,6 @@ export interface ReinstallCommand {
 
 export interface Instruction {
   id: number;
-  bid: string;
   action: string;
   payload: JsonObject;
   status: InstructionStatus;
@@ -325,6 +332,10 @@ export interface Instruction {
 
 export interface ListTabsInstructionRequest {
   action: "list";
+}
+
+export interface CleanupInstructionRequest {
+  action: "cleanup";
 }
 
 export interface CloseTabInstructionRequest extends CloseTabPayload {
@@ -424,6 +435,7 @@ export interface BatchInstructionRequest {
 }
 
 export type InstructionRequest =
+  | CleanupInstructionRequest
   | ClickInstructionRequest
   | CloseTabInstructionRequest
   | ConsoleInstructionRequest
@@ -454,6 +466,10 @@ export interface ListedTab extends TabDetails {
 export interface ClosedTab {
   closed: true;
   tab: TabDetails;
+}
+
+export interface CleanupResult {
+  cleaned: true;
 }
 
 export interface ScrollResult {
@@ -591,7 +607,9 @@ export type InstructionResultFor<
                                   ? ConsoleStartResult | ConsoleCaptureResult
                                   : Request extends { action: "list" }
                 ? ListedTab[]
-                : Request extends { action: "close" }
+                : Request extends { action: "cleanup" }
+                  ? CleanupResult
+                  : Request extends { action: "close" }
                   ? ClosedTab
                   : Request extends { action: "focus" | "navigate" | "reload" }
                     ? TabDetails
@@ -612,6 +630,7 @@ export type ExtensionInstructionResult =
   | ListedTab[]
   | TabDetails
   | ClosedTab
+  | CleanupResult
   | ScrollResult
   | ClickResult
   | KeyboardTextResult

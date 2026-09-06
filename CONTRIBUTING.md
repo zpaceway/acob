@@ -32,6 +32,27 @@ Install the extension dependencies:
 npm --prefix extension ci
 ```
 
+For the standard isolated full-stack installation, run:
+
+```bash
+make install PORT=58346 NAME=default
+make install PORT=61554 NAME=alexandro
+```
+
+The default proxy port is `58346`, and `NAME` is required. The installation
+context is always `acob-<port>-<name>`; the first example uses
+`.local/acob-58346-default/extension` and Compose project
+`acob-58346-default`. `NAME` allows lowercase letters, digits, and internal
+hyphens, but cannot start or end with a hyphen. The context prefixes Compose
+network, volume, container, and image resources and is the default MCP
+registration name used by `install-opencode` and `install-claude`.
+
+Pass the same `PORT` and `NAME` to `up`, `down`, `purge`, `logs`, and `ps`.
+Distinct installations still need distinct ports because only one process can
+bind each host port. Names distinguish user or work contexts only: they do not
+add protocol routing or executor identity. Each stack has one global queue, and
+any extension polling it may claim any pending instruction.
+
 Start the server with migrations applied:
 
 ```bash
@@ -44,6 +65,10 @@ Build the extension, then load `extension/dist/` through
 ```bash
 npm --prefix extension run build
 ```
+
+This native workflow keeps the API and MCP development ports at `58347` and
+`58348`. Root-installed extensions should instead be loaded from the path
+printed by `make install`.
 
 The independently packaged Python client supports Python 3.10 and newer. Its
 commands use the project metadata in `client/pyproject.toml`. Install its
@@ -74,6 +99,12 @@ The browser protocol crosses `srv/api/schemas.py`, `extension/src/types.ts`,
 `extension/src/background.ts`, and `client/acob/client.py`. Keep those
 contracts aligned whenever an action, payload, result, or validation rule
 changes.
+
+The protocol has no extension selector. REST routes are flat under
+`/api/instructions/`, `/api/reinstall/`, and `/api/media/`, and MCP is served at
+`/mcp`. Extension settings are local and user-known rather than part of the
+server or MCP protocol. Any future network or enterprise design must explicitly
+add authentication, executor identity, affinity, leases, and related isolation.
 
 ## Making Changes
 

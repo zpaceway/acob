@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -70,13 +71,14 @@ TEMPLATES = [
 WSGI_APPLICATION = "acob.wsgi.application"
 
 
-# Database
+# Local data
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+DATA_DIR = Path(os.environ.get("ACOB_DATA_DIR", BASE_DIR))
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": DATA_DIR / "db.sqlite3",
     }
 }
 
@@ -127,4 +129,4 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 1024
 # Captures (screenshots and recordings) are stored locally under MEDIA_ROOT
 # and served by this server at /api/media/<filename>; there is no external
 # storage service. The directory is created on first use.
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = DATA_DIR / "media"

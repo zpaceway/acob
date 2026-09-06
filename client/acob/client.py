@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Annotated, Literal, TypeAlias, TypeVar, cast, overload
 from urllib.parse import urlsplit
-from uuid import UUID
 
 import httpx
 from pydantic import (
@@ -19,8 +18,7 @@ from pydantic import (
 )
 from typing_extensions import Self
 
-DEFAULT_ENDPOINT = "http://127.0.0.1:58347"
-UUIDV4_VERSION = 4
+DEFAULT_ENDPOINT = "http://127.0.0.1:58346"
 
 JsonObject: TypeAlias = dict[str, JsonValue]
 KeyboardModifier: TypeAlias = Literal["alt", "ctrl", "meta", "shift"]
@@ -58,6 +56,10 @@ class ScrollResult(_ResultModel):
     y: Annotated[float, Field(allow_inf_nan=False)]
 
 
+class CleanupResult(_ResultModel):
+    cleaned: Literal[True]
+
+
 class ClickResult(_ResultModel):
     clicked: Literal[True]
     selector: str
@@ -80,11 +82,6 @@ class ReinstallResult(_ResultModel):
     )
     status: Literal["pending"]
     requested_at: str = Field(min_length=1)
-
-
-class BrowserSettings(_ResultModel):
-    settings: dict[str, JsonValue]
-    updated_at: str = Field(min_length=1)
 
 
 class RecordingStart(_ResultModel):
@@ -244,19 +241,17 @@ class ACOBTimeoutError(ACOBError):
 
 
 class ACOBClient:
-    """Asynchronous client for controlling one ACOB browser."""
+    """Asynchronous client for one local ACOB installation."""
 
     _REQUEST_TIMEOUT = 60.0
 
     def __init__(
         self,
-        bid: str,
         endpoint: str | None = None,
         *,
         timeout: float = 60.0,
         poll_interval: float = 0.5,
     ) -> None:
-        self.bid = self._validate_bid(bid)
         self.endpoint = self._validate_endpoint(
             DEFAULT_ENDPOINT if endpoint is None else endpoint,
         )
@@ -265,9 +260,8 @@ class ACOBClient:
             poll_interval,
             "poll_interval",
         )
-        self._instructions_url = f"{self.endpoint}/api/browsers/{self.bid}/instructions"
-        self._reinstall_url = f"{self.endpoint}/api/browsers/{self.bid}/reinstall/"
-        self._settings_url = f"{self.endpoint}/api/browsers/{self.bid}/settings/"
+        self._instructions_url = f"{self.endpoint}/api/instructions"
+        self._reinstall_url = f"{self.endpoint}/api/reinstall/"
         self._http_client: httpx.AsyncClient | None = None
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -514,6 +508,23 @@ class ACOBClient:
             await self.execute("scroll", tid=tid, y=y, timeout=timeout),
             ScrollResult,
             "scroll",
+        )
+
+    async def cleanup(
+        self,
+        *,
+        timeout: float | None = None,
+    ) -> CleanupResult:
+        """Clear all browser data (cookies, storage, history, cache).
+
+        The browser profile is wiped except for the ACOB extension itself.
+        The extension only accepts this when its "Allow browser cleanup"
+        setting is enabled in its popup; otherwise the instruction fails.
+        """
+        return self._expect_model(
+            await self.execute("cleanup", timeout=timeout),
+            CleanupResult,
+            "cleanup",
         )
 
     async def click(
@@ -802,26 +813,6 @@ class ACOBClient:
         )
         return ProxyUnset(proxied=result_unset.proxied)
 
-    async def settings(
-        self,
-        *,
-        timeout: float | None = None,
-    ) -> BrowserSettings:
-        """Return the settings most recently reported by the extension.
-
-        The extension reports its settings periodically and whenever they
-        change, so a fresh installation may return 404 until the first report.
-        """
-        return self._expect_model(
-            await self._request_json(
-                "GET",
-                self._settings_url,
-                timeout=min(timeout or self.timeout, self.timeout),
-            ),
-            BrowserSettings,
-            "settings",
-        )
-
     async def javascript(
         self,
         tid: int,
@@ -978,16 +969,6 @@ class ACOBClient:
         return (
             f"{message}: {'; '.join(rendered_details)}" if rendered_details else message
         )
-
-    @staticmethod
-    def _validate_bid(bid: str) -> str:
-        try:
-            parsed = UUID(bid)
-        except (ValueError, TypeError, AttributeError) as error:
-            raise ValueError("bid must be a lowercase dashless UUIDv4") from error
-        if parsed.hex != bid or parsed.version != UUIDV4_VERSION:
-            raise ValueError("bid must be a lowercase dashless UUIDv4")
-        return bid
 
     @staticmethod
     def _validate_endpoint(endpoint: str) -> str:

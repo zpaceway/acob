@@ -23,9 +23,10 @@ its source, dependencies, tooling, and documentation in its own directory.
 Product direction, accepted non-goals, and future milestones are tracked in
 [`PLAN.md`](PLAN.md).
 
-There is no root dependency manifest or root task runner. Run commands from the
-relevant component directory, or use tools such as `make -C <directory>` and
-`npm --prefix <directory>` from the repository root.
+There is no root dependency manifest. The root Makefile installs and manages
+isolated stack instances; component-specific development commands remain owned
+by each component and can be run with `make -C <directory>` or
+`npm --prefix <directory>`.
 
 ## Local setup
 
@@ -47,17 +48,53 @@ local development and do not provide API authentication or TLS; review
 
 ## Docker
 
-The recommended way to run the full stack is the unified proxy, which
-fronts both the API and MCP on a single port (`58346` → `/mcp/` for MCP,
-`/` for the API):
+The recommended installation builds a context-specific extension and starts a
+full stack behind the unified proxy:
 
 ```bash
-docker compose -f proxy/compose.yaml up --build
+make install PORT=58346 NAME=default
 ```
 
-The proxy builds `acob-srv` and `acob-mcp` and runs `nginx:alpine` on
-`http://127.0.0.1:58346` with `client_max_body_size 1024M` and streaming
-timeouts. See [`proxy/README.md`](proxy/README.md) for details.
+This uses context and Compose project `acob-58346-default`, writes the unpacked
+extension to `.local/acob-58346-default/extension`, and starts an isolated
+Compose project with its own network and volume. Only the proxy publishes a host
+port, bound to `127.0.0.1`; it exposes the API under `/api/` and MCP at `/mcp`.
+
+`NAME` is required and distinguishes a user or work context. The installation
+context is always `acob-<port>-<name>`:
+
+```bash
+make install PORT=61554 NAME=alexandro
+```
+
+This uses context and Compose project `acob-61554-alexandro` and writes the
+extension to `.local/acob-61554-alexandro/extension`. `NAME` may contain
+lowercase letters, digits, and internal hyphens, but cannot start or end with a
+hyphen. Compose network, volume, container, and image resources use the project
+prefix. The `install-opencode` and `install-claude` targets also use the context
+as their default MCP registration name.
+
+Each stack has one global instruction queue. Any extension polling that stack
+may claim any pending instruction, so do not point multiple extensions at one
+stack when execution must be isolated or predictable. Instead, install one
+stack per extension on a distinct proxy port:
+
+```bash
+make install PORT=61001 NAME=secondary
+```
+
+That creates Compose project `acob-61001-secondary`, its isolated network and
+volume, and the matching extension at
+`.local/acob-61001-secondary/extension`. Use the same `PORT` and `NAME` with
+root `make up`, `make down`, `make purge`, `make logs`, and `make ps`. Distinct
+installations still require distinct `PORT` values because only one process can
+bind a host port. Names are labels for user or work contexts; they do not add
+protocol routing or executor identity, and the queue remains promiscuous within
+each stack. See
+[`proxy/README.md`](proxy/README.md) for lower-level details.
+
+Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
+them manually with Compose or replace them with a named installation.
 
 To run only the API server:
 
@@ -66,7 +103,7 @@ docker compose -f srv/compose.yaml up --build
 ```
 
 That service applies migrations through `make run` and exposes `58347` on
-the `acob` bridge network (or via the proxy). To run it in the background
+its Compose network (or via the proxy). To run it in the background
 and follow its logs:
 
 ```bash
@@ -76,12 +113,11 @@ docker compose -f srv/compose.yaml logs --follow acob-srv
 docker compose -f proxy/compose.yaml logs --follow acob-srv
 ```
 
-Stop and remove it with `docker compose -f proxy/compose.yaml down` (full
-stack) or `docker compose -f srv/compose.yaml down`. The SQLite database
-is stored inside the container, so its data is lost when the container is
-removed or replaced. The proxy setup binds `127.0.0.1:58346` by default
-(API alone binds `127.0.0.1:58347`); do not expose either on an untrusted
-network without additional controls.
+Stop a root-managed stack with `make down PORT=58346 NAME=default`, or remove
+its volume as well with `make purge PORT=58346 NAME=default`. The proxy setup
+binds
+`127.0.0.1:58346` by default. Native development ports remain `58347` for the
+API and `58348` for MCP.
 
 ## Browser extension
 
@@ -96,15 +132,18 @@ With either server running, load the built extension in Chromium 116 or newer:
 
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
-3. Select **Load unpacked** and choose the `extension/dist/` directory.
-4. Open the ACOB extension popup and copy its automatically generated browser ID.
+3. Select **Load unpacked** and choose `extension/dist/` for native development,
+   or the `.local/acob-<port>-<name>/extension` directory printed by the root
+   installer.
 
-The extension source is strict TypeScript under `extension/src/`. Each
-installation gets a dashless UUID browser ID. Instructions are stored and
-claimed under that ID, allowing one server to control multiple independent
-browsers. Rotating the ID moves the extension to a new instruction queue. See
-[`extension/README.md`](extension/README.md) for its architecture, settings,
-permissions, package exports, and manual verification steps.
+The extension source is strict TypeScript under `extension/src/`. It polls the
+single global queue at its configured stack endpoint; the protocol has no
+extension selector or identity field. Separate proxy ports and stack instances,
+not request routing fields, provide isolation. Extension settings remain local
+to the extension and are known and controlled through its popup; they are not
+reported through a public API. See [`extension/README.md`](extension/README.md)
+for architecture, settings, permissions, package exports, and manual
+verification steps.
 
 Run the extension checks independently:
 
@@ -154,7 +193,7 @@ from acob import ACOBClient
 
 
 async def main() -> None:
-    async with ACOBClient("0123456789ab4def8123456789abcdef") as client:
+    async with ACOBClient() as client:
         tabs = await client.list()
         tab = await client.navigate("https://example.com")
         await client.scroll(tab.tid, 500)
@@ -181,7 +220,8 @@ executions, reloads affected tabs, restarts itself, and acknowledges the
 command from the new worker. Processing instructions interrupted by the
 restart fail explicitly instead of remaining stuck indefinitely.
 
-Pass `endpoint="http://host:port"` to target a non-default server. Independent
+`ACOBClient()` defaults to the proxy at `http://127.0.0.1:58346`. Pass only
+`endpoint="http://127.0.0.1:61001"` to target another local stack. Independent
 actions can be launched together with `asyncio.gather()`. See
 [`client/README.md`](client/README.md) for every action, parallel execution,
 low-level queue access, timeout behavior, and error types.
@@ -192,20 +232,25 @@ The standalone [`mcp/`](mcp/README.md) project uses the official `mcp` Python
 SDK and talks to Django through `acob-client`. It has its own dependencies,
 tests, process, and container, but is not an installable Python package.
 
-The MCP adapter runs as a Streamable HTTP server. Each connection selects its
-browser with the BID path segment. Nothing is configurable per connection: the
-ACOB API origin always comes from the `ACOB_ENDPOINT` environment variable.
-When running via the unified proxy the API and MCP share one port (`58346`):
+The MCP adapter runs as a Streamable HTTP server at `/mcp`. Its ACOB API origin
+comes from the `ACOB_ENDPOINT` environment variable. When running via the
+unified proxy the API and MCP share one port (`58346`):
 
 ```json
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58346/mcp/0123456789ab4def8123456789abcdef"
+      "url": "http://127.0.0.1:58346/mcp"
     }
   }
 }
 ```
+
+Root `make install-opencode` and `make install-claude` targets register this
+endpoint under the installation context name `acob-<port>-<name>` by default.
+Both targets require `NAME`; `MCP_NAME` can override the registration label.
+The registration name selects no browser or queue; the endpoint's port selects
+the stack.
 
 Standalone without the proxy the MCP port is separate:
 
@@ -213,7 +258,7 @@ Standalone without the proxy the MCP port is separate:
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58348/mcp/0123456789ab4def8123456789abcdef"
+      "url": "http://127.0.0.1:58348/mcp"
     }
   }
 }
@@ -225,9 +270,8 @@ Run it as a separate service:
 make -C mcp run
 ```
 
-`ACOB_ENDPOINT` is required and has no built-in default; `make -C mcp run`
-supplies a development default of `http://127.0.0.1:58347`. The BID is routing
-configuration and is not authentication.
+`ACOB_ENDPOINT` is required by the MCP process; `make -C mcp run` supplies the
+native-development default `http://127.0.0.1:58347`.
 
 The recommended Docker workflow is the unified proxy, which runs both
 services together:
@@ -245,7 +289,7 @@ docker compose -f mcp/compose.yaml up --build
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
-`record`, `proxy`, `console`, `settings`, `javascript`, and `reinstall`.
+`record`, `proxy`, `cleanup`, `console`, `javascript`, and `reinstall`.
 Structured results use SDK-generated output schemas. `screenshot` always
 returns the public download URL served by the ACOB server itself; neither the
 client nor the MCP server downloads the image, so the agent fetches the
@@ -267,11 +311,23 @@ layout and deployment expectations.
 
 ## API
 
-Set `BID` to the browser ID shown in the extension popup. Create an instruction with `POST /api/browsers/<bid>/instructions/`:
+The stack exposes one flat REST surface:
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/instructions/` | Validate and enqueue one instruction. |
+| `POST` | `/api/instructions/batch/` | Validate and enqueue one sequential batch. |
+| `GET` | `/api/instructions/next/` | Claim pending work from the global queue. |
+| `GET` | `/api/instructions/<id>/` | Read instruction status or consume its terminal response. |
+| `POST` | `/api/instructions/<id>/result/` | Complete claimed work. |
+| `POST` | `/api/reinstall/` | Request a stack-global extension reinstall. |
+| `POST` | `/api/reinstall/acknowledge/` | Acknowledge reinstall from the restarted extension. |
+| `GET` | `/api/media/<filename>` | Download a hosted capture. |
+
+Create an instruction with `POST /api/instructions/`:
 
 ```bash
-BID=0123456789ab4def8123456789abcdef
-curl -X POST "http://127.0.0.1:58347/api/browsers/$BID/instructions/" \
+curl -X POST "http://127.0.0.1:58347/api/instructions/" \
   -H 'Content-Type: application/json' \
   -d '{"action":"list"}'
 ```
@@ -294,6 +350,7 @@ Supported instructions:
 {"action":"record","method":"stop","tid":123}
 {"action":"proxy","method":"set","proxy":"http://127.0.0.1:8080"}
 {"action":"proxy","method":"unset"}
+{"action":"cleanup"}
 {"action":"console","method":"start","tid":123}
 {"action":"console","method":"capture","tid":123}
 {"action":"console","method":"stop","tid":123}
@@ -420,6 +477,33 @@ affects every tab and window. Results never echo credentials (`authenticated`
 is boolean-only). Quiesce other work around proxy changes and verify with a
 navigation afterwards.
 
+`cleanup` clears all browser data except the ACOB extension itself, for use
+when repeated navigation hits Cloudflare or other walls and the site becomes
+operational again only after a full wipe. It takes no payload fields:
+
+```json
+{"action":"cleanup"}
+```
+
+```json
+{"cleaned": true}
+```
+
+Authorization lives in the browser, not in the request: the extension only
+accepts the instruction when its "Allow browser cleanup" setting is checked
+in the extension popup (off by default). Remote callers cannot enable it;
+when it is off the instruction fails with a hint to enable it. Confirm the
+local `allowCleanup` setting in the popup before calling.
+
+It clears cookies, localStorage (and sessionStorage), history, cache and
+CacheStorage, downloads list, fileSystems, formData/autofill, IndexedDB, and
+service workers across the whole profile (`since: 0`, `unprotectedWeb` and
+`protectedWeb`, never extension origins, so extension settings in
+`chrome.storage` are retained). Saved passwords are not cleared (Chrome
+provides no extension API for them). It is browser-global and destructive:
+all logins die, quiesce recordings and other work first (cleanup fails while
+a recording is active), and open pages keep in-memory state until reloaded.
+
 `console` captures the page's console output per tab. `method: start`
 installs a shim that calls through to the real `console.debug/log/info/warn/error`
 and buffers serialized entries in the page; `method: capture` returns a
@@ -446,29 +530,10 @@ of filling the agent's context:
 The downloaded document is a JSON array of `{t, level, text}` entries.
 Collection stops automatically at the `consoleTimeoutSec` deadline (default
 180 s, at most 300 s) or when the buffer reaches `consoleMaxSizeMiB`
-(default 2 MiB, at most 10 MiB); both are extension settings readable via
-`settings`. A snapshot then carries `truncated: true`. The buffer lives in
+(default 2 MiB, at most 10 MiB); both are extension-local settings visible to
+the user in the popup. A snapshot then carries `truncated: true`. The buffer lives in
 the page, so navigation wipes it (a later capture fails with a "lost" hint
 and the session is dropped) and only entries logged after `start` are kept.
-
-The browser's configured limits and other settings are not an instruction:
-the extension reports them periodically to
-`POST /api/browsers/<bid>/heartbeat/`, and agents read them with
-`GET /api/browsers/<bid>/settings/` before acting:
-
-```json
-{
-  "settings": {
-    "pollIntervalMs": 1000,
-    "maxRecordingDurationSec": 300,
-    "maxRecordingSizeMiB": 512
-  },
-  "updated_at": "2026-08-12T00:00:00Z"
-}
-```
-
-The settings endpoint returns 404 until the extension has reported at least
-once.
 
 `javascript` requires a `tid` and evaluates the supplied script in that tab.
 Values available by value are returned as JSON-compatible results; Chromium
@@ -509,7 +574,7 @@ For example, an input can be updated and notified with:
 
 A batch runs up to 20 complete instructions sequentially, one at a time, so a
 cascade of dependent actions is claimed and executed with a single request.
-Submit it to `POST /api/browsers/<bid>/instructions/batch/`:
+Submit it to `POST /api/instructions/batch/`:
 
 ```json
 {
@@ -548,28 +613,43 @@ instruction, so actions submitted outside a batch still run in parallel with
 each other. Recordings are keyed by tab, so a batch can start recordings on
 different tabs; starting twice on the same tab fails the second entry.
 
-The extension claims queued work with `GET /api/browsers/<bid>/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and accepts values from 1 through 20. A successful response is an array of up to `limit` instructions whose status has been changed to `processing`; an empty queue returns `204 No Content`. While a reinstall is pending, the response is a single `reinstall` command instead of queued work.
+Any polling extension can claim queued work with
+`GET /api/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and
+accepts values from 1 through 20. A successful response is an array of up to
+`limit` instructions whose status has been changed to `processing`; an empty
+queue returns `204 No Content`. While a reinstall is pending, the response is
+a single `reinstall` command instead of queued work. This claim route is
+promiscuous by design: it has no executor selection or affinity.
 
 Use the ID returned when creating an instruction to retrieve its status and result:
 
 ```bash
-curl "http://127.0.0.1:58347/api/browsers/$BID/instructions/1/"
+curl "http://127.0.0.1:58347/api/instructions/1/"
 ```
 
 Reads are non-destructive while the instruction is `pending` or `processing`. The first detail request after it becomes `completed` or `failed` returns the terminal response and deletes the instruction. Every later request for that ID returns 404. Capture the complete terminal response from the polling request; do not issue another request to fetch its result.
 
 Invalid requests return an `Invalid request` error with a `details` list containing the field, message, and validation type for each problem.
 
-The browser ID must be a lowercase dashless UUIDv4. API clients select a browser by using its ID in every instruction route.
-
 The client and MCP `reinstall` operation requests an unpacked-extension reload
-with `POST /api/browsers/<bid>/reinstall/`. While such a reinstall is
+with `POST /api/reinstall/`. While such a reinstall is
 pending, `instructions/next/` returns a `reinstall` command instead of
 claiming queue work; the extension executes it and restarts itself.
-`POST reinstall/acknowledge/` from the restarted worker completes the
+`POST /api/reinstall/acknowledge/` from the restarted worker completes the
 handshake. The initial POST is idempotent while one reinstall is pending and
 returns `202` with its token. The `reload` instruction reloads one tab through
 the instruction queue.
+
+An extension completes claimed work with
+`POST /api/instructions/<id>/result/`. Media remains available at
+`/api/media/<filename>`.
+
+ACOB's shipped architecture is local-only. It has no authentication, executor
+identity, queue affinity, or claim leases, and one stack must not be used as a
+network or enterprise control plane unchanged. Such use requires an adapted
+deployment and protocol with authentication and authorization, explicit
+executor identity and affinity, leases, secure transport, and appropriate
+auditing and policy controls.
 
 ## Contributing and security
 

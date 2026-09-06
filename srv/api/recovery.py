@@ -6,11 +6,10 @@ from .models import Instruction, Reinstall
 EXTENSION_REINSTALL_ERROR = "Extension reinstalled before instruction completed"
 
 
-def request_reinstall(bid: str) -> Reinstall:
+def request_reinstall() -> Reinstall:
     with transaction.atomic():
-        reinstall_request, _ = Reinstall.objects.get_or_create(bid=bid)
+        reinstall_request, _ = Reinstall.objects.get_or_create(pk=1)
         Instruction.objects.filter(
-            bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             status=Instruction.Status.FAILED,

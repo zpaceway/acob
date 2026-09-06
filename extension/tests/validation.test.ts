@@ -267,3 +267,30 @@ test("accepts console inside batches", () => {
 
   assert.equal(isSupportedInstruction(value), true);
 });
+
+test("accepts cleanup with an empty payload", () => {
+  assert.equal(isSupportedInstruction(instruction("cleanup", {})), true);
+});
+
+test("rejects cleanup with any payload fields", () => {
+  assert.equal(
+    isSupportedInstruction(instruction("cleanup", { confirm: true })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("cleanup", { tid: 12 })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("cleanup", { extra: 1 })),
+    false,
+  );
+});
+
+test("accepts cleanup inside batches", () => {
+  const value = instruction("batch", {
+    actions: [{ action: "cleanup" }],
+  });
+
+  assert.equal(isSupportedInstruction(value), true);
+});

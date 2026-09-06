@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 if TYPE_CHECKING:
@@ -20,13 +19,11 @@ from .storage import StorageError, store_media
 
 
 class InstructionApiTests(TestCase):
-    BID = "0123456789ab4def8123456789abcdef"
-
     def instruction_path(self, suffix: str = "") -> str:
-        return f"/api/browsers/{self.BID}/instructions/{suffix}"
+        return f"/api/instructions/{suffix}"
 
     def batch_path(self, suffix: str = "") -> str:
-        return f"/api/browsers/{self.BID}/instructions/batch/{suffix}"
+        return f"/api/instructions/batch/{suffix}"
 
     def post_json(self, path: str, data: object) -> _MonkeyPatchedWSGIResponse:
         return self.client.post(
@@ -46,7 +43,7 @@ class InstructionApiTests(TestCase):
         )
 
     def reinstall_path(self, suffix: str = "") -> str:
-        return f"/api/browsers/{self.BID}/reinstall/{suffix}"
+        return f"/api/reinstall/{suffix}"
 
     def test_instruction_flow(self) -> None:
         created = self.post_json(
@@ -55,7 +52,6 @@ class InstructionApiTests(TestCase):
         )
 
         self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.json()["bid"], self.BID)
         instruction_id = created.json()["id"]
 
         next_batch = self.client.get(self.instruction_path("next/"))
@@ -93,7 +89,7 @@ class InstructionApiTests(TestCase):
         self.assertEqual(empty_queue.headers["Cache-Control"], "no-store")
 
     def test_pending_and_processing_reads_are_not_consumed(self) -> None:
-        instruction = Instruction.objects.create(bid=self.BID, action="list")
+        instruction = Instruction.objects.create(action="list")
 
         pending = self.client.get(self.instruction_path(f"{instruction.id}/"))
         processing = self.client.get(self.instruction_path("next/")).json()[0]
@@ -102,29 +98,8 @@ class InstructionApiTests(TestCase):
         self.assertEqual(processing["status"], "processing")
         self.assertTrue(Instruction.objects.filter(id=instruction.id).exists())
 
-    def test_browser_queues_are_isolated(self) -> None:
-        other_bid = "fedcba9876544210a9876543210fedcb"
-        created = self.post_json(
-            self.instruction_path(),
-            {"action": "list"},
-        )
-        instruction_id = created.json()["id"]
-        other_path = f"/api/browsers/{other_bid}/instructions"
-
-        self.assertEqual(self.client.get(f"{other_path}/next/").status_code, 204)
-        self.assertEqual(
-            self.client.get(f"{other_path}/{instruction_id}/").status_code,
-            404,
-        )
-        self.assertEqual(
-            self.client.get(self.instruction_path("next/")).json()[0]["id"],
-            instruction_id,
-        )
-
     def test_claims_up_to_the_requested_instruction_limit(self) -> None:
-        instructions = [
-            Instruction.objects.create(bid=self.BID, action="list") for _ in range(6)
-        ]
+        instructions = [Instruction.objects.create(action="list") for _ in range(6)]
 
         first_batch = self.client.get(self.instruction_path("next/?limit=4"))
         second_batch = self.client.get(self.instruction_path("next/?limit=4"))
@@ -146,8 +121,8 @@ class InstructionApiTests(TestCase):
         )
 
     def test_pending_reinstall_blocks_instruction_claims(self) -> None:
-        instruction = Instruction.objects.create(bid=self.BID, action="list")
-        reinstall_request = Reinstall.objects.create(bid=self.BID)
+        instruction = Instruction.objects.create(action="list")
+        reinstall_request = Reinstall.objects.create()
 
         response = self.client.get(self.instruction_path("next/?limit=4"))
 
@@ -190,7 +165,6 @@ class InstructionApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["bid"], self.BID)
         self.assertEqual(response.json()["action"], "batch")
         self.assertEqual(
             response.json()["payload"]["actions"],
@@ -560,30 +534,8 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid request")
 
-    def test_rejects_invalid_browser_ids(self) -> None:
-        invalid_bids = (
-            "not-a-uuid",
-            "00000000000000000000000000000000",
-            "01234567-89ab-4def-8123-456789abcdef",
-            "0123456789AB4DEF8123456789ABCDEF",
-        )
-
-        for bid in invalid_bids:
-            with self.subTest(bid=bid):
-                response = self.post_json(
-                    f"/api/browsers/{bid}/instructions/",
-                    {"action": "list"},
-                )
-                self.assertEqual(response.status_code, 404)
-
-    def test_model_validates_browser_id(self) -> None:
-        instruction = Instruction(bid="0" * 32, action="list")
-
-        with self.assertRaises(ValidationError):
-            instruction.full_clean()
-
     def test_failed_instruction(self) -> None:
-        instruction = Instruction.objects.create(bid=self.BID, action="list")
+        instruction = Instruction.objects.create(action="list")
         self.client.get(self.instruction_path("next/"))
 
         response = self.post_result(
@@ -624,7 +576,6 @@ class InstructionApiTests(TestCase):
 
     def test_does_not_return_processing_instruction(self) -> None:
         Instruction.objects.create(
-            bid=self.BID,
             action="list",
             status=Instruction.Status.PROCESSING,
         )
@@ -753,7 +704,7 @@ class InstructionApiTests(TestCase):
                 )
 
     def test_rejects_result_with_error(self) -> None:
-        instruction = Instruction.objects.create(bid=self.BID, action="list")
+        instruction = Instruction.objects.create(action="list")
         self.client.get(self.instruction_path("next/"))
 
         response = self.post_result(
@@ -767,7 +718,6 @@ class InstructionApiTests(TestCase):
 
     def test_rejects_non_finite_scroll_result(self) -> None:
         instruction = Instruction.objects.create(
-            bid=self.BID,
             action="scroll",
             payload={"tid": 12, "y": 500},
             status=Instruction.Status.PROCESSING,
@@ -1417,6 +1367,56 @@ class InstructionApiTests(TestCase):
         self.assertEqual(stopped.status_code, 201)
         self.assertEqual(stopped.json()["payload"], {"method": "stop", "tid": 12})
 
+    def test_accepts_cleanup_instruction(self) -> None:
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "cleanup"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["action"], "cleanup")
+        self.assertEqual(response.json()["payload"], {})
+
+    def test_cleanup_rejects_payload_fields(self) -> None:
+        with_confirm = self.post_json(
+            self.instruction_path(),
+            {"action": "cleanup", "confirm": True},
+        )
+        with_tid = self.post_json(
+            self.instruction_path(),
+            {"action": "cleanup", "tid": 12},
+        )
+
+        self.assertEqual(with_confirm.status_code, 400)
+        self.assertEqual(with_tid.status_code, 400)
+
+    def test_cleanup_result_is_validated(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "cleanup"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"cleaned": True}},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["result"], {"cleaned": True})
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "cleanup"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        rejected = self.post_result(
+            instruction_id,
+            {"result": {"cleaned": False}},
+        )
+        self.assertEqual(rejected.status_code, 400)
+
     def test_console_instructions_require_valid_arguments(self) -> None:
         missing_method = self.post_json(
             self.instruction_path(),
@@ -1701,52 +1701,6 @@ class InstructionApiTests(TestCase):
             ],
         )
 
-    def test_heartbeat_stores_and_returns_browser_settings(self) -> None:
-        settings_url = f"/api/browsers/{self.BID}/settings/"
-        not_reported = self.client.get(settings_url)
-        self.assertEqual(not_reported.status_code, 404)
-
-        heartbeat = self.post_json(
-            f"/api/browsers/{self.BID}/heartbeat/",
-            {
-                "settings": {
-                    "pollIntervalMs": 1000,
-                    "maxRecordingDurationSec": 300,
-                    "maxRecordingSizeMiB": 512,
-                }
-            },
-        )
-        self.assertEqual(heartbeat.status_code, 204)
-
-        reported = self.client.get(settings_url)
-        self.assertEqual(reported.status_code, 200)
-        self.assertEqual(
-            reported.json()["settings"],
-            {
-                "pollIntervalMs": 1000,
-                "maxRecordingDurationSec": 300,
-                "maxRecordingSizeMiB": 512,
-            },
-        )
-        self.assertTrue(reported.json()["updated_at"])
-
-        updated = self.post_json(
-            f"/api/browsers/{self.BID}/heartbeat/",
-            {"settings": {"pollIntervalMs": 2500}},
-        )
-        self.assertEqual(updated.status_code, 204)
-        self.assertEqual(
-            self.client.get(settings_url).json()["settings"],
-            {"pollIntervalMs": 2500},
-        )
-
-    def test_heartbeat_requires_a_settings_object(self) -> None:
-        response = self.post_json(
-            f"/api/browsers/{self.BID}/heartbeat/",
-            {"settings": []},
-        )
-        self.assertEqual(response.status_code, 400)
-
     def test_reinstall_is_idempotent_until_acknowledged(self) -> None:
         first = self.client.post(self.reinstall_path())
         second = self.client.post(self.reinstall_path())
@@ -1762,11 +1716,10 @@ class InstructionApiTests(TestCase):
 
     def test_reinstall_request_recovers_processing_work(self) -> None:
         processing = Instruction.objects.create(
-            bid=self.BID,
             action="javascript",
             status=Instruction.Status.PROCESSING,
         )
-        pending = Instruction.objects.create(bid=self.BID, action="list")
+        pending = Instruction.objects.create(action="list")
         requested = self.client.post(self.reinstall_path())
         token = requested.json()["token"]
 

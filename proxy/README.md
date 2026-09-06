@@ -1,135 +1,140 @@
 # ACOB Proxy
 
-Unified entrypoint for ACOB. An `nginx:alpine` front proxies both
-services over a single host port, routing by path:
+The `nginx:alpine` proxy is the only public entrypoint for a containerized ACOB
+installation. It publishes one localhost port and routes by path:
 
 ```text
-http://127.0.0.1:58346/mcp/*  -> acob-mcp:58348   (MCP Streamable HTTP)
-http://127.0.0.1:58346/*      -> acob-srv:58347   (Django API + /api/media/*)
+http://127.0.0.1:58346/mcp  -> acob-mcp:58348   (MCP Streamable HTTP)
+http://127.0.0.1:58346/*    -> acob-srv:58347   (Django API and /api/media/*)
 ```
 
-MCP->API traffic stays inside the `acob` Docker network
-(`http://acob-srv:58347`), so `srv` and `mcp` no longer need
-`network_mode: host` or host-published ports.
+The server, MCP service, and proxy share a Compose-project-local `acob` network.
+The server and MCP containers only expose their ports on that network; neither
+publishes a host port. MCP-to-API traffic stays internal at
+`http://acob-srv:58347`.
 
-## Requirements
+## Install
 
-- Docker with Compose
-- The `acob-srv` and `acob-mcp` images build from `../srv` and `../mcp`
-
-## Usage
-
-From the monorepo root:
+Docker with Compose and Node.js 20 or newer are required. From the monorepo
+root, install a complete local stack and build its matching extension:
 
 ```bash
-docker compose -f proxy/compose.yaml up --build
+make install PORT=58346 NAME=default
+make install PORT=61554 NAME=alexandro
 ```
 
-Or via the Makefile:
+`PORT` is optional and defaults to `58346`, but `NAME` is required. The
+installation context is always `acob-<port>-<name>`. `NAME` may contain lowercase
+letters, digits, and internal hyphens, but cannot start or end with a hyphen. The
+command:
+
+- builds the extension with `http://127.0.0.1:<port>` as its default Server URL;
+- writes the unpacked build to `.local/<context>/extension`;
+- starts Compose with project name `<context>`;
+- creates network, volume, container, and image resources with that project
+  prefix; and
+- publishes only nginx at `127.0.0.1:<port>`.
+
+The first example uses context `acob-58346-default` and extension artifact
+`.local/acob-58346-default/extension`. Load the printed directory in Chromium.
+Names distinguish user or work contexts, but they do not add protocol routing
+or executor identity: every extension connected to one stack still consumes
+its promiscuous queue. Distinct installations require distinct `PORT` values
+because only one process can bind each host port.
+
+Root lifecycle commands must use the same `PORT` and `NAME` as installation:
 
 ```bash
-make -C proxy docker   # up --build --detach
-make -C proxy logs     # follow acob-proxy
-make -C proxy down
+make up PORT=58346 NAME=default
+make logs PORT=58346 NAME=default
+make ps PORT=58346 NAME=default
+make down PORT=58346 NAME=default
+make purge PORT=58346 NAME=default
+
+make logs PORT=61554 NAME=alexandro
+make down PORT=61554 NAME=alexandro
 ```
 
-## MCP client installers
+`down` preserves the project volume. `purge` removes it along with the stack.
+`up` rebuilds the containers but does not rebuild the extension; use `install`
+when creating an installation or changing its port or name.
 
-The installer targets bring up the full stack (`docker compose up -d --build`)
-and register the MCP server with the chosen client. `BID` is required: copy
-the browser ID from the ACOB extension popup.
+## MCP Clients
+
+The root installers build and start the full stack, generate the extension, and
+register its fixed `/mcp` endpoint:
 
 ```bash
-make -C proxy install-opencode BID=0123456789ab4def8123456789abcdef
-make -C proxy install-claude BID=0123456789ab4def8123456789abcdef
+make install-opencode PORT=58346 NAME=default
+make install-claude PORT=58346 NAME=default
+make install-opencode PORT=61554 NAME=alexandro
+make install-claude PORT=61554 NAME=alexandro
 ```
 
-- `install-opencode` registers `acob` via `opencode mcp add --url
-  http://127.0.0.1:58346/mcp/<bid>`. Restart/reconnect the opencode session
-  afterwards so it picks up the new tools.
-- `install-claude` registers `acob` via `claude mcp add --transport http -s
-  user` (user scope, re-runnable). Start a new Claude Code session to use the
-  tools.
+The registration name defaults to the installation context
+`acob-<port>-<name>`. The URL is
+`http://127.0.0.1:<port>/mcp`. Override `MCP_NAME`, `OPENCODE_BIN`, or
+`CLAUDE_BIN` when needed. Restart or reconnect the MCP client after installation
+so it discovers the current tool schemas. This name is an MCP client label, not
+a protocol selector; queue selection still comes only from the endpoint port.
 
-Overrides:
-
-```bash
-make -C proxy install-opencode BID=<bid> ACOB_PROXY_PORT=8000
-make -C proxy install-claude BID=<bid> OPENCODE_BIN=/path/to/opencode CLAUDE_BIN=/path/to/claude
-```
-
-Verify the registration with `opencode mcp list` or `claude mcp list`.
-
-Override the unified host port:
-
-```bash
-ACOB_PROXY_PORT=8000 docker compose -f proxy/compose.yaml up --build
-```
-
-The API remains available at (via the proxy):
-
-- `POST http://127.0.0.1:58346/api/browsers/<bid>/instructions/`
-- `GET  http://127.0.0.1:58346/api/media/<file>`
-- MCP Streamable HTTP at `http://127.0.0.1:58346/mcp/<bid>`
-
-For MCP clients (via proxy):
+Manual MCP configuration for the default port is:
 
 ```json
 {
   "mcpServers": {
     "acob": {
-      "url": "http://127.0.0.1:58346/mcp/0123456789ab4def8123456789abcdef"
+      "url": "http://127.0.0.1:58346/mcp"
     }
   }
 }
 ```
 
-When running standalone via `make -C srv run` / `make -C mcp run` the
-services bind directly to `http://127.0.0.1:58347` and `http://127.0.0.1:58348`.
-The standalone compose files (`srv/compose.yaml`, `mcp/compose.yaml`) now
-only `expose` on the internal `acob` network — host access is via this
-proxy at `58346`.
+## Endpoints
 
-`ACOB_SRV` and `ACOB_MCP` environment passthrough is still supported
-via the unified compose (`ACOB_TIMEOUT`, `ACOB_POLL_INTERVAL`).
+The default proxy exposes the flat, single-queue interfaces:
 
-## nginx config
+- REST API: `http://127.0.0.1:58346/api/instructions/`
+- Media: `http://127.0.0.1:58346/api/media/<file>`
+- Reinstall: `http://127.0.0.1:58346/api/reinstall/`
+- MCP Streamable HTTP: `http://127.0.0.1:58346/mcp`
 
-`nginx.conf` is mounted read-only into the proxy container. It:
+There is no browser identifier in any route and no heartbeat or settings
+endpoint. Extension settings and limits remain local to the extension popup.
 
-- listens on `80` inside the container (mapped to `ACOB_PROXY_PORT` on the host, default `58346`)
-- proxies `/mcp/` to `acob-mcp:58348` with `Upgrade`/`Connection` headers,
-  `proxy_http_version 1.1`, buffering disabled and 3600s timeouts for MCP streaming
-- proxies `/` to `acob-srv:58347` with `client_max_body_size 1024M` to allow
-  512 MiB recordings and 30 MiB screenshots
-- uses `resolver 127.0.0.11` (Docker embedded DNS) with variables so nginx
-  defers upstream resolution to request time
+## Compose
 
-All three services share the `acob` bridge network (`name: acob`),
-so `srv` and `mcp` are reachable by service name without host networking.
-`proxy/compose.yaml` reuses the existing definitions via Compose `include`:
-
-```yaml
-include:
-  - path: ../srv/compose.yaml
-  - path: ../mcp/compose.yaml
-```
-
-so `srv`/`mcp` are not rewritten — the proxy only adds `acob-proxy` and
-routes by path.
-
-## Standalone srv / mcp
-
-`../srv/compose.yaml` and `../mcp/compose.yaml` now also use the `acob`
-bridge network and `expose:` instead of `network_mode: host`. They can still
-be run individually for development (`docker compose -f srv/compose.yaml up`
-exposes only internally; use `make -C srv run` for host `58347`), but the
-recommended way to run the full stack is through this proxy compose.
-
-## Verification
+The root Makefile is the recommended interface because it consistently derives
+the context from `PORT` and required `NAME`. The equivalent direct command for
+the first example is:
 
 ```bash
-BID=0123456789ab4def8123456789abcdef
-curl http://127.0.0.1:58346/api/browsers/$BID/settings/  # via proxy -> srv
-curl -N http://127.0.0.1:58346/mcp/$BID  # via proxy -> mcp Streamable HTTP
+PORT=58346 docker compose --project-name acob-58346-default --file proxy/compose.yaml up --build
 ```
+
+Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
+them manually with direct Compose commands or replace them with a named install.
+
+`proxy/compose.yaml` includes `../srv/compose.yaml` and `../mcp/compose.yaml`,
+then adds `acob-proxy`. Compose scopes the declared `acob` network and
+`srv-data` volume to the selected project. Do not assign a global network name:
+project scoping is what isolates installations.
+
+The component Compose files may be run individually for container development,
+but they publish no ports. Use native `make -C srv run` and `make -C mcp run`
+when direct host access on `58347` and `58348` is needed.
+
+## nginx Configuration
+
+`nginx.conf` is mounted read-only. It:
+
+- listens on container port `80`, mapped only to `127.0.0.1:${PORT}`;
+- proxies `/mcp` to `acob-mcp:58348` with HTTP/1.1, buffering disabled, and
+  3600-second streaming timeouts;
+- proxies every other path to `acob-srv:58347`;
+- accepts request bodies up to `1024M` for bounded recordings and screenshot
+  batches; and
+- uses Docker's embedded DNS so included services resolve at request time.
+
+ACOB has no API authentication or TLS. Keep the published proxy bound to the
+trusted local machine unless deployment-specific controls are added.

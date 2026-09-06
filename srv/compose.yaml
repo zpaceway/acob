@@ -1,20 +1,19 @@
-name: acob-srv
-
 services:
   acob-srv:
-    image: acob-srv:latest
-    container_name: acob-srv
     build: .
-    ports:
-      - "${ACOB_SRV_PORT:-58347}:58347"
     expose:
       - "58347"
     environment:
-      ACOB_SRV_HOST: ${ACOB_SRV_HOST:-0.0.0.0}
-      ACOB_SRV_PORT: ${ACOB_SRV_PORT:-58347}
+      ACOB_DATA_DIR: /data
+      ACOB_SRV_HOST: 0.0.0.0
+      ACOB_SRV_PORT: 58347
+    volumes:
+      - srv-data:/data
     networks:
       - acob
 
 networks:
-  acob:
-    name: acob
+  acob: {}
+
+volumes:
+  srv-data: {}

@@ -1,25 +1,18 @@
-name: acob-mcp
-
 services:
   acob-mcp:
-    image: acob-mcp:latest
-    container_name: acob-mcp
     build:
       context: ..
       dockerfile: mcp/Dockerfile
-    ports:
-      - "${ACOB_MCP_PORT:-58348}:58348"
     expose:
       - "58348"
     environment:
       ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://acob-srv:58347}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
-      ACOB_MCP_HOST: ${ACOB_MCP_HOST:-0.0.0.0}
-      ACOB_MCP_PORT: ${ACOB_MCP_PORT:-58348}
+      ACOB_MCP_HOST: 0.0.0.0
+      ACOB_MCP_PORT: 58348
     networks:
       - acob
 
 networks:
-  acob:
-    name: acob
+  acob: {}

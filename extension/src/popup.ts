@@ -25,9 +25,6 @@ const configurationFields = requireElement(
   "#configuration-fields",
   HTMLDivElement,
 );
-const bidInput = requireElement("#bid", HTMLInputElement);
-const copyButton = requireElement("#copy-bid", HTMLButtonElement);
-const rotateButton = requireElement("#rotate-bid", HTMLButtonElement);
 const status = requireElement("#status", HTMLParagraphElement);
 const settingInputs = new Map<SettingName, HTMLInputElement>();
 let statusDurationMs =
@@ -39,9 +36,9 @@ function inputId(name: SettingName): string {
   return name.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
 }
 
-function mcpUrlFromValues(baseUrl: string, bid: string): string {
+function mcpUrlFromValues(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/+$/, "") || String(ACOBSettings.definitions.baseUrl.defaultValue);
-  return `${normalized}/mcp/${bid}`;
+  return `${normalized}/mcp`;
 }
 
 function updateMcpUrl(): void {
@@ -50,14 +47,17 @@ function updateMcpUrl(): void {
   }
   const baseUrlInput = settingInputs.get("baseUrl");
   const baseUrl = baseUrlInput?.value.trim() || String(ACOBSettings.definitions.baseUrl.defaultValue);
-  const bid = bidInput.value.trim();
-  mcpInput.value = mcpUrlFromValues(baseUrl, bid);
+  mcpInput.value = mcpUrlFromValues(baseUrl);
 }
 
 function buildConfigurationFields(): void {
   for (const name of ACOBSettings.settingNames) {
     const definition = ACOBSettings.definitions[name];
     if (!definition.visible) {
+      continue;
+    }
+    if (definition.inputType === "checkbox") {
+      buildCheckboxField(name);
       continue;
     }
     const id = inputId(name);
@@ -136,7 +136,7 @@ function buildConfigurationFields(): void {
       const mcpHint = document.createElement("p");
       mcpHint.className =
         "mt-1.5 mb-[18px] min-h-[18px] text-[11px] leading-normal text-muted";
-      mcpHint.textContent = "MCP endpoint for this browser (via the proxy).";
+      mcpHint.textContent = "MCP endpoint for this local ACOB installation.";
 
       configurationFields.append(mcpLabel, mcpRow, mcpHint);
 
@@ -145,13 +145,64 @@ function buildConfigurationFields(): void {
   }
 }
 
+function buildCheckboxField(name: SettingName): void {
+  const definition = ACOBSettings.definitions[name];
+  const id = inputId(name);
+
+  const row = document.createElement("div");
+  row.className =
+    "mb-[18px] flex cursor-pointer items-center justify-between gap-3 rounded-[7px] border border-field-border bg-field px-[11px] py-3";
+
+  const text = document.createElement("div");
+  const label = document.createElement("p");
+  label.textContent = definition.label;
+  label.className = "text-[13px] font-semibold text-label";
+  const hint = document.createElement("p");
+  hint.className = "mt-0.5 text-[11px] leading-normal text-muted";
+  hint.textContent = definition.editable
+    ? definition.hint
+    : `${definition.hint} Read-only in the popup.`;
+  text.append(label, hint);
+
+  const input = document.createElement("input");
+  input.id = id;
+  input.name = name;
+  input.type = "checkbox";
+  input.disabled = !definition.editable;
+  input.className =
+    "h-[22px] w-[22px] shrink-0 cursor-pointer accent-acid disabled:cursor-default";
+  input.addEventListener("input", () => input.setCustomValidity(""));
+
+  row.append(text, input);
+  row.addEventListener("click", (event) => {
+    if (event.target !== input && !input.disabled) {
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+
+  configurationFields.append(row);
+  settingInputs.set(name, input);
+}
+
 function inputValue(
   name: SettingName,
   input: HTMLInputElement,
 ): SettingValue {
+  if (ACOBSettings.definitions[name].valueType === "boolean") {
+    return input.checked;
+  }
   return ACOBSettings.definitions[name].valueType === "integer"
     ? input.valueAsNumber
     : input.value;
+}
+
+function setInputValue(input: HTMLInputElement, value: SettingValue): void {
+  if (input.type === "checkbox") {
+    input.checked = value === true;
+    return;
+  }
+  input.value = String(value);
 }
 
 function showStatus(message: string): void {
@@ -173,10 +224,9 @@ async function loadConfiguration(): Promise<void> {
   }
 
   for (const [name, input] of settingInputs) {
-    input.value = String(configuration[name]);
+    setInputValue(input, configuration[name]);
   }
   statusDurationMs = configuration.popupStatusDurationMs;
-  bidInput.value = configuration.bid;
   updateMcpUrl();
 }
 
@@ -202,7 +252,7 @@ form.addEventListener("submit", async (event) => {
   for (const [name, input] of settingInputs) {
     const value = configuration[name];
     if (value !== undefined) {
-      input.value = String(value);
+      setInputValue(input, value);
     }
   }
   updateMcpUrl();
@@ -216,21 +266,6 @@ form.addEventListener("submit", async (event) => {
       .catch(console.error);
   }
 });
-
-copyButton.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(bidInput.value);
-  showStatus("Browser ID copied");
-});
-
-rotateButton.addEventListener("click", async () => {
-  const bid = ACOBSettings.generateBrowserId();
-  await chrome.storage.local.set({ bid });
-  bidInput.value = bid;
-  updateMcpUrl();
-  showStatus("Browser ID rotated");
-});
-
-bidInput.addEventListener("input", updateMcpUrl);
 
 buildConfigurationFields();
 loadConfiguration().catch((error) => {

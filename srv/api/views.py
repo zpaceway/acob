@@ -19,16 +19,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import JsonValue, ValidationError
 
-from .models import BrowserHeartbeat, Instruction, Reinstall
+from .models import Instruction, Reinstall
 from .recovery import EXTENSION_REINSTALL_ERROR, request_reinstall
 from .schemas import (
     ApiModel,
     BatchInstructionRequest,
-    BrowserSettingsResponse,
+    CleanupResult,
     ConsoleCaptureUploadResult,
     ConsoleStartResult,
     ErrorResponse,
-    HeartbeatRequest,
     InstructionResponse,
     InstructionResultRequest,
     NextInstructionsQuery,
@@ -98,7 +97,7 @@ def instruction_list_response(instructions: list[Instruction]) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def create_instruction(request: HttpRequest, bid: str) -> JsonResponse:
+def create_instruction(request: HttpRequest) -> JsonResponse:
     try:
         request_model = instruction_adapter.validate_json(request.body)
     except ValidationError as error:
@@ -110,7 +109,6 @@ def create_instruction(request: HttpRequest, bid: str) -> JsonResponse:
         exclude_none=True,
     )
     instruction = Instruction.objects.create(
-        bid=bid,
         action=request_model.action,
         payload=payload,
     )
@@ -119,7 +117,7 @@ def create_instruction(request: HttpRequest, bid: str) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def create_batch_instruction(request: HttpRequest, bid: str) -> JsonResponse:
+def create_batch_instruction(request: HttpRequest) -> JsonResponse:
     """Create one instruction that runs its actions sequentially."""
     try:
         request_model = BatchInstructionRequest.model_validate_json(request.body)
@@ -131,7 +129,6 @@ def create_batch_instruction(request: HttpRequest, bid: str) -> JsonResponse:
         exclude={"action"},
     )
     instruction = Instruction.objects.create(
-        bid=bid,
         action=Instruction.Action.BATCH,
         payload=payload,
     )
@@ -141,10 +138,9 @@ def create_batch_instruction(request: HttpRequest, bid: str) -> JsonResponse:
 @require_http_methods(["GET"])
 def instruction_detail(
     _request: HttpRequest,
-    bid: str,
     instruction_id: int,
 ) -> JsonResponse:
-    instruction = Instruction.objects.filter(id=instruction_id, bid=bid).first()
+    instruction = Instruction.objects.filter(id=instruction_id).first()
     if instruction is None:
         return error_response("Instruction not found", status=404)
 
@@ -157,7 +153,6 @@ def instruction_detail(
 
     deleted, _ = Instruction.objects.filter(
         id=instruction.id,
-        bid=bid,
         status=instruction.status,
     ).delete()
     if not deleted:
@@ -166,13 +161,13 @@ def instruction_detail(
 
 
 @require_http_methods(["GET"])
-def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
+def next_instructions(request: HttpRequest) -> HttpResponse:
     try:
         query = NextInstructionsQuery.model_validate_strings(request.GET.dict())
     except ValidationError as error:
         return validation_error_response(error)
 
-    pending_reinstall = Reinstall.objects.filter(bid=bid).first()
+    pending_reinstall = Reinstall.objects.first()
     if pending_reinstall is not None:
         reinstall_command = JsonResponse(
             [
@@ -186,13 +181,12 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
         return reinstall_command
 
     instructions: list[Instruction] = []
-    no_pending_reinstall = ~Exists(Reinstall.objects.filter(bid=bid))
+    no_pending_reinstall = ~Exists(Reinstall.objects.all())
     while len(instructions) < query.limit:
-        if Reinstall.objects.filter(bid=bid).exists():
+        if Reinstall.objects.exists():
             break
         candidate = (
             Instruction.objects.filter(
-                bid=bid,
                 status=Instruction.Status.PENDING,
             )
             .values("id")
@@ -204,7 +198,6 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
         claimed = (
             Instruction.objects.filter(
                 id=candidate["id"],
-                bid=bid,
                 status=Instruction.Status.PENDING,
             )
             .filter(no_pending_reinstall)
@@ -228,10 +221,9 @@ def next_instructions(request: HttpRequest, bid: str) -> HttpResponse:
 @require_http_methods(["POST"])
 def complete_instruction(
     request: HttpRequest,
-    bid: str,
     instruction_id: int,
 ) -> JsonResponse:
-    instruction = Instruction.objects.filter(id=instruction_id, bid=bid).first()
+    instruction = Instruction.objects.filter(id=instruction_id).first()
     if instruction is None:
         return error_response("Instruction not found", status=404)
 
@@ -279,7 +271,6 @@ def complete_instruction(
     with transaction.atomic():
         completed = Instruction.objects.filter(
             id=instruction_id,
-            bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             result=result,
@@ -289,7 +280,7 @@ def complete_instruction(
         )
 
     if not completed:
-        current = Instruction.objects.filter(id=instruction_id, bid=bid).first()
+        current = Instruction.objects.filter(id=instruction_id).first()
         if current is None:
             return error_response("Instruction not found", status=404)
         return instruction_response(current)
@@ -328,6 +319,7 @@ ACTION_RESULT_PROCESSED = frozenset(
         Instruction.Action.PROXY,
         Instruction.Action.SCROLL,
         Instruction.Action.CONSOLE,
+        Instruction.Action.CLEANUP,
     }
 )
 
@@ -574,6 +566,18 @@ def _prepare_action_result(
                 validation_error=error,
             ) from error
 
+    if action == Instruction.Action.CLEANUP:
+        try:
+            return (
+                CleanupResult.model_validate(result_value).model_dump(mode="json"),
+                None,
+            )
+        except ValidationError as error:
+            raise InvalidResultDataError(
+                "Invalid cleanup result",
+                validation_error=error,
+            ) from error
+
     return result_value, None
 
 
@@ -638,9 +642,9 @@ def serve_media(_request: HttpRequest, name: str) -> HttpResponseBase:
 
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
-def reinstall(request: HttpRequest, bid: str) -> HttpResponse:
+def reinstall(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
-        reinstall_request = request_reinstall(bid)
+        reinstall_request = request_reinstall()
         response = model_response(
             ReinstallResponse(
                 token=reinstall_request.token,
@@ -651,7 +655,7 @@ def reinstall(request: HttpRequest, bid: str) -> HttpResponse:
         response["Cache-Control"] = "no-store"
         return response
 
-    pending_reinstall = Reinstall.objects.filter(bid=bid).first()
+    pending_reinstall = Reinstall.objects.first()
     if pending_reinstall is None:
         no_content_response = HttpResponse(status=204)
         no_content_response["Cache-Control"] = "no-store"
@@ -668,23 +672,20 @@ def reinstall(request: HttpRequest, bid: str) -> HttpResponse:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def acknowledge_reinstall(request: HttpRequest, bid: str) -> HttpResponse:
+def acknowledge_reinstall(request: HttpRequest) -> HttpResponse:
     try:
         acknowledgement = ReinstallAcknowledgement.model_validate_json(request.body)
     except ValidationError as error:
         return validation_error_response(error)
 
     with transaction.atomic():
-        reinstall_request = (
-            Reinstall.objects.select_for_update().filter(bid=bid).first()
-        )
+        reinstall_request = Reinstall.objects.select_for_update().first()
         if reinstall_request is None:
             return HttpResponse(status=204)
         if reinstall_request.token != acknowledgement.token:
             return error_response("Reinstall token does not match", status=409)
 
         Instruction.objects.filter(
-            bid=bid,
             status=Instruction.Status.PROCESSING,
         ).update(
             status=Instruction.Status.FAILED,
@@ -693,36 +694,3 @@ def acknowledge_reinstall(request: HttpRequest, bid: str) -> HttpResponse:
         )
         reinstall_request.delete()
     return HttpResponse(status=204)
-
-
-@csrf_exempt
-@require_http_methods(["POST"])
-def report_heartbeat(request: HttpRequest, bid: str) -> HttpResponse:
-    """Store the extension's reported settings for one browser."""
-    try:
-        heartbeat = HeartbeatRequest.model_validate_json(request.body)
-    except ValidationError as error:
-        return validation_error_response(error)
-
-    BrowserHeartbeat.objects.update_or_create(
-        bid=bid,
-        defaults={"settings": heartbeat.settings},
-    )
-    return HttpResponse(status=204)
-
-
-@require_http_methods(["GET"])
-def browser_settings(_request: HttpRequest, bid: str) -> JsonResponse:
-    """Return the settings most recently reported by the extension."""
-    stored = BrowserHeartbeat.objects.filter(bid=bid).first()
-    if stored is None:
-        return error_response(
-            "Browser settings not found; the extension has not reported yet",
-            status=404,
-        )
-    return model_response(
-        BrowserSettingsResponse(
-            settings=stored.settings,
-            updated_at=stored.updated_at,
-        )
-    )

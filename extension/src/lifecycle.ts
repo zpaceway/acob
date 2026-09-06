@@ -24,31 +24,12 @@ export async function getConfiguration(): Promise<Configuration> {
 
 export function instructionApiUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
-  return `${baseUrl}/api/browsers/${configuration.bid}/instructions`;
-}
-
-export async function reportSettings(
-  configuration: Configuration,
-): Promise<void> {
-  const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
-  const { bid: _bid, ...settings } = configuration;
-  const response = await fetch(
-    `${baseUrl}/api/browsers/${configuration.bid}/heartbeat/`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings }),
-      signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`Could not report browser settings: HTTP ${response.status}`);
-  }
+  return `${baseUrl}/api/instructions`;
 }
 
 function reinstallUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
-  return `${baseUrl}/api/browsers/${configuration.bid}/reinstall`;
+  return `${baseUrl}/api/reinstall`;
 }
 
 export async function acknowledgePendingReinstall(

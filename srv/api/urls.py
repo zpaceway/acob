@@ -1,69 +1,40 @@
-from django.core.exceptions import ValidationError
-from django.urls import path, register_converter
+from django.urls import path
 
 from . import views
-from .validators import validate_bid
-
-
-class BrowserIdConverter:
-    regex = "[0-9a-f]{32}"
-
-    def to_python(self, value: str) -> str:
-        try:
-            validate_bid(value)
-        except ValidationError as error:
-            raise ValueError from error
-        return value
-
-    def to_url(self, value: str) -> str:
-        return value
-
-
-register_converter(BrowserIdConverter, "bid")
 
 urlpatterns = [
     path(
-        "browsers/<bid:bid>/reinstall/",
+        "reinstall/",
         views.reinstall,
         name="reinstall",
     ),
     path(
-        "browsers/<bid:bid>/reinstall/acknowledge/",
+        "reinstall/acknowledge/",
         views.acknowledge_reinstall,
         name="acknowledge-reinstall",
     ),
     path(
-        "browsers/<bid:bid>/heartbeat/",
-        views.report_heartbeat,
-        name="report-heartbeat",
-    ),
-    path(
-        "browsers/<bid:bid>/settings/",
-        views.browser_settings,
-        name="browser-settings",
-    ),
-    path(
-        "browsers/<bid:bid>/instructions/",
+        "instructions/",
         views.create_instruction,
         name="create-instruction",
     ),
     path(
-        "browsers/<bid:bid>/instructions/batch/",
+        "instructions/batch/",
         views.create_batch_instruction,
         name="create-batch-instruction",
     ),
     path(
-        "browsers/<bid:bid>/instructions/next/",
+        "instructions/next/",
         views.next_instructions,
         name="next-instructions",
     ),
     path(
-        "browsers/<bid:bid>/instructions/<int:instruction_id>/",
+        "instructions/<int:instruction_id>/",
         views.instruction_detail,
         name="instruction-detail",
     ),
     path(
-        "browsers/<bid:bid>/instructions/<int:instruction_id>/result/",
+        "instructions/<int:instruction_id>/result/",
         views.complete_instruction,
         name="complete-instruction",
     ),

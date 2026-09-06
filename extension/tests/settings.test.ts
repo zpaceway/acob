@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ACOBSettings as settings } from "../src/settings.js";
-const BID = "0123456789ab4def8123456789abcdef";
 
 test("normalizes a complete default configuration", () => {
-  const configuration = settings.normalizeConfiguration({ bid: BID });
+  const configuration = settings.normalizeConfiguration();
 
   assert.deepEqual(configuration, {
-    bid: BID,
     baseUrl: "http://127.0.0.1:58346",
+    allowCleanup: false,
     instructionsPerPoll: 4,
     maxConcurrentExecutions: 8,
     maxTabs: 20,
@@ -31,7 +30,6 @@ test("normalizes a complete default configuration", () => {
 
 test("accepts valid custom settings and canonicalizes the server URL", () => {
   const configuration = settings.normalizeConfiguration({
-    bid: BID,
     baseUrl: "https://acob.test/base/",
     instructionsPerPoll: 8,
     maxConcurrentExecutions: 40,
@@ -62,12 +60,13 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
   assert.equal(configuration.consoleTimeoutSec, 60);
   assert.equal(configuration.consoleMaxSizeMiB, 5);
   assert.equal(configuration.resultRetryAttempts, 2);
+  assert.equal(configuration.resultRetryDelayMs, 500);
+  assert.equal(configuration.popupStatusDurationMs, 4000);
   assert.equal(configuration.debuggerProtocolVersion, "1.4");
 });
 
 test("replaces invalid values with their centralized defaults", () => {
   const configuration = settings.normalizeConfiguration({
-    bid: BID,
     baseUrl: "ftp://acob.test",
     instructionsPerPoll: 21,
     maxConcurrentExecutions: 0,
@@ -106,6 +105,27 @@ test("replaces invalid values with their centralized defaults", () => {
   assert.equal(configuration.debuggerProtocolVersion, "1.3");
 });
 
+test("validates the cleanup toggle as a strict boolean", () => {
+  assert.equal(settings.isValidSetting("allowCleanup", true), true);
+  assert.equal(settings.isValidSetting("allowCleanup", false), true);
+  assert.equal(settings.isValidSetting("allowCleanup", 1), false);
+  assert.equal(settings.isValidSetting("allowCleanup", "true"), false);
+  assert.equal(settings.isValidSetting("allowCleanup", undefined), false);
+  assert.equal(
+    settings.normalizeSetting("allowCleanup", true),
+    true,
+  );
+  assert.equal(
+    settings.normalizeSetting("allowCleanup", "yes"),
+    false,
+  );
+  assert.equal(
+    settings.normalizeConfiguration({ allowCleanup: true })
+      .allowCleanup,
+    true,
+  );
+});
+
 test("converts the configured screenshot limit to bytes", () => {
   assert.equal(settings.mebibytesToBytes(30), 30 * 1024 * 1024);
 });
@@ -123,9 +143,7 @@ test("marks fixed settings as read-only and hidden", () => {
   }
 });
 
-test("validates browser IDs and server URLs", () => {
-  assert.equal(settings.isValidBrowserId(BID), true);
-  assert.equal(settings.isValidBrowserId("browser-id"), false);
+test("validates server URLs", () => {
   assert.equal(settings.isValidSetting("baseUrl", "HTTP://acob.test"), true);
   assert.equal(settings.isValidSetting("baseUrl", "http://acob.test?"), false);
   assert.equal(settings.isValidSetting("baseUrl", "http://acob.test#"), false);

@@ -3,14 +3,13 @@ from uuid import uuid4
 
 from django.db import models
 
-from .validators import validate_bid
-
 
 class Instruction(models.Model):
     id: int
 
     class Action(models.TextChoices):
         BATCH = "batch"
+        CLEANUP = "cleanup"
         CLICK = "click"
         CLOSE = "close"
         CONSOLE = "console"
@@ -31,7 +30,6 @@ class Instruction(models.Model):
         COMPLETED = "completed"
         FAILED = "failed"
 
-    bid = models.CharField(max_length=32, db_index=True, validators=[validate_bid])
     action = models.CharField(max_length=16, choices=Action)
     payload = models.JSONField(default=dict)
     status = models.CharField(
@@ -53,30 +51,9 @@ class Instruction(models.Model):
 
 
 class Reinstall(models.Model):
-    bid = models.CharField(
-        max_length=32,
-        unique=True,
-        validators=[validate_bid],
-    )
     token = models.UUIDField(default=uuid4, editable=False, unique=True)
     requested_at = models.DateTimeField(auto_now_add=True)
 
     @override
     def __str__(self) -> str:
-        return f"reinstall {self.bid}"
-
-
-class BrowserHeartbeat(models.Model):
-    """Most recently reported extension settings for one browser."""
-
-    bid = models.CharField(
-        max_length=32,
-        unique=True,
-        validators=[validate_bid],
-    )
-    settings = models.JSONField(default=dict)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    @override
-    def __str__(self) -> str:
-        return f"heartbeat {self.bid}"
+        return f"reinstall {self.token}"

@@ -12,6 +12,7 @@ import {
   executeConsoleStart,
   executeConsoleStop,
 } from "./console.js";
+import { executeCleanup } from "./cleanup.js";
 import { executeProxy } from "./proxy.js";
 import { instructionApiUrl } from "./lifecycle.js";
 import { state } from "./state.js";
@@ -141,6 +142,10 @@ async function runInstructionAction(
 
   if (action === "proxy") {
     return executeProxy(payload, configuration);
+  }
+
+  if (action === "cleanup") {
+    return executeCleanup(configuration);
   }
 
   if (action === "record") {

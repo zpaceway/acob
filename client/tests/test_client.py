@@ -17,7 +17,7 @@ from acob import (
     ACOBProtocolError,
     ACOBTimeoutError,
     BatchResultEntry,
-    BrowserSettings,
+    CleanupResult,
     ClickResult,
     ClosedTab,
     ConsoleCapture,
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
         _console_stopped: ConsoleCapture = await client.console("stop", 1)
         _proxy_set: ProxySet = await client.proxy("set", proxy="http://127.0.0.1:8080")
         _proxy_unset: ProxyUnset = await client.proxy("unset")
-        _settings: BrowserSettings = await client.settings()
+        _cleanup: CleanupResult = await client.cleanup()
         _javascript: JsonValue = await client.javascript(1, "1")
         _reinstall: ReinstallResult = await client.reinstall()
         _batch: list[BatchResultEntry] = await client.execute_batch(
@@ -71,11 +71,8 @@ class FailingTransport(httpx.AsyncBaseTransport):
 
 
 class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
-    BID = "0123456789ab4def8123456789abcdef"
-
     def make_client(self, endpoint: str = "http://acob.test/") -> ACOBClient:
         client = ACOBClient(
-            self.BID,
             endpoint=endpoint,
             timeout=5,
             poll_interval=0.01,
@@ -108,25 +105,14 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_initializes_with_default_endpoint_and_validates_configuration(
         self,
     ) -> None:
-        client = ACOBClient(self.BID)
+        client = ACOBClient()
         self.addAsyncCleanup(client.aclose)
 
-        self.assertEqual(client.bid, self.BID)
         self.assertEqual(client.endpoint, DEFAULT_ENDPOINT)
-
-        invalid_bids = (
-            "not-a-uuid",
-            "00000000000000000000000000000000",
-            "01234567-89ab-4def-8123-456789abcdef",
-            "0123456789AB4DEF8123456789ABCDEF",
-        )
-        for bid in invalid_bids:
-            with self.subTest(bid=bid), self.assertRaises(ValueError):
-                ACOBClient(bid)
 
         for endpoint in ("", "acob.test", "ftp://acob.test", "http://acob.test?q=1"):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
-                ACOBClient(self.BID, endpoint)
+                ACOBClient(endpoint)
 
     async def test_list_submits_and_consumes_terminal_response(self) -> None:
         tab = {
@@ -159,7 +145,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted_request.method, "POST")
         self.assertEqual(
             str(submitted_request.url),
-            f"http://acob.test/api/browsers/{self.BID}/instructions/",
+            "http://acob.test/api/instructions/",
         )
         self.assertEqual(
             json.loads(submitted_request.content),
@@ -170,11 +156,11 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(terminal_request.method, "GET")
         self.assertEqual(
             str(terminal_request.url),
-            f"http://acob.test/api/browsers/{self.BID}/instructions/7/",
+            "http://acob.test/api/instructions/7/",
         )
 
     async def test_submit_caps_the_http_request_timeout_at_60_seconds(self) -> None:
-        client = ACOBClient(self.BID, endpoint="http://acob.test", timeout=90)
+        client = ACOBClient(endpoint="http://acob.test", timeout=90)
         self.addAsyncCleanup(client.aclose)
         request_json = AsyncMock(return_value={"id": 1, "status": "pending"})
 
@@ -183,7 +169,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
 
         request_json.assert_awaited_once_with(
             "POST",
-            f"http://acob.test/api/browsers/{self.BID}/instructions/",
+            "http://acob.test/api/instructions/",
             {"action": "list"},
             timeout=60,
         )
@@ -234,7 +220,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted_request.method, "POST")
         self.assertEqual(
             str(submitted_request.url),
-            f"http://acob.test/api/browsers/{self.BID}/instructions/batch/",
+            "http://acob.test/api/instructions/batch/",
         )
         self.assertEqual(
             json.loads(submitted_request.content),
@@ -251,7 +237,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_submit_batch_caps_the_http_request_timeout_at_60_seconds(
         self,
     ) -> None:
-        client = ACOBClient(self.BID, endpoint="http://acob.test", timeout=90)
+        client = ACOBClient(endpoint="http://acob.test", timeout=90)
         self.addAsyncCleanup(client.aclose)
         request_json = AsyncMock(return_value={"id": 1, "status": "pending"})
 
@@ -260,7 +246,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
 
         request_json.assert_awaited_once_with(
             "POST",
-            f"http://acob.test/api/browsers/{self.BID}/instructions/batch/",
+            "http://acob.test/api/instructions/batch/",
             {"action": "batch", "actions": [{"action": "list"}]},
             timeout=60,
         )
@@ -919,48 +905,31 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await client.proxy("bogus", proxy="http://127.0.0.1:8080")  # ty: ignore[invalid-argument-type]
 
-    async def test_settings_returns_the_reported_browser_settings(self) -> None:
+    async def test_cleanup_returns_cleaned(self) -> None:
         client = self.make_client()
-        reported = {
-            "settings": {
-                "pollIntervalMs": 1000,
-                "maxRecordingDurationSec": 300,
-                "maxRecordingSizeMiB": 512,
-            },
-            "updated_at": "2026-08-12T00:00:00Z",
-        }
-        requests = self.add_responses(client, [(200, reported)])
-
-        result = await client.settings()
-
-        self.assertIsInstance(result, BrowserSettings)
-        self.assertEqual(result.settings["maxRecordingDurationSec"], 300)
-        self.assertEqual(result.updated_at, "2026-08-12T00:00:00Z")
-        self.assertEqual(len(requests), 1)
-        self.assertEqual(requests[0].method, "GET")
-        self.assertIn("/settings/", str(requests[0].url))
-
-    async def test_settings_surfaces_an_unreported_browser(self) -> None:
-        client = self.make_client()
-        self.add_responses(
+        requests = self.add_responses(
             client,
             [
+                (201, {"id": 22, "status": "pending"}),
                 (
-                    404,
+                    200,
                     {
-                        "error": (
-                            "Browser settings not found; the extension has "
-                            "not reported yet"
-                        ),
+                        "id": 22,
+                        "status": "completed",
+                        "result": {"cleaned": True},
                     },
                 ),
             ],
         )
 
-        with self.assertRaises(ACOBHTTPError) as raised:
-            await client.settings()
+        result = await client.cleanup()
 
-        self.assertEqual(raised.exception.status_code, 404)
+        self.assertIsInstance(result, CleanupResult)
+        self.assertTrue(result.cleaned)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "cleanup"},
+        )
 
     async def test_action_methods_reject_malformed_browser_results(self) -> None:
         client = self.make_client()
@@ -990,6 +959,19 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             await client.scroll(12, 500)
+
+        with (
+            patch.object(
+                client,
+                "execute",
+                AsyncMock(return_value={"cleaned": False}),
+            ),
+            self.assertRaisesRegex(
+                ACOBProtocolError,
+                "cleanup returned an invalid result",
+            ),
+        ):
+            await client.cleanup()
 
     async def test_javascript_returns_the_value_unchanged(self) -> None:
         client = self.make_client()
@@ -1023,7 +1005,7 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0].method, "POST")
         self.assertEqual(
             str(requests[0].url),
-            f"http://acob.test/api/browsers/{self.BID}/reinstall/",
+            "http://acob.test/api/reinstall/",
         )
 
     async def test_timeout_retains_instruction_id_for_later_recovery(self) -> None:

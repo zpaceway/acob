@@ -5,7 +5,7 @@ instructions from an ACOB server. Runtime source is written in strict
 TypeScript, and the popup is built with Tailwind CSS.
 
 The extension requires Node.js 20 or newer for development and Chromium 116 or
-newer at runtime. It polls the browser-specific queue exposed by the
+newer at runtime. It polls the single global queue exposed by the
 [Django server](../srv/README.md), executes claimed work through Chrome APIs
 and the Chromium DevTools Protocol, and posts each result back to the server.
 Before each JavaScript instruction, it exposes bundled jQuery and Turndown in a
@@ -34,6 +34,28 @@ cleanup; type-only contracts are checked by TypeScript. Changes to the manifest,
 service worker, offscreen polling, popup, Chrome APIs, or debugger behavior
 require a manual unpacked-extension test against a running server.
 
+For a complete isolated local installation, run this from the repository root:
+
+```bash
+make install PORT=58346 NAME=default
+make install PORT=61554 NAME=alexandro
+```
+
+`PORT` defaults to `58346`, but `NAME` is required. The root installer always
+uses context and Compose project `acob-<port>-<name>` and writes the unpacked
+extension to `.local/acob-<port>-<name>/extension`; the first example writes
+`.local/acob-58346-default/extension`. Names allow lowercase letters, digits,
+and internal hyphens and cannot start or end with a hyphen. Load the generated
+context artifact rather than `dist/`.
+
+The context prefixes Compose network, volume, container, and image resources
+and is the default MCP registration name used by root `install-opencode` and
+`install-claude`. Use the same `PORT` and `NAME` for lifecycle commands.
+Different installations still require different ports because only one process
+can bind a host port. Names label user or work contexts; they do not add
+protocol routing or executor identity, and extensions sharing one stack still
+consume its promiscuous queue.
+
 ## JavaScript Timeouts
 
 Chromium's `Runtime.terminateExecution` is the hard execution stop. A timed-out
@@ -56,8 +78,8 @@ JavaScript on the same tab execute in claim order.
 ## Batches
 
 A `batch` instruction (`{actions: [...]}`, 1 to 20 complete instruction
-requests, delivered by the server's `instructions/batch/` route) executes its
-actions strictly in order, one at a time, awaiting each before the next. Each
+requests, delivered by the server's `/api/instructions/batch/` route) executes
+its actions strictly in order, one at a time, awaiting each before the next. Each
 sub-action still routes through the per-tab execution queue, so a batch keeps
 its order relative to other instructions on the same tab while other tabs run
 concurrently. The batch completes with one result or error entry per action;
@@ -111,15 +133,25 @@ supplied via `webRequest.onAuthRequired`; results are redacted
 for unset) and never echo secrets. Requires the `proxy`, `webRequest`, and
 `webRequestAuthProvider` permissions.
 
-The extension reports its normalized configuration to the server's heartbeat
-route from the poll loop (throttled to 30 s, immediate on setting changes) so
-controllers can read the browser's configured limits before acting.
+The `cleanup` action (no payload fields) clears all browser data except the
+ACOB extension itself via a single `chrome.browsingData.remove` call
+(`since: 0`; `unprotectedWeb` and `protectedWeb`, never extension origins;
+cache, cacheStorage, cookies, downloads list, fileSystems, formData,
+history, indexedDB, localStorage, and service workers). Saved passwords are
+not cleared (Chrome provides no extension API for them). The extension
+accepts it only when its `allowCleanup` setting ("Allow browser cleanup",
+default `false`) is enabled in the popup, so remote callers cannot authorize
+a wipe on their own; otherwise it fails with a hint to enable it. It also
+fails while a recording is active or a reinstall is scheduled, holds a
+keep-alive across the call, and returns `{cleaned: true}`. Requires the
+`browsingData` permission. `chrome.storage` settings are untouched because
+extension origins are excluded.
 
 ## Extension Recovery
 
 The public `reinstall` operation calls
-`POST /api/browsers/<bid>/reinstall/`. While the command is pending the
-server claims no queue work, so the next `instructions/next/` poll returns a
+`POST /api/reinstall/`. While the command is pending the server claims no queue
+work, so the next `/api/instructions/next/` poll returns a
 `reinstall` command instead. The service worker persists its token, stops
 active JavaScript, reloads affected tabs, and calls `chrome.runtime.reload()`.
 Its next instance acknowledges the token and resumes polling. Because the
@@ -133,20 +165,24 @@ Chromium process requires an external browser supervisor or user action.
 
 ## Runtime Configuration
 
-The popup displays the generated browser ID and controls defined centrally in
-`src/settings.ts`. Defaults include the unified proxy at
-`http://127.0.0.1:58346` (MCP at `/mcp/<bid>`), one-second polling, a batch size
-of four, and up to eight concurrent executions. The same settings module owns
-validation and the remaining tab, timeout, screenshot, and retry limits. A
-read-only MCP URL derived from the Server URL is shown directly beneath it.
+The popup displays controls defined centrally in `src/settings.ts`. Defaults
+include the unified proxy at `http://127.0.0.1:58346`, one-second polling, a
+batch size of four, and up to eight concurrent executions. The same settings
+module owns validation and the remaining tab, timeout, screenshot, recording,
+console, and retry limits. These settings remain local to the extension; the
+server, Python client, and MCP service do not expose a settings endpoint or
+method. A read-only MCP URL (`<Server URL>/mcp`) is shown beneath the Server URL.
 
-Each installation uses a lowercase dashless UUIDv4 as its browser ID. The ID
-selects a queue; it is not an authentication secret. Rotating it moves the
-extension to a new queue and leaves work under the previous ID unclaimed.
+All extensions connected to one server consume its same global queue. Use the
+root `make install PORT=... NAME=...` workflow when separate local installations
+are needed; `NAME` is required, and each generated extension must point at its
+own distinct-port stack. Run one extension per stack when deterministic queue
+ownership matters.
 
 ## Permissions And Safety
 
-The extension requests `debugger`, `offscreen`, `storage`, and `tabs`
+The extension requests `browsingData`, `debugger`, `offscreen`, `proxy`,
+`storage`, `tabs`, `webRequest`, and `webRequestAuthProvider`
 permissions plus host access to all URLs. These capabilities are necessary for
 real browser input, JavaScript evaluation, screenshots, and polling, but they
 also grant broad access to the active browser profile. Use a dedicated profile
@@ -203,9 +239,9 @@ Named keyboard keys can be used directly. Wrap a single Unicode character with
 `keyboardCharacter()` so unsupported multi-character key names are rejected at
 both compile time and runtime.
 
-The settings runtime uses standard `crypto.randomUUID()` and `URL` APIs. Import
-it only in environments that provide those APIs. The package is ESM-only;
-CommonJS consumers must use dynamic `import()`.
+The settings runtime uses the standard `URL` API. Import it only in environments
+that provide that API. The package is ESM-only; CommonJS consumers must use
+dynamic `import()`.
 
 Run `npm run build` before using a repository checkout as a local file
 dependency. Published tarballs run the build automatically through `prepack`.

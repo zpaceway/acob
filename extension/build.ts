@@ -1,12 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const extensionDirectory = path.dirname(fileURLToPath(import.meta.url));
-const outputDirectory = path.join(extensionDirectory, "dist");
+const configuredOutput = process.env.ACOB_EXTENSION_OUTPUT_DIR;
+const outputDirectory = configuredOutput
+  ? path.resolve(extensionDirectory, configuredOutput)
+  : path.join(extensionDirectory, "dist");
+const proxyPort = process.env.ACOB_PROXY_PORT ?? "58346";
+if (!/^\d+$/.test(proxyPort) || Number(proxyPort) < 1 || Number(proxyPort) > 65535) {
+  throw new Error("ACOB_PROXY_PORT must be an integer from 1 to 65535");
+}
 const packageExecutable = (
   packageName: string,
   executablePath: string,
@@ -36,10 +43,20 @@ execFileSync(
     packageExecutable("typescript", "bin/tsc"),
     "--project",
     "tsconfig.build.json",
+    "--outDir",
+    outputDirectory,
   ],
   { cwd: extensionDirectory, stdio: "inherit" },
 );
 await mkdir(outputDirectory, { recursive: true });
+if (proxyPort !== "58346") {
+  const settingsPath = path.join(outputDirectory, "settings.js");
+  const settingsSource = await readFile(settingsPath, "utf8");
+  await writeFile(
+    settingsPath,
+    settingsSource.replaceAll("127.0.0.1:58346", `127.0.0.1:${proxyPort}`),
+  );
+}
 await Promise.all(
   [
     ...assets.map((asset) => ({
@@ -76,7 +93,7 @@ execFileSync(
     "-i",
     "src/popup.css",
     "-o",
-    "dist/popup.css",
+    path.join(outputDirectory, "popup.css"),
     "--minify",
   ],
   { cwd: extensionDirectory, stdio: "inherit" },

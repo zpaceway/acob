@@ -30,6 +30,15 @@ const definitions: SettingDefinitions = {
     editable: true,
     visible: true,
   },
+  allowCleanup: {
+    defaultValue: false,
+    valueType: "boolean",
+    inputType: "checkbox",
+    label: "Allow browser cleanup",
+    hint: "When checked, the extension accepts cleanup instructions that wipe cookies, storage, history, and cache.",
+    editable: true,
+    visible: true,
+  },
   instructionsPerPoll: {
     defaultValue: 4,
     valueType: "integer",
@@ -225,17 +234,6 @@ for (const definition of Object.values(definitions)) {
 }
 Object.freeze(definitions);
 
-function generateBrowserId(): string {
-  return crypto.randomUUID().replaceAll("-", "");
-}
-
-function isValidBrowserId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    /^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(value)
-  );
-}
-
 function isSettingName(name: string): name is SettingName {
   return Object.hasOwn(definitions, name);
 }
@@ -250,6 +248,9 @@ function isValidSetting(name: string, value: unknown): boolean {
     return false;
   }
   const definition = definitions[name];
+  if (definition.valueType === "boolean") {
+    return typeof value === "boolean";
+  }
   if (definition.valueType === "integer") {
     return (
       typeof value === "number" &&
@@ -311,7 +312,7 @@ function normalizeSetting(
 }
 
 const settingNames = Object.freeze(Object.keys(definitions) as SettingName[]);
-const storageKeys = Object.freeze<StorageKey[]>(["bid", ...settingNames]);
+const storageKeys = Object.freeze<StorageKey[]>([...settingNames]);
 
 function normalizeConfiguration(
   values: Readonly<Partial<Record<StorageKey, unknown>>> = {},
@@ -319,16 +320,11 @@ function normalizeConfiguration(
   const normalizedSettings = Object.fromEntries(
     settingNames.map((name) => [name, normalizeSetting(name, values[name])]),
   ) as unknown as SettingValues;
-  return {
-    bid: isValidBrowserId(values.bid) ? values.bid : generateBrowserId(),
-    ...normalizedSettings,
-  };
+  return normalizedSettings;
 }
 
 export const ACOBSettings: Readonly<SettingsApi> = Object.freeze({
   definitions,
-  generateBrowserId,
-  isValidBrowserId,
   isValidSetting,
   mebibytesToBytes: (value: number) => value * MEBIBYTE_IN_BYTES,
   normalizeConfiguration,

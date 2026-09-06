@@ -1,6 +1,6 @@
 # ACOB Server
 
-The server is the Django API and transient SQLite queue for ACOB. API clients
+The server is the Django API and single global SQLite queue for ACOB. API clients
 submit browser instructions, the Chromium extension claims and completes them,
 and clients poll for the resulting browser output. The server does not execute
 browser actions itself and does not serve the static site in `../web/`.
@@ -63,38 +63,48 @@ From the monorepo root, run:
 docker compose -f srv/compose.yaml up --build
 ```
 
-The Compose project, service, image, and container are named `acob-srv`. The
-service exposes `58347` on the `acob` bridge network (see `compose.yaml`);
-when run via `../proxy/compose.yaml` it is reachable internally as
-`http://acob-srv:58347` and publicly through the proxy at
-`http://127.0.0.1:58346`. The SQLite database lives inside the container
-because no volume is configured; removing or replacing the container removes
-queued instructions and other database state.
+The service exposes `58347` only to its Compose project's internal `acob`
+network and publishes no host port. When included by `../proxy/compose.yaml`,
+it is reachable internally as `http://acob-srv:58347` and publicly only through
+the proxy at `http://127.0.0.1:58346` by default. Compose stores SQLite and
+media under `/data` in the project-scoped `srv-data` volume. A root
+`make install PORT=... NAME=...` requires `NAME` and uses installation context
+and project `acob-<port>-<name>`. For example,
+`make install PORT=61554 NAME=alexandro` uses `acob-61554-alexandro` and writes
+the matching extension to `.local/acob-61554-alexandro/extension`. `NAME` may
+contain lowercase letters, digits, and internal hyphens, but cannot start or end
+with a hyphen. Compose network, volume, container, and image resources use that
+project prefix, and the root OpenCode and Claude installers use the context as
+their default MCP registration name.
+
+Lifecycle commands must receive the same `PORT` and `NAME`. Distinct
+installations still require distinct ports because only one process can bind a
+host port. A name only distinguishes a user or work context; it does not add
+server protocol routing or executor identity, and this server's queue remains
+promiscuous within its stack.
 
 ## API
 
-All routes are scoped by a lowercase dashless UUIDv4 browser ID under
-`/api/browsers/<bid>/`.
+All routes are flat under `/api/` and operate on the one queue for this local
+server.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `instructions/` | Validate and enqueue an instruction. |
-| `POST` | `instructions/batch/` | Enqueue one instruction that runs up to 20 actions sequentially. |
-| `GET` | `instructions/next/?limit=1` | Claim 1 to 20 pending instructions for the extension. |
-| `GET` | `instructions/<id>/` | Read status or consume a terminal response. |
-| `POST` | `instructions/<id>/result/` | Complete a claimed instruction. |
-| `POST` | `reinstall/` | Queue an unpacked-extension reinstall. |
-| `GET` | `reinstall/` | Read the pending reinstall command for manual inspection. |
-| `POST` | `reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
-| `POST` | `heartbeat/` | Store the extension's reported settings. |
-| `GET` | `settings/` | Return the settings most recently reported by the extension. |
-| `GET` | `media/<name>` | Serve a stored screenshot or recording. |
+| `POST` | `/api/instructions/` | Validate and enqueue an instruction. |
+| `POST` | `/api/instructions/batch/` | Enqueue one instruction that runs up to 20 actions sequentially. |
+| `GET` | `/api/instructions/next/?limit=1` | Claim 1 to 20 pending instructions for the extension. |
+| `GET` | `/api/instructions/<id>/` | Read status or consume a terminal response. |
+| `POST` | `/api/instructions/<id>/result/` | Complete a claimed instruction. |
+| `POST` | `/api/reinstall/` | Queue an unpacked-extension reinstall. |
+| `GET` | `/api/reinstall/` | Read the pending reinstall command for manual inspection. |
+| `POST` | `/api/reinstall/acknowledge/` | Acknowledge recovery from the new worker. |
+| `GET` | `/api/media/<name>` | Serve a stored screenshot, recording, or console capture. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record`, `proxy`, `console`, and
+`click`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`, `console`, and
 `javascript`. See the root [API guide](../README.md#api) for payload examples.
 
-`POST instructions/batch/` accepts `{"action": "batch", "actions": [...]}`
+`POST /api/instructions/batch/` accepts `{"action": "batch", "actions": [...]}`
 with 1 to 20 complete instruction requests. The extension executes the
 actions strictly in order and completes the single instruction with one
 result or error entry per action; a failed action does not stop the rest of
@@ -123,11 +133,16 @@ and stores as `console-{tid}-<uuid>.json` and returns as an absolute
 `/api/media/` URL; the extension-side session is keyed by tab and not
 tracked by the server. The `proxy` action (`method: set` with a proxy string like
 `http://host:port`, `method: unset`) is browser-global and carries only
-redacted results. Like the SQLite
-database, the media directory lives on the local filesystem; a fresh
-container starts with an empty media root.
+redacted results. The `cleanup` action (no payload fields) is browser-global
+and destructive: it clears cookies, localStorage, history, cache, and
+related site data except the extension itself, and its result
+`{cleaned: true}` is validated. The extension only accepts it when its
+"Allow browser cleanup" popup setting is enabled. Like the SQLite database,
+the media directory lives on the local filesystem. The Compose deployment
+persists both in its project-scoped `srv-data` volume; purging that volume
+starts with an empty queue and media root.
 
-While a reinstall is pending, `instructions/next/` claims no queue work and
+While a reinstall is pending, `/api/instructions/next/` claims no queue work and
 instead returns the `reinstall` command directly to the extension; the
 extension does not poll the reinstall route separately. The extension persists
 the command token, stops active JavaScript work, reloads affected tabs, calls
@@ -140,17 +155,18 @@ Pending instructions remain available to the restarted extension.
 
 The default configuration is for trusted local development only:
 
-- SQLite stores all queue state in `db.sqlite3`.
+- SQLite stores the global queue state in `db.sqlite3`.
 - `media/` holds screenshots and recordings; any client that can reach the
   server can fetch them from `/api/media/<filename>`.
 - `DEBUG` is enabled, `ALLOWED_HOSTS` accepts every host, and the secret key is
   committed as a development value.
 - Queue endpoints have no authentication, and API POST routes are CSRF-exempt.
 - ACOB does not provide TLS, rate limiting, expiry cleanup, or tenant isolation.
-- When run through `../proxy/compose.yaml`, the proxy publishes a single
-  host port (`58346` by default) and routes `/mcp/` to the MCP service and
-  everything else to this API; standalone `srv/compose.yaml` exposes the
-  service only on the internal `acob` network.
+- When run through `../proxy/compose.yaml`, the proxy publishes a single host
+  port (`58346` by default) and routes `/mcp` to the MCP service and everything
+  else to this API. `srv/compose.yaml` only exposes the service on its Compose
+  project's internal `acob` network; it never publishes a host port. Use
+  `make dev` or `make run` for direct native development on `58347`.
 
 Do not expose this configuration directly to an untrusted network. Review
 [`SECURITY.md`](../SECURITY.md) and add authentication, transport security, and

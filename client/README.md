@@ -1,8 +1,8 @@
 # ACOB Python Client
 
-The ACOB Python client asynchronously controls one Chromium installation
-through an ACOB server. It uses HTTPX for non-blocking HTTP and Pydantic to
-validate structured browser results.
+The ACOB Python client asynchronously controls the Chromium extension connected
+to one local ACOB stack and its global instruction queue. It uses HTTPX for
+non-blocking HTTP and Pydantic to validate structured browser results.
 
 It requires Python 3.10 or newer. Install it from this directory:
 
@@ -15,8 +15,8 @@ From the monorepo root, the equivalent command is
 [Chromium extension](../extension/README.md) must also be running to execute
 browser instructions.
 
-All operations that communicate with ACOB are awaitable. Create a client with
-the browser ID shown in the extension popup and close it with `async with`:
+All operations that communicate with ACOB are awaitable. The endpoint is
+optional, so the default local proxy can be used with no constructor arguments:
 
 ```python
 import asyncio
@@ -25,7 +25,7 @@ from acob import ACOBClient
 
 
 async def main() -> None:
-    async with ACOBClient("0123456789ab4def8123456789abcdef") as client:
+    async with ACOBClient() as client:
         tabs = await client.list()
         tab = await client.navigate("https://example.com")
         tid = tab.tid
@@ -48,16 +48,20 @@ async def main() -> None:
         print(proxied.scheme, proxied.host, proxied.port)
         await client.proxy("unset")
 
+        cleaned = await client.cleanup()
+        print(cleaned.cleaned)
+
 
 asyncio.run(main())
 ```
 
-The endpoint defaults to `http://127.0.0.1:58347`. Configure a different server
-and result-wait deadline when needed:
+The endpoint defaults to the unified proxy at `http://127.0.0.1:58346`.
+`ACOBClient` has no browser selector: its only optional positional argument is
+the stack endpoint. Configure a different stack and result-wait deadline when
+needed:
 
 ```python
 client = ACOBClient(
-    "0123456789ab4def8123456789abcdef",
     endpoint="http://127.0.0.1:8000",
     timeout=90,
     poll_interval=0.5,
@@ -67,6 +71,18 @@ try:
 finally:
     await client.aclose()
 ```
+
+Root installations require `NAME` and always use context
+`acob-<port>-<name>` for the Compose project, generated extension path, network,
+volume, container, and image resource prefix, and default MCP registration
+label. For example,
+`make install PORT=61554 NAME=alexandro` creates context
+`acob-61554-alexandro` and `.local/acob-61554-alexandro/extension`. Names allow
+lowercase letters, digits, and internal hyphens and cannot start or end with a
+hyphen. Use the same `PORT` and `NAME` for lifecycle commands, and use a distinct
+port for every installation because only one process can bind it. `ACOBClient`
+still selects only by endpoint; a context name adds no protocol routing or
+identity, and each selected stack retains its promiscuous queue.
 
 `timeout` is the default result-wait deadline after submission and also caps
 individual HTTP requests. An action-level timeout overrides the result-wait
@@ -195,23 +211,30 @@ print(proxied.scheme, proxied.host, proxied.port, proxied.authenticated)
 await client.proxy("unset")
 ```
 
+`cleanup()` clears all browser data except the ACOB extension itself
+(cookies, localStorage, history, cache, and related site data across the
+whole profile). The extension only accepts it when its "Allow browser
+cleanup" setting is enabled in its popup (off by default), so check that local
+popup setting first; otherwise the instruction fails. It
+returns a `CleanupResult` (`{cleaned: True}`). Browser-global and
+destructive: quiesce other work first, and it fails while a recording is
+active:
+
+```python
+cleaned = await client.cleanup()
+print(cleaned.cleaned)
+```
+
 Recordings need a timeout that covers the intended recording time, and the
 tab's window should be focused for reliable captures. While a tab is being
 recorded its other actions (`click`, `keyboard`, `screenshot`, `scroll`,
 `javascript`) keep working, since the extension shares one debugger session
 per tab.
 
-`screenshot()` and `record(method="stop")` return the same public media URL pattern.
-`settings()` returns the browser's reported configuration (limits such as
-`maxRecordingDurationSec`, polling, timeouts) so callers can plan bounded work:
-
-```python
-browser = await client.settings()
-print(browser.settings["maxRecordingDurationSec"])
-```
-
-The extension reports settings periodically and on change; `settings()`
-raises `ACOBHTTPError` with status 404 until the first report arrives.
+`screenshot()` and `record(method="stop")` return the same public media URL
+pattern. Recording, console, cleanup authorization, polling, and execution
+limits are configured locally in the extension popup; there is no client
+settings method or server settings endpoint.
 
 `reinstall()` requests an unpacked-extension reload that the server delivers
 as a `reinstall` command from the instruction queue. `reload(tid)` sends a

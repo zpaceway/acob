@@ -186,6 +186,10 @@ class ListInstruction(ApiModel):
     action: Literal["list"]
 
 
+class CleanupInstruction(ApiModel):
+    action: Literal["cleanup"]
+
+
 class CloseInstruction(ApiModel):
     action: Literal["close"]
     tid: Tid
@@ -214,7 +218,8 @@ class ScrollInstruction(ApiModel):
 
 
 InstructionRequest = Annotated[
-    CloseInstruction
+    CleanupInstruction
+    | CloseInstruction
     | ClickInstruction
     | ConsoleInstruction
     | FocusInstruction
@@ -311,6 +316,10 @@ class ScrollResult(ApiModel):
     y: ScrollY
 
 
+class CleanupResult(ApiModel):
+    cleaned: Literal[True]
+
+
 class InstructionResultRequest(ApiModel):
     result: JsonValue = None
     error: NonEmptyString | None = None
@@ -356,7 +365,6 @@ class ReinstallCommand(ApiModel):
 
 class InstructionResponse(ApiModel):
     id: int
-    bid: str
     # Stored instructions can outlive the request schema that accepted them.
     action: str
     payload: dict[str, JsonValue]
@@ -371,7 +379,6 @@ class InstructionResponse(ApiModel):
         return cls.model_validate(
             {
                 "id": instruction.id,
-                "bid": instruction.bid,
                 "action": instruction.action,
                 "payload": instruction.payload,
                 "status": instruction.status,
@@ -385,15 +392,6 @@ class InstructionResponse(ApiModel):
 
 class ErrorResponse(ApiModel):
     error: str
-
-
-class HeartbeatRequest(ApiModel):
-    settings: dict[str, JsonValue]
-
-
-class BrowserSettingsResponse(ApiModel):
-    settings: dict[str, JsonValue]
-    updated_at: datetime
 
 
 class ValidationIssue(ApiModel):
