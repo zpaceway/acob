@@ -4,7 +4,7 @@ INSTANCE := acob-$(PORT)-$(strip $(NAME))
 EXTENSION_DIR ?= $(CURDIR)/.local/$(INSTANCE)/extension
 MCP_NAME ?= $(INSTANCE)
 MCP_URL := http://127.0.0.1:$(PORT)/mcp
-COMPOSE := PORT=$(PORT) docker compose --project-name $(INSTANCE) --file proxy/compose.yaml
+COMPOSE := PORT=$(PORT) docker compose --project-name $(INSTANCE) --file compose.yaml
 OPENCODE_BIN ?= $(shell command -v opencode 2>/dev/null || echo $$HOME/.opencode/bin/opencode)
 CLAUDE_BIN ?= $(shell command -v claude 2>/dev/null || echo $$HOME/.local/bin/claude)
 

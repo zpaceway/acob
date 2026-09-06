@@ -39,7 +39,7 @@ The Streamable HTTP path is fixed at `/mcp`. For direct native development:
 }
 ```
 
-When run behind the unified proxy (`../proxy/compose.yaml`), the same
+When run behind the unified proxy (root `compose.yaml`), the same
 service is available on the single proxy port (`58346`):
 
 ```json
@@ -116,10 +116,17 @@ error entry per action.
 ## Docker
 
 The image uses the sibling client project, so its build context is the
-monorepo root. The component Compose file can run the container for development:
+monorepo root. There is no component Compose file; use the root `compose.yaml`
+from the monorepo root:
 
 ```bash
-docker compose -f mcp/compose.yaml up --build
+docker compose -f compose.yaml up --build
+```
+
+To build or start only this service:
+
+```bash
+docker compose -f compose.yaml up --build acob-mcp
 ```
 
 It only exposes `58348` to its Compose project's internal network and publishes
@@ -141,7 +148,7 @@ letters, digits, and internal hyphens and cannot start or end with a hyphen.
 Lifecycle commands must receive the same `PORT` and `NAME`. Distinct
 installations still require distinct ports because only one process can bind a
 host port. The Dockerfile starts the service with `make run`. Build it without
-Compose:
+Compose, from the monorepo root:
 
 ```bash
 docker build -f mcp/Dockerfile -t acob-mcp .

@@ -30,7 +30,9 @@ not by partitioning one stack's queue.
 
 Everything is component-owned: each of `client/`, `extension/`, `mcp/`,
 `srv/`, `proxy/`, and `web/` keeps its own source, dependencies, tooling, and docs.
-There is no root dependency manifest. The root `Makefile` owns installation
+`proxy/` owns only `proxy/nginx.conf` (no compose file). Compose is root-owned:
+the root `compose.yaml` defines all three services (`acob-srv`, `acob-mcp`,
+`acob-proxy`). There is no root dependency manifest. The root `Makefile` owns installation
 and isolated stack lifecycle; component commands remain available through
 `make -C <dir> ...` or `npm --prefix extension ...`.
 
@@ -51,7 +53,7 @@ adding aliases, shims, or deprecation layers.
 | `extension/README.md` | Extension architecture, settings, permissions, typed package API, manual verification steps. | When changing `extension/`. |
 | `srv/README.md` | Server setup, routes table, storage config, development settings. | When changing `srv/`. |
 | `mcp/README.md` | MCP transport, environment variables, Docker. | When changing `mcp/`. |
-| `proxy/README.md` | Unified nginx proxy, single-port routing, compose. | When changing `proxy/`. |
+| `proxy/README.md` | Unified nginx proxy config (`nginx.conf`) and single-port routing. | When changing `proxy/`. |
 | `web/README.md` | Static website layout and deployment. | Only for `web/` changes. |
 
 ## Components
@@ -177,8 +179,9 @@ adding aliases, shims, or deprecation layers.
   `/` -> `acob-srv:58347`. `client_max_body_size 1024M` covers recordings
   and screenshot batches; buffering is disabled and timeouts are 3600s for
   MCP streaming.
-- `proxy/compose.yaml` includes `srv/compose.yaml` and `mcp/compose.yaml` and
-  adds nginx. Compose creates the `acob` network and `srv-data` volume inside
+- The root `compose.yaml` defines all three services (`acob-srv`, `acob-mcp`,
+  `acob-proxy`) and mounts `proxy/nginx.conf` read-only into nginx. Compose
+  creates the `acob` network and `srv-data` volume inside
   the selected project; neither has a fixed global name.
 - Only nginx publishes a host port, bound to `127.0.0.1:${PORT}`. `srv` and
   `mcp` only expose their ports to the project-scoped network.
@@ -452,7 +455,7 @@ stack, which extension receives the command is intentionally unspecified.
 - Identify the stack by its context and use `make ps PORT=<port> NAME=<name>`
   or `make logs PORT=<port> NAME=<name>`. For direct Compose
   commands, set `PORT=<port>` and use `--project-name <context> --file
-  proxy/compose.yaml` so diagnostics do not accidentally target another stack.
+  compose.yaml` so diagnostics do not accidentally target another stack.
 - Inspect nginx, Django, and MCP logs in that project; filter for the action or
   error of interest. Validation failures log the full rejected
   input — for `record`/`screenshot` that includes the entire base64

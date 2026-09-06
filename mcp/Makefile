@@ -2,7 +2,7 @@ ACOB_MCP_HOST ?= 0.0.0.0
 ACOB_MCP_PORT ?= 58348
 ACOB_ENDPOINT ?= http://127.0.0.1:58347
 
-.PHONY: format check test run docker logs build-push
+.PHONY: format check test run
 
 format:
 	@echo "Formatting ACOB MCP code..."
@@ -22,21 +22,3 @@ test:
 run:
 	@echo "Starting ACOB MCP server..."
 	ACOB_ENDPOINT=$(ACOB_ENDPOINT) ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server
-
-docker:
-	@echo "Building Docker image..."
-	docker compose down --remove-orphans
-	docker compose up -d --build
-
-logs:
-	@echo "Viewing Docker logs..."
-	docker compose logs --follow acob-mcp
-
-build-push:
-	@echo "Building Docker image..."
-	docker build -t acob-mcp:latest -f ./Dockerfile ..
-
-deploy:
-	@echo "Deploying locally..."
-	$(MAKE) build-push
-	docker compose up -d --build

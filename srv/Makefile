@@ -1,7 +1,7 @@
 ACOB_SRV_HOST ?= 0.0.0.0
 ACOB_SRV_PORT ?= 58347
 
-.PHONY: format check test migrations migrate dev run docker logs
+.PHONY: format check test migrations migrate dev run
 
 format:
 	@echo "Formatting Python code..."
@@ -37,21 +37,3 @@ run:
 	@echo "Starting ASGI server..."
 	$(MAKE) migrate
 	uv run --no-sync uvicorn acob.asgi:application --host $(ACOB_SRV_HOST) --port $(ACOB_SRV_PORT)
-
-docker:
-	@echo "Building Docker image..."
-	docker compose down --remove-orphans
-	docker compose up -d --build
-
-logs:
-	@echo "Viewing Docker logs..."
-	docker compose logs -f acob-srv
-
-build-push:
-	@echo "Building Docker image..."
-	docker build -t acob-srv:latest .
-
-deploy:
-	@echo "Deploying locally..."
-	$(MAKE) build-push
-	docker compose up -d --build

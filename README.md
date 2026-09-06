@@ -17,7 +17,7 @@ its source, dependencies, tooling, and documentation in its own directory.
 | [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
 | [`mcp/`](mcp/README.md) | Standalone Model Context Protocol service. |
 | [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
-| [`proxy/`](proxy/README.md) | Unified nginx proxy (single-port routing for API + MCP). |
+| [`proxy/`](proxy/README.md) | nginx config for single-port routing of API + MCP. |
 | [`web/`](web/README.md) | Buildless static marketing website. |
 
 Product direction, accepted non-goals, and future milestones are tracked in
@@ -90,28 +90,29 @@ root `make up`, `make down`, `make purge`, `make logs`, and `make ps`. Distinct
 installations still require distinct `PORT` values because only one process can
 bind a host port. Names are labels for user or work contexts; they do not add
 protocol routing or executor identity, and the queue remains promiscuous within
-each stack. See
-[`proxy/README.md`](proxy/README.md) for lower-level details.
+each stack. See `compose.yaml` for lower-level service details and
+[`proxy/README.md`](proxy/README.md) for nginx routing details.
 
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
 them manually with Compose or replace them with a named installation.
 
-To run only the API server:
+The root `compose.yaml` is the only Compose file. To start the full stack
+directly:
 
 ```bash
-docker compose -f srv/compose.yaml up --build
+docker compose -f compose.yaml up --build
 ```
 
-That service applies migrations through `make run` and exposes `58347` on
-its Compose network (or via the proxy). To run it in the background
-and follow its logs:
+To run it in the background and follow its logs:
 
 ```bash
-docker compose -f srv/compose.yaml up --build --detach
-docker compose -f srv/compose.yaml logs --follow acob-srv
-# or via the proxy stack:
-docker compose -f proxy/compose.yaml logs --follow acob-srv
+docker compose -f compose.yaml up --build --detach
+docker compose -f compose.yaml logs --follow acob-srv
 ```
+
+Individual services can be selected from the root file (for example
+`docker compose -f compose.yaml up --build acob-srv`) or run natively with
+`make -C srv dev` / `make -C mcp run`.
 
 Stop a root-managed stack with `make down PORT=58346 NAME=default`, or remove
 its volume as well with `make purge PORT=58346 NAME=default`. The proxy setup
@@ -273,19 +274,16 @@ make -C mcp run
 `ACOB_ENDPOINT` is required by the MCP process; `make -C mcp run` supplies the
 native-development default `http://127.0.0.1:58347`.
 
-The recommended Docker workflow is the unified proxy, which runs both
+The recommended Docker workflow is the root `compose.yaml`, which runs all
 services together:
 
 ```bash
-docker compose -f proxy/compose.yaml up --build
+docker compose -f compose.yaml up --build
 ```
 
-Its image includes the adapter and `acob-client`. For standalone Docker,
-run `acob-srv` or another reachable ACOB API independently:
-
-```bash
-docker compose -f mcp/compose.yaml up --build
-```
+Its MCP image includes the adapter and `acob-client`. For standalone native
+development, run `acob-srv` or another reachable ACOB API independently with
+`make -C srv dev` and `make -C mcp run`.
 
 MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,

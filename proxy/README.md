@@ -106,23 +106,23 @@ endpoint. Extension settings and limits remain local to the extension popup.
 
 The root Makefile is the recommended interface because it consistently derives
 the context from `PORT` and required `NAME`. The equivalent direct command for
-the first example is:
+the first example, run from the monorepo root, is:
 
 ```bash
-PORT=58346 docker compose --project-name acob-58346-default --file proxy/compose.yaml up --build
+PORT=58346 docker compose --project-name acob-58346-default --file compose.yaml up --build
 ```
 
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
 them manually with direct Compose commands or replace them with a named install.
 
-`proxy/compose.yaml` includes `../srv/compose.yaml` and `../mcp/compose.yaml`,
-then adds `acob-proxy`. Compose scopes the declared `acob` network and
-`srv-data` volume to the selected project. Do not assign a global network name:
+The root `compose.yaml` is the only Compose file. It defines all three services
+(`acob-srv`, `acob-mcp`, `acob-proxy`) plus the project-scoped `acob` network
+and `srv-data` volume. Do not assign a global network name:
 project scoping is what isolates installations.
 
-The component Compose files may be run individually for container development,
-but they publish no ports. Use native `make -C srv run` and `make -C mcp run`
-when direct host access on `58347` and `58348` is needed.
+There are no component Compose files. For individual-service development, use
+native `make -C srv run` and `make -C mcp run` when direct host access on
+`58347` and `58348` is needed.
 
 ## nginx Configuration
 

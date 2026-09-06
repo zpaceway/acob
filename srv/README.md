@@ -51,20 +51,21 @@ API test suite. `make format` applies Ruff fixes and formatting.
 
 ## Docker
 
-The Dockerfile expects this directory to be the build context. From `srv/`, run:
+The Dockerfile expects `srv/` to be the build context. There is no component
+Compose file; use the root `compose.yaml` from the monorepo root:
 
 ```bash
-docker compose up --build
+docker compose -f compose.yaml up --build
 ```
 
-From the monorepo root, run:
+To build or start only this service:
 
 ```bash
-docker compose -f srv/compose.yaml up --build
+docker compose -f compose.yaml up --build acob-srv
 ```
 
 The service exposes `58347` only to its Compose project's internal `acob`
-network and publishes no host port. When included by `../proxy/compose.yaml`,
+network and publishes no host port. When run via root `compose.yaml`,
 it is reachable internally as `http://acob-srv:58347` and publicly only through
 the proxy at `http://127.0.0.1:58346` by default. Compose stores SQLite and
 media under `/data` in the project-scoped `srv-data` volume. A root
@@ -162,10 +163,11 @@ The default configuration is for trusted local development only:
   committed as a development value.
 - Queue endpoints have no authentication, and API POST routes are CSRF-exempt.
 - ACOB does not provide TLS, rate limiting, expiry cleanup, or tenant isolation.
-- When run through `../proxy/compose.yaml`, the proxy publishes a single host
+- When run through root `compose.yaml`, the proxy publishes a single host
   port (`58346` by default) and routes `/mcp` to the MCP service and everything
-  else to this API. `srv/compose.yaml` only exposes the service on its Compose
-  project's internal `acob` network; it never publishes a host port. Use
+  else to this API. The `acob-srv` service in root `compose.yaml` only exposes
+  the service on its Compose project's internal `acob` network; it never
+  publishes a host port. Use
   `make dev` or `make run` for direct native development on `58347`.
 
 Do not expose this configuration directly to an untrusted network. Review

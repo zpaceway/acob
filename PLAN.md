@@ -672,7 +672,9 @@ graph.
 The root installation workflow requires `NAME`; for example,
 `make install PORT=58346 NAME=default` builds a matching extension at
 `.local/acob-58346-default/extension` and starts an isolated Compose project,
-network, and volume. Only that instance's proxy binds its localhost port; native
+network, and volume from the root `compose.yaml`. The root `compose.yaml`
+defines all three services (`acob-srv`, `acob-mcp`, `acob-proxy`). Only that
+instance's proxy binds its localhost port; native
 server and MCP development ports remain `58347` and `58348`.
 
 `NAME` distinguishes user or work contexts. For example,
