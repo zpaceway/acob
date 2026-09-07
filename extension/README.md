@@ -170,9 +170,10 @@ every value is normalized through that settings module. Later starts and
 extension updates use the stored configuration and do not reread the file.
 `settings.example.json` is the committed default and documents the complete
 build-time shape. An ignored local `settings.json` overrides it when present.
-Set `ACOB_BASE_URL` during `npm run build` to replace the bundled initial server URL; the browser image uses
-`http://acob-proxy`, while an ordinary native build defaults to
-`http://127.0.0.1:58346`.
+Set `ACOB_BASE_URL` during `npm run build` to replace the bundled initial server
+URL. The root installation workflow builds the extension with
+`http://acob-proxy` before passing `extension/dist/` into the browser image,
+while an ordinary native build defaults to `http://127.0.0.1:58346`.
 
 The defaults include one-second polling, a batch size of four, up to eight
 concurrent executions, and `allowCleanup: false`. The same settings module owns

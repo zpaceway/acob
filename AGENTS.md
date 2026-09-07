@@ -201,8 +201,9 @@ adding aliases, shims, or deprecation layers.
 
 ### browser/ — managed Chromium executor
 
-- `browser/Dockerfile` builds the extension with initial `baseUrl`
-  `http://acob-proxy`, then installs it into a Chromium image.
+- The root `Makefile` builds the extension with initial `baseUrl`
+  `http://acob-proxy`; `browser/Dockerfile` consumes that prebuilt directory as
+  a named Docker build context and installs it into the Chromium image.
 - Chromium runs as non-root on Xvfb. Its inner sandbox is disabled because
   standard Docker blocks the required nested namespaces; the container is the
   process boundary. This is not stealth or fingerprint evasion.

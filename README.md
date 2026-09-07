@@ -60,7 +60,18 @@ This uses context and Compose project `acob-58346-default` and starts an isolate
 Compose project with its own network, server-data volume, and persistent browser
 profile. The proxy publishes the API and MCP port on `127.0.0.1`. The browser
 runs Chromium as a non-root process on an Xvfb virtual display and loads the
-ACOB extension from its image automatically.
+ACOB extension from its image automatically. The install target builds
+`extension/dist/` with `http://acob-proxy` as its initial server URL and passes
+that output into the browser image build.
+
+To package an extension that is already built, pass its directory instead:
+
+```bash
+make install PORT=58346 NAME=default EXTENSION_PATH=/path/to/extension
+```
+
+A custom path is used as-is and must contain `manifest.json` with the intended
+build-time settings.
 
 `NAME` is required and distinguishes a user or work context. The installation
 context is always `acob-<port>-<name>`:
@@ -95,10 +106,11 @@ each stack. See `compose.yaml` for lower-level service details and
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
 them manually with Compose or replace them with a named installation.
 
-The root `compose.yaml` is the only Compose file. To start the full stack
-directly:
+The root `compose.yaml` is the only Compose file. Build the extension before
+starting the full stack directly:
 
 ```bash
+ACOB_BASE_URL=http://acob-proxy npm --prefix extension run build
 docker compose -f compose.yaml up --build
 ```
 

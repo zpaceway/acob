@@ -30,11 +30,16 @@ installation context is always `acob-<port>-<name>`. `NAME` may contain lowercas
 letters, digits, and internal hyphens, but cannot start or end with a hyphen. The
 command:
 
-- builds the browser image and its bundled extension for `http://acob-proxy`;
+- builds the extension for `http://acob-proxy`, then passes the built directory
+  into the browser image build;
 - starts Compose with project name `<context>`;
 - creates network, volume, container, and image resources with that project
   prefix; and
 - publishes nginx at `127.0.0.1:<port>`.
+
+Set `EXTENSION_PATH=/path/to/extension` to use an existing built extension
+directory instead. Custom builds are not rebuilt and must already contain a
+`manifest.json` with the intended initial server URL.
 
 The first example uses context `acob-58346-default` and a project-scoped
 persistent browser profile. Names distinguish user or work contexts, but they do not add protocol routing

@@ -30,8 +30,9 @@ services:
 
   acob-browser:
     build:
-      context: .
-      dockerfile: browser/Dockerfile
+      context: ./browser
+      additional_contexts:
+        extension: ${ACOB_EXTENSION_PATH:-./extension/dist}
     environment:
       ACOB_BROWSER_HEIGHT: ${ACOB_BROWSER_HEIGHT:-1080}
       ACOB_BROWSER_WIDTH: ${ACOB_BROWSER_WIDTH:-1920}

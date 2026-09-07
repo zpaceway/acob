@@ -1,7 +1,13 @@
-.PHONY: check build
+EXTENSION_PATH ?= ../extension/dist
+EXTENSION_CONTEXT := $(abspath $(EXTENSION_PATH))
+
+.PHONY: check check-extension build
 
 check:
 	sh -n entrypoint.sh
 
-build: check
-	docker build --file Dockerfile --tag acob-browser ..
+check-extension:
+	@test -f "$(EXTENSION_CONTEXT)/manifest.json" || (echo "error: EXTENSION_PATH must contain a built extension with manifest.json"; exit 1)
+
+build: check check-extension
+	docker build --build-context extension="$(EXTENSION_CONTEXT)" --file Dockerfile --tag acob-browser .

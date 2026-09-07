@@ -1,15 +1,3 @@
-FROM node:22-bookworm-slim AS extension-builder
-
-WORKDIR /build/extension
-
-COPY extension/package.json extension/package-lock.json ./
-RUN npm ci
-
-COPY extension/ ./
-ARG ACOB_BASE_URL=http://acob-proxy
-ENV ACOB_BASE_URL=${ACOB_BASE_URL}
-RUN npm run build
-
 FROM debian:bookworm-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -30,8 +18,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/sh acob
 
-COPY --from=extension-builder /build/extension/dist /opt/acob-extension
-COPY browser/entrypoint.sh /usr/local/bin/acob-browser
+COPY --from=extension / /opt/acob-extension
+COPY entrypoint.sh /usr/local/bin/acob-browser
 
 RUN chmod 0755 /usr/local/bin/acob-browser
 

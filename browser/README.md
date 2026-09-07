@@ -17,6 +17,19 @@ an initial server URL of `http://acob-proxy`. The extension reads its bundled
 `settings.json` only when its profile has no stored extension settings; later
 image rebuilds do not overwrite profile settings.
 
+The browser image consumes a built extension directory through Docker's named
+`extension` build context. It does not install Node dependencies or compile the
+extension. The root `make install` and `make up` workflows build
+`extension/dist/` first and pass it to Compose. To use an existing build instead,
+set `EXTENSION_PATH`:
+
+```bash
+make install PORT=58346 NAME=default EXTENSION_PATH=/path/to/extension
+```
+
+The directory must contain the built extension's `manifest.json`. A custom path
+is used as-is; its build-time server URL must already target the intended stack.
+
 On container startup, the entrypoint removes Chromium's stale singleton lock,
 cookie, and socket from the persisted profile. These process-local artifacts
 cannot survive a container replacement because its hostname changes.
@@ -38,9 +51,14 @@ otherwise.
 
 ## Verification
 
-Check the startup script and build the image from this directory:
+Build the extension, check the startup script, and build the image from this
+directory:
 
 ```bash
+ACOB_BASE_URL=http://acob-proxy npm --prefix ../extension run build
 make check
 make build
 ```
+
+Pass `EXTENSION_PATH=/path/to/extension` to `make build` to package another
+prebuilt extension directory.
