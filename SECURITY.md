@@ -46,11 +46,13 @@ not be exposed to a network or treated as an enterprise control plane without
 adapting the architecture.
 
 Root `make install PORT=<port> NAME=<name>` creates a named, port-specific
-Compose project, network, volume, and extension build. `NAME` is required, and
-the resulting context is `acob-<port>-<name>`. Only the proxy publishes the
-selected port, bound to localhost (`58346` by default). Separate trusted
-extensions with separate stack instances and proxy ports; a second extension
-on the same endpoint is not an isolation boundary.
+Compose project, network, server volume, and managed Chromium profile. `NAME` is
+required, and the resulting context is `acob-<port>-<name>`. The proxy publishes
+the selected API/MCP port on localhost (`58346` by default). Optional
+passwordless noVNC is disabled by default and, when enabled, is served under
+`/vnc` on that same loopback proxy. Separate trusted browsers with separate stack instances and
+proxy ports; a second extension on the same endpoint is not an isolation
+boundary.
 
 The native development server has no API authentication or TLS, uses a
 committed development secret, enables Django debug mode, accepts every host,
@@ -59,6 +61,7 @@ and exempts API POST routes from CSRF protection. Native ports `58347` and
 
 - Keep installed proxy ports and native development services on loopback or an
   equivalently trusted local boundary.
+- Enable passwordless VNC only temporarily on a trusted local machine.
 - Do not expose the development server directly to untrusted networks.
 - Enterprise or network use requires authentication and authorization, secure
   transport, explicit executor identity and affinity, claim leases, scoped

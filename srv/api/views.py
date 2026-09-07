@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Exists
 from django.http import (
@@ -593,7 +594,7 @@ def _host_screenshot(
         if isinstance(tid, int)
         else f"screenshot-{uuid.uuid4().hex}.png"
     )
-    return request.build_absolute_uri(store_media(image, name))
+    return _absolute_media_url(request, store_media(image, name))
 
 
 def _host_recording(
@@ -610,7 +611,7 @@ def _host_recording(
         if isinstance(tid, int)
         else f"recording-{uuid.uuid4().hex}{extension}"
     )
-    return request.build_absolute_uri(store_media(recording, name))
+    return _absolute_media_url(request, store_media(recording, name))
 
 
 def _host_console(
@@ -625,7 +626,13 @@ def _host_console(
         if isinstance(tid, int)
         else f"console-{uuid.uuid4().hex}.json"
     )
-    return request.build_absolute_uri(store_media(console_data, name))
+    return _absolute_media_url(request, store_media(console_data, name))
+
+
+def _absolute_media_url(request: HttpRequest, path: str) -> str:
+    if settings.ACOB_PUBLIC_URL:
+        return f"{settings.ACOB_PUBLIC_URL}{path}"
+    return request.build_absolute_uri(path)
 
 
 @require_http_methods(["GET"])

@@ -28,11 +28,11 @@ next instruction. Run one extension per stack for deterministic ownership.
 Isolation is provided by running separate stacks on separate localhost ports,
 not by partitioning one stack's queue.
 
-Everything is component-owned: each of `client/`, `extension/`, `mcp/`,
-`srv/`, `proxy/`, and `web/` keeps its own source, dependencies, tooling, and docs.
-`proxy/` owns only `proxy/nginx.conf` (no compose file). Compose is root-owned:
-the root `compose.yaml` defines all three services (`acob-srv`, `acob-mcp`,
-`acob-proxy`). There is no root dependency manifest. The root `Makefile` owns installation
+Everything is component-owned: each of `browser/`, `client/`, `extension/`,
+`mcp/`, `srv/`, `proxy/`, and `web/` keeps its own source, dependencies, tooling,
+and docs. `proxy/` owns its Dockerfile and `nginx.conf` (no compose file).
+Compose is root-owned: the root `compose.yaml` defines four services
+(`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`). There is no root dependency manifest. The root `Makefile` owns installation
 and isolated stack lifecycle; component commands remain available through
 `make -C <dir> ...` or `npm --prefix extension ...`.
 
@@ -49,6 +49,7 @@ adding aliases, shims, or deprecation layers.
 | `PLAN.md` | Product direction, engineering principles, invariants, milestones, non-goals, release gates. | Before designing features: it defines accepted scope and what is explicitly a non-goal (e.g. unbounded capture, stealth, workflows). |
 | `CONTRIBUTING.md` | Dev setup, project layout, verification commands, PR guidance. | Before submitting changes. |
 | `SECURITY.md` | Security policy and reporting. | Before exposing anything to a network. |
+| `browser/README.md` | Managed Chromium image, Xvfb, profile persistence, and optional VNC. | When changing `browser/` or Compose browser deployment. |
 | `client/README.md` | Client API surface, parallel execution, timeouts, low-level queue access. | When changing `client/`. |
 | `extension/README.md` | Extension architecture, settings, permissions, typed package API, manual verification steps. | When changing `extension/`. |
 | `srv/README.md` | Server setup, routes table, storage config, development settings. | When changing `srv/`. |
@@ -89,7 +90,9 @@ adding aliases, shims, or deprecation layers.
     extension acknowledges it after reloading.
 - `srv/acob/settings.py`: `DATA_UPLOAD_MAX_MEMORY_SIZE` must exceed the
   largest accepted base64 body (1 GiB covers the 512 MiB recording cap and a
-  full-size 20-action batch).
+  full-size 20-action batch). Compose sets `ACOB_PUBLIC_URL` so media results
+  use the host-reachable proxy origin rather than the browser's internal
+  service name.
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
   helpers, `patch` for media storage failures).
 - Migration history was intentionally reset during this pre-release refactor
@@ -179,21 +182,36 @@ adding aliases, shims, or deprecation layers.
   `/` -> `acob-srv:58347`. `client_max_body_size 1024M` covers recordings
   and screenshot batches; buffering is disabled and timeouts are 3600s for
   MCP streaming.
-- The root `compose.yaml` defines all three services (`acob-srv`, `acob-mcp`,
-  `acob-proxy`) and mounts `proxy/nginx.conf` read-only into nginx. Compose
-  creates the `acob` network and `srv-data` volume inside
+- `proxy/Dockerfile` copies `proxy/nginx.conf` into an nginx image. The root
+  `compose.yaml` defines four services (`acob-srv`, `acob-mcp`, `acob-proxy`,
+  `acob-browser`). Compose creates the `acob` network and data volumes inside
   the selected project; neither has a fixed global name.
-- Only nginx publishes a host port, bound to `127.0.0.1:${PORT}`. `srv` and
-  `mcp` only expose their ports to the project-scoped network.
+- nginx publishes the host port at `127.0.0.1:${PORT}`. `srv`, `mcp`, and the
+  browser only expose their ports to the project-scoped network. Optional
+  passwordless noVNC is served under `/vnc` on the same origin.
 - The supported full-stack workflow is the root `Makefile`. `make install
   PORT=<port> NAME=<name>` uses context/project `acob-<port>-<name>` and builds
-  the extension under `.local/acob-<port>-<name>/extension`. `NAME` is required
+  the managed browser with its extension. `NAME` is required
   and allows
   lowercase letters, digits, and internal hyphens and cannot start or end with
   a hyphen. Compose network, volume, container, and image resources use that
   project prefix. Root OpenCode and Claude installers use the context as their
   default MCP registration name. Lifecycle commands require the same `PORT` and
   `NAME`. Multiple stacks still require different `PORT` values.
+
+### browser/ — managed Chromium executor
+
+- `browser/Dockerfile` builds the extension with initial `baseUrl`
+  `http://acob-proxy`, then installs it into a Chromium image.
+- Chromium runs as non-root on Xvfb. Its inner sandbox is disabled because
+  standard Docker blocks the required nested namespaces; the container is the
+  process boundary. This is not stealth or fingerprint evasion.
+- `browser-data` persists the browser profile. The extension reads bundled
+  `settings.json` only when no extension settings are stored, so image rebuilds
+  do not overwrite user settings.
+- `ACOB_VNC_ENABLED=true` starts passwordless x11vnc plus noVNC/websockify.
+  nginx serves the lightweight client and WebSocket under `/vnc`; no separate
+  VNC host port is published. VNC stays disabled by default.
 
 ## The Cross-Component Protocol Contract
 
@@ -388,19 +406,18 @@ make install PORT=61554 NAME=alexandro
 - Compose network, volume, container, and image resources use the project
   prefix. The root `install-opencode` and `install-claude` targets use the
   context as their default MCP registration name.
-- The matching unpacked extension is built to
-  `.local/<context>/extension` with its default server URL set to
-  `http://127.0.0.1:<port>`. Load that exact artifact in Chromium.
-- Only nginx publishes `127.0.0.1:<port>`. It routes `/mcp` to MCP and all
-  other paths to Django. The MCP container reaches Django at
+- The managed Chromium image includes the unpacked extension with initial
+  server URL `http://acob-proxy`; no manual extension loading is needed.
+- nginx publishes `127.0.0.1:<port>`, routes `/mcp` to MCP, `/vnc` to optional
+  noVNC, and all other paths to Django. The MCP container reaches Django at
   `http://acob-srv:58347` on the internal network.
-- SQLite and media are persisted in that project's `srv-data` volume and
-  served through the same proxy. Lifecycle commands must receive the same
-  `PORT` and `NAME`; `down` preserves the volume and `purge` removes it.
+- SQLite and media are persisted in that project's `srv-data` volume; the
+  Chromium profile is persisted in `browser-data`. Lifecycle commands must
+  receive the same `PORT` and `NAME`; `down` preserves both volumes and `purge`
+  removes them.
 - Run another independent stack with another port, for example `make install
-  PORT=58356 NAME=secondary`. Point one separately loaded extension and one MCP
-  endpoint at each stack; extensions sharing a stack race to claim its global
-  queue.
+  PORT=58356 NAME=secondary`. Each stack starts its own managed browser and MCP
+  endpoint; extensions sharing a stack still race to claim its global queue.
 - Names distinguish user or work contexts but add no protocol routing or
   executor identity. Distinct installations still need distinct ports because
   only one process can bind each host port.
@@ -418,13 +435,11 @@ External URLs for `PORT=58346`:
 1. Run the component's checks and tests, and build the extension
    (`npm --prefix extension run build`) before deploying anything.
 2. Bump versions per the Version bumping rules when the protocol changed.
-3. Reinstall the selected stack and rebuild its context-specific extension with
-   `make install PORT=<port> NAME=<name>`. Use the same context arguments as
-   the original installation. This rebuilds/restarts services but preserves the
-   project volume.
-4. Deploy extension changes with the reinstall flow below. Never commit
-   `extension/dist/` or `.local/`; the loaded unpacked artifact is the
-   context-specific `.local/<context>/extension` directory.
+3. Reinstall the selected stack with `make install PORT=<port> NAME=<name>`.
+   Use the same context arguments as the original installation. This rebuilds
+   the browser image and restarts services while preserving data and browser
+   profile volumes.
+4. Never commit generated `extension/dist/` or `.local/` contents.
 5. **After updating the MCP, restart/reconnect the MCP client** (e.g. the
    opencode session that called it). Tool input/output schemas are captured
    at connection time; a stale client rejects responses that no longer match
@@ -437,15 +452,17 @@ External URLs for `PORT=58346`:
 
 ### Reinstall flow (extension reload)
 
-1. Rebuild the selected artifact with `make install PORT=<port> NAME=<name>`
-   or the equivalent extension build using `ACOB_PROXY_PORT=<port>` and
-   `ACOB_EXTENSION_OUTPUT_DIR=.local/<context>/extension`.
-2. Trigger the stack-global command with the MCP `reinstall` tool or `POST
-   /api/reinstall/`. The next extension polling that stack receives it, stops
-   active JavaScript work, reloads the unpacked extension, and acknowledges at
+1. For managed-browser code changes, rebuild and replace the container with
+   `make install PORT=<port> NAME=<name>`; the image owns the extension files.
+2. Use the MCP `reinstall` tool or `POST /api/reinstall/` only to restart the
+   currently installed extension for recovery. The extension stops active
+   JavaScript work, reloads itself, and acknowledges at
    `POST /api/reinstall/acknowledge/` from the new worker.
-3. Confirm recovery with a normal `list` instruction. There is no heartbeat
-   or settings endpoint.
+3. For native extension development, run `ACOB_BASE_URL=<url> npm --prefix
+   extension run build`, load `extension/dist/`, then use `reinstall` after
+   rebuilding so Chromium reads the latest unpacked files.
+4. Confirm recovery with a normal `list` instruction. There is no heartbeat or
+   settings endpoint.
 
 The reinstall channel is global per stack. If multiple extensions poll one
 stack, which extension receives the command is intentionally unspecified.
@@ -456,6 +473,9 @@ stack, which extension receives the command is intentionally unspecified.
   or `make logs PORT=<port> NAME=<name>`. For direct Compose
   commands, set `PORT=<port>` and use `--project-name <context> --file
   compose.yaml` so diagnostics do not accidentally target another stack.
+- Set `ACOB_VNC_ENABLED=true` when starting the stack to inspect Chromium at
+  `http://127.0.0.1:<port>/vnc`. noVNC is passwordless and for trusted local
+  debugging only.
 - Inspect nginx, Django, and MCP logs in that project; filter for the action or
   error of interest. Validation failures log the full rejected
   input — for `record`/`screenshot` that includes the entire base64
@@ -480,19 +500,17 @@ stack, which extension receives the command is intentionally unspecified.
 
 End-to-end browser testing against the local stack:
 
-1. Run `make install PORT=<port> NAME=<name>` and load or refresh the unpacked
-   extension from `.local/<context>/extension`.
-2. Ask the extension to reload its unpacked build: use the MCP `reinstall`
-   tool (or `POST /api/reinstall/`). This interrupts active work and reads the
-   latest files from the loaded context-specific artifact.
-3. Verify recovery with `list`, then use the MCP/client tool surface (e.g.
+1. Run `make install PORT=<port> NAME=<name>` to build and start the managed
+   browser with its bundled extension.
+2. Verify readiness with `list`, then use the MCP/client tool surface (e.g.
    `record`, `console`, `proxy`, `screenshot`) against a live tab; downloads
    are public media URLs that the ACOB server serves. Recordings should come back
    as `video/mp4` (H.264) on Chromium 126+; verify the returned file with
    `ffprobe` (`Duration:` must be present); the old WebM fallback lacks a
    duration element and tools that probe duration (e.g. vsense) reject it.
+3. Enable local VNC when visual inspection is useful.
 4. Verify isolation, when relevant, by running a second stack on another
-   `PORT` and confirming each extension polls only its matching proxy URL.
+   `PORT` and confirming each managed browser polls only its own proxy.
 
 Behavior that requires manual browser verification (no automated coverage):
 debugger interactions, offscreen document lifecycle, recording encode

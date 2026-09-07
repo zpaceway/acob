@@ -13,11 +13,12 @@ its source, dependencies, tooling, and documentation in its own directory.
 
 | Directory | Project |
 | --- | --- |
+| [`browser/`](browser/README.md) | Managed Chromium image with Xvfb and optional local VNC. |
 | [`client/`](client/README.md) | Independently installable Python API client. |
 | [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
 | [`mcp/`](mcp/README.md) | Standalone Model Context Protocol service. |
 | [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
-| [`proxy/`](proxy/README.md) | nginx config for single-port routing of API + MCP. |
+| [`proxy/`](proxy/README.md) | nginx image for single-port routing of API + MCP. |
 | [`web/`](web/README.md) | Buildless static marketing website. |
 
 Product direction, accepted non-goals, and future milestones are tracked in
@@ -48,17 +49,18 @@ local development and do not provide API authentication or TLS; review
 
 ## Docker
 
-The recommended installation builds a context-specific extension and starts a
-full stack behind the unified proxy:
+The recommended installation builds and starts a managed Chromium browser plus
+the API and MCP services behind the unified proxy:
 
 ```bash
 make install PORT=58346 NAME=default
 ```
 
-This uses context and Compose project `acob-58346-default`, writes the unpacked
-extension to `.local/acob-58346-default/extension`, and starts an isolated
-Compose project with its own network and volume. Only the proxy publishes a host
-port, bound to `127.0.0.1`; it exposes the API under `/api/` and MCP at `/mcp`.
+This uses context and Compose project `acob-58346-default` and starts an isolated
+Compose project with its own network, server-data volume, and persistent browser
+profile. The proxy publishes the API and MCP port on `127.0.0.1`. The browser
+runs Chromium as a non-root process on an Xvfb virtual display and loads the
+ACOB extension from its image automatically.
 
 `NAME` is required and distinguishes a user or work context. The installation
 context is always `acob-<port>-<name>`:
@@ -67,26 +69,23 @@ context is always `acob-<port>-<name>`:
 make install PORT=61554 NAME=alexandro
 ```
 
-This uses context and Compose project `acob-61554-alexandro` and writes the
-extension to `.local/acob-61554-alexandro/extension`. `NAME` may contain
+This uses context and Compose project `acob-61554-alexandro`. `NAME` may contain
 lowercase letters, digits, and internal hyphens, but cannot start or end with a
 hyphen. Compose network, volume, container, and image resources use the project
 prefix. The `install-opencode` and `install-claude` targets also use the context
 as their default MCP registration name.
 
-Each stack has one global instruction queue. Any extension polling that stack
-may claim any pending instruction, so do not point multiple extensions at one
-stack when execution must be isolated or predictable. Instead, install one
-stack per extension on a distinct proxy port:
+Each stack has one global instruction queue and one managed browser. Do not
+point another extension at that stack because either executor may claim pending
+work. Instead, install another complete stack on a distinct proxy port:
 
 ```bash
 make install PORT=61001 NAME=secondary
 ```
 
-That creates Compose project `acob-61001-secondary`, its isolated network and
-volume, and the matching extension at
-`.local/acob-61001-secondary/extension`. Use the same `PORT` and `NAME` with
-root `make up`, `make down`, `make purge`, `make logs`, and `make ps`. Distinct
+That creates Compose project `acob-61001-secondary`, its isolated network,
+volumes, and browser. Use the same `PORT` and `NAME` with root `make up`, `make
+down`, `make purge`, `make logs`, and `make ps`. Distinct
 installations still require distinct `PORT` values because only one process can
 bind a host port. Names are labels for user or work contexts; they do not add
 protocol routing or executor identity, and the queue remains promiscuous within
@@ -120,6 +119,24 @@ binds
 `127.0.0.1:58346` by default. Native development ports remain `58347` for the
 API and `58348` for MCP.
 
+## Browser
+
+The Docker installation includes the browser. It uses graphical Chromium on a
+virtual Xvfb display rather than Chromium's headless mode, which keeps extension
+and media APIs available in an unattended container. It does not provide
+stealth, fingerprint evasion, CAPTCHA bypass, or anti-bot behavior.
+
+Passwordless browser-based VNC debugging is disabled by default. Enable it when
+starting the stack:
+
+```bash
+ACOB_VNC_ENABLED=true make up PORT=58346 NAME=default
+```
+
+Open `http://127.0.0.1:58346/vnc` in a browser. nginx serves noVNC's lightweight
+client and proxies its WebSocket over the existing stack port. See
+[`browser/README.md`](browser/README.md).
+
 ## Browser extension
 
 Install the extension toolchain and create a production build:
@@ -129,13 +146,12 @@ npm --prefix extension ci
 npm --prefix extension run build
 ```
 
-With either server running, load the built extension in Chromium 116 or newer:
+For native extension development, load the built extension in Chromium 116 or
+newer:
 
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
-3. Select **Load unpacked** and choose `extension/dist/` for native development,
-   or the `.local/acob-<port>-<name>/extension` directory printed by the root
-   installer.
+3. Select **Load unpacked** and choose `extension/dist/`.
 
 The extension source is strict TypeScript under `extension/src/`. It polls the
 single global queue at its configured stack endpoint; the protocol has no
@@ -206,8 +222,8 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-After rebuilding an unpacked extension, request a reinstall so Chromium reads
-the updated files from `extension/dist/`:
+After rebuilding a natively loaded unpacked extension, request a reinstall so
+Chromium reads the updated files from `extension/dist/`:
 
 ```python
 reinstall_request = await client.reinstall()

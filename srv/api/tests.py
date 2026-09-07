@@ -332,7 +332,10 @@ class InstructionApiTests(TestCase):
 
         with (
             tempfile.TemporaryDirectory() as media_dir,
-            override_settings(MEDIA_ROOT=Path(media_dir)),
+            override_settings(
+                MEDIA_ROOT=Path(media_dir),
+                ACOB_PUBLIC_URL="http://127.0.0.1:58466",
+            ),
         ):
             completed = self.post_result(
                 instruction_id,
@@ -356,7 +359,7 @@ class InstructionApiTests(TestCase):
                 {"result": []},
                 {
                     "result": {
-                        "url": f"http://testserver/api/media/{stored_name}",
+                        "url": f"http://127.0.0.1:58466/api/media/{stored_name}",
                         "content_type": "image/png",
                         "full_page": True,
                     }
@@ -1205,7 +1208,10 @@ class InstructionApiTests(TestCase):
         self.assertEqual(result["content_type"], "video/mp4")
         self.assertEqual(result["duration"], 5.0)
         self.assertEqual(result["stopped_reason"], "user")
-        self.assertEqual(result["url"], f"http://testserver/api/media/{stored_name}")
+        self.assertEqual(
+            result["url"],
+            f"http://testserver/api/media/{stored_name}",
+        )
 
     def test_rejects_unknown_record_content_type(self) -> None:
         created = self.post_json(

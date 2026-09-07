@@ -35,6 +35,11 @@ and served by this server at `/api/media/<filename>`. No external storage
 service is configured; when storing a capture fails, the instruction
 completes as failed with a clear error.
 
+Set `ACOB_DATA_DIR` to move both SQLite and locally hosted captures. Set
+`ACOB_PUBLIC_URL` when capture download URLs need an origin other than the
+incoming request host. Compose sets it to `http://127.0.0.1:${PORT}` because
+the managed browser reaches nginx through its internal service name.
+
 Create and apply migrations separately with `make migrations` and
 `make migrate`.
 
@@ -71,8 +76,8 @@ the proxy at `http://127.0.0.1:58346` by default. Compose stores SQLite and
 media under `/data` in the project-scoped `srv-data` volume. A root
 `make install PORT=... NAME=...` requires `NAME` and uses installation context
 and project `acob-<port>-<name>`. For example,
-`make install PORT=61554 NAME=alexandro` uses `acob-61554-alexandro` and writes
-the matching extension to `.local/acob-61554-alexandro/extension`. `NAME` may
+`make install PORT=61554 NAME=alexandro` uses `acob-61554-alexandro` and starts
+a managed browser with a project-scoped profile. `NAME` may
 contain lowercase letters, digits, and internal hyphens, but cannot start or end
 with a hyphen. Compose network, volume, container, and image resources use that
 project prefix, and the root OpenCode and Claude installers use the context as

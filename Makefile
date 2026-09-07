@@ -1,7 +1,6 @@
 PORT ?= 58346
 NAME ?=
 INSTANCE := acob-$(PORT)-$(strip $(NAME))
-EXTENSION_DIR ?= $(CURDIR)/.local/$(INSTANCE)/extension
 MCP_NAME ?= $(INSTANCE)
 MCP_URL := http://127.0.0.1:$(PORT)/mcp
 COMPOSE := PORT=$(PORT) docker compose --project-name $(INSTANCE) --file compose.yaml
@@ -20,12 +19,9 @@ check-name:
 check-context: check-port check-name
 
 install: check-context
-	@echo "Building ACOB extension for http://127.0.0.1:$(PORT)..."
-	npm --prefix extension ci
-	ACOB_PROXY_PORT=$(PORT) ACOB_EXTENSION_OUTPUT_DIR=$(EXTENSION_DIR) npm --prefix extension run build
 	@echo "Starting isolated ACOB instance $(INSTANCE)..."
 	$(COMPOSE) up --detach --build
-	@echo "Load the unpacked extension from $(EXTENSION_DIR)"
+	@echo "Managed Chromium is running in the acob-browser container"
 	@echo "MCP endpoint: $(MCP_URL)"
 
 up: check-context

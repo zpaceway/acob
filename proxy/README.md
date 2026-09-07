@@ -1,22 +1,24 @@
 # ACOB Proxy
 
-The `nginx:alpine` proxy is the only public entrypoint for a containerized ACOB
+The proxy image is the API and MCP entrypoint for a containerized ACOB
 installation. It publishes one localhost port and routes by path:
 
 ```text
 http://127.0.0.1:58346/mcp  -> acob-mcp:58348   (MCP Streamable HTTP)
+http://127.0.0.1:58346/vnc  -> acob-browser:6080 (optional noVNC)
 http://127.0.0.1:58346/*    -> acob-srv:58347   (Django API and /api/media/*)
 ```
 
-The server, MCP service, and proxy share a Compose-project-local `acob` network.
-The server and MCP containers only expose their ports on that network; neither
-publishes a host port. MCP-to-API traffic stays internal at
-`http://acob-srv:58347`.
+The server, MCP service, proxy, and managed browser share a
+Compose-project-local `acob` network. The server and MCP containers only expose
+their ports on that network; neither publishes a host port. MCP-to-API traffic
+stays internal at `http://acob-srv:58347`, and the browser extension polls
+`http://acob-proxy`.
 
 ## Install
 
-Docker with Compose and Node.js 20 or newer are required. From the monorepo
-root, install a complete local stack and build its matching extension:
+Docker with Compose is required. From the monorepo root, install a complete
+local stack including its managed browser:
 
 ```bash
 make install PORT=58346 NAME=default
@@ -28,16 +30,14 @@ installation context is always `acob-<port>-<name>`. `NAME` may contain lowercas
 letters, digits, and internal hyphens, but cannot start or end with a hyphen. The
 command:
 
-- builds the extension with `http://127.0.0.1:<port>` as its default Server URL;
-- writes the unpacked build to `.local/<context>/extension`;
+- builds the browser image and its bundled extension for `http://acob-proxy`;
 - starts Compose with project name `<context>`;
 - creates network, volume, container, and image resources with that project
   prefix; and
-- publishes only nginx at `127.0.0.1:<port>`.
+- publishes nginx at `127.0.0.1:<port>`.
 
-The first example uses context `acob-58346-default` and extension artifact
-`.local/acob-58346-default/extension`. Load the printed directory in Chromium.
-Names distinguish user or work contexts, but they do not add protocol routing
+The first example uses context `acob-58346-default` and a project-scoped
+persistent browser profile. Names distinguish user or work contexts, but they do not add protocol routing
 or executor identity: every extension connected to one stack still consumes
 its promiscuous queue. Distinct installations require distinct `PORT` values
 because only one process can bind each host port.
@@ -55,14 +55,13 @@ make logs PORT=61554 NAME=alexandro
 make down PORT=61554 NAME=alexandro
 ```
 
-`down` preserves the project volume. `purge` removes it along with the stack.
-`up` rebuilds the containers but does not rebuild the extension; use `install`
-when creating an installation or changing its port or name.
+`down` preserves the project volumes. `purge` removes them along with the stack.
+Both `up` and `install` rebuild changed images.
 
 ## MCP Clients
 
-The root installers build and start the full stack, generate the extension, and
-register its fixed `/mcp` endpoint:
+The root installers build and start the full stack and register its fixed
+`/mcp` endpoint:
 
 ```bash
 make install-opencode PORT=58346 NAME=default
@@ -98,6 +97,7 @@ The default proxy exposes the flat, single-queue interfaces:
 - Media: `http://127.0.0.1:58346/api/media/<file>`
 - Reinstall: `http://127.0.0.1:58346/api/reinstall/`
 - MCP Streamable HTTP: `http://127.0.0.1:58346/mcp`
+- Optional noVNC debugger: `http://127.0.0.1:58346/vnc`
 
 There is no browser identifier in any route and no heartbeat or settings
 endpoint. Extension settings and limits remain local to the extension popup.
@@ -115,9 +115,9 @@ PORT=58346 docker compose --project-name acob-58346-default --file compose.yaml 
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
 them manually with direct Compose commands or replace them with a named install.
 
-The root `compose.yaml` is the only Compose file. It defines all three services
-(`acob-srv`, `acob-mcp`, `acob-proxy`) plus the project-scoped `acob` network
-and `srv-data` volume. Do not assign a global network name:
+The root `compose.yaml` is the only Compose file. It defines four services
+(`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`) plus the project-scoped
+`acob` network and data volumes. Do not assign a global network name:
 project scoping is what isolates installations.
 
 There are no component Compose files. For individual-service development, use
@@ -126,11 +126,13 @@ native `make -C srv run` and `make -C mcp run` when direct host access on
 
 ## nginx Configuration
 
-`nginx.conf` is mounted read-only. It:
+`proxy/Dockerfile` copies `nginx.conf` into the proxy image. The configuration:
 
 - listens on container port `80`, mapped only to `127.0.0.1:${PORT}`;
 - proxies `/mcp` to `acob-mcp:58348` with HTTP/1.1, buffering disabled, and
   3600-second streaming timeouts;
+- redirects `/vnc` to noVNC's lightweight client and proxies `/vnc/` plus its
+  WebSocket to `acob-browser:6080`;
 - proxies every other path to `acob-srv:58347`;
 - accepts request bodies up to `1024M` for bounded recordings and screenshot
   batches; and

@@ -73,11 +73,10 @@ finally:
 ```
 
 Root installations require `NAME` and always use context
-`acob-<port>-<name>` for the Compose project, generated extension path, network,
-volume, container, and image resource prefix, and default MCP registration
-label. For example,
-`make install PORT=61554 NAME=alexandro` creates context
-`acob-61554-alexandro` and `.local/acob-61554-alexandro/extension`. Names allow
+`acob-<port>-<name>` for the Compose project, network, volume, container, and
+image resource prefix, managed browser, and default MCP registration label. For
+example, `make install PORT=61554 NAME=alexandro` creates context
+`acob-61554-alexandro`. Names allow
 lowercase letters, digits, and internal hyphens and cannot start or end with a
 hyphen. Use the same `PORT` and `NAME` for lifecycle commands, and use a distinct
 port for every installation because only one process can bind it. `ACOBClient`
@@ -268,11 +267,13 @@ for entry in entries:
 accept 1 to 20 actions. Actions submitted outside a batch still run in
 parallel.
 
-For an unpacked extension, build `extension/dist/` first. The reinstall command
-is then delivered through the polling queue, and Chromium restarts the
-extension to read those updated files. Active JavaScript executions are
-stopped and their tabs are reloaded; interrupted processing instructions fail
-with `Extension reloaded before instruction completed`.
+For native extension development, build and load `extension/dist/` first. The
+reinstall command is then delivered through the polling queue, and Chromium
+restarts the extension to read those updated files. In the managed browser,
+rebuild and replace the browser container to deploy changed extension files.
+Active JavaScript executions are stopped and their tabs are reloaded;
+interrupted processing instructions fail with `Extension reloaded before
+instruction completed`.
 
 ## Low-Level Queue Access
 

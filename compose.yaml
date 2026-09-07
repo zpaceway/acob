@@ -5,6 +5,7 @@ services:
       - "58347"
     environment:
       ACOB_DATA_DIR: /data
+      ACOB_PUBLIC_URL: http://127.0.0.1:${PORT:-58346}
       ACOB_SRV_HOST: 0.0.0.0
       ACOB_SRV_PORT: 58347
     volumes:
@@ -27,12 +28,29 @@ services:
     networks:
       - acob
 
+  acob-browser:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    environment:
+      ACOB_BROWSER_HEIGHT: ${ACOB_BROWSER_HEIGHT:-1080}
+      ACOB_BROWSER_WIDTH: ${ACOB_BROWSER_WIDTH:-1920}
+      ACOB_VNC_ENABLED: ${ACOB_VNC_ENABLED:-false}
+    expose:
+      - "6080"
+    volumes:
+      - browser-data:/data
+    shm_size: 1gb
+    restart: unless-stopped
+    depends_on:
+      - acob-proxy
+    networks:
+      - acob
+
   acob-proxy:
-    image: nginx:alpine
+    build: ./proxy
     ports:
       - "127.0.0.1:${PORT:-58346}:80"
-    volumes:
-      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - acob-srv
       - acob-mcp
@@ -43,4 +61,5 @@ networks:
   acob: {}
 
 volumes:
+  browser-data: {}
   srv-data: {}

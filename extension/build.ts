@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -10,9 +11,18 @@ const configuredOutput = process.env.ACOB_EXTENSION_OUTPUT_DIR;
 const outputDirectory = configuredOutput
   ? path.resolve(extensionDirectory, configuredOutput)
   : path.join(extensionDirectory, "dist");
-const proxyPort = process.env.ACOB_PROXY_PORT ?? "58346";
-if (!/^\d+$/.test(proxyPort) || Number(proxyPort) < 1 || Number(proxyPort) > 65535) {
-  throw new Error("ACOB_PROXY_PORT must be an integer from 1 to 65535");
+const configuredBaseUrl = process.env.ACOB_BASE_URL;
+if (configuredBaseUrl) {
+  const baseUrl = new URL(configuredBaseUrl);
+  if (
+    (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") ||
+    baseUrl.search ||
+    baseUrl.hash
+  ) {
+    throw new Error(
+      "ACOB_BASE_URL must be an HTTP(S) URL without a query or fragment",
+    );
+  }
 }
 const packageExecutable = (
   packageName: string,
@@ -30,6 +40,7 @@ const assets = [
   "manifest.json",
   "offscreen.html",
   "popup.html",
+  "settings.example.json",
 ];
 const jqueryDistDirectory = path.dirname(require.resolve("jquery"));
 const turndownDirectory = path.dirname(
@@ -49,14 +60,20 @@ execFileSync(
   { cwd: extensionDirectory, stdio: "inherit" },
 );
 await mkdir(outputDirectory, { recursive: true });
-if (proxyPort !== "58346") {
-  const settingsPath = path.join(outputDirectory, "settings.js");
-  const settingsSource = await readFile(settingsPath, "utf8");
-  await writeFile(
-    settingsPath,
-    settingsSource.replaceAll("127.0.0.1:58346", `127.0.0.1:${proxyPort}`),
-  );
+const localSettingsPath = path.join(extensionDirectory, "settings.json");
+const settingsPath = existsSync(localSettingsPath)
+  ? localSettingsPath
+  : path.join(extensionDirectory, "settings.example.json");
+const bundledSettings = JSON.parse(
+  await readFile(settingsPath, "utf8"),
+) as Record<string, unknown>;
+if (configuredBaseUrl) {
+  bundledSettings.baseUrl = configuredBaseUrl.replace(/\/+$/, "");
 }
+await writeFile(
+  path.join(outputDirectory, "settings.json"),
+  `${JSON.stringify(bundledSettings, null, 2)}\n`,
+);
 await Promise.all(
   [
     ...assets.map((asset) => ({

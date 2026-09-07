@@ -41,12 +41,11 @@ make install PORT=58346 NAME=default
 make install PORT=61554 NAME=alexandro
 ```
 
-`PORT` defaults to `58346`, but `NAME` is required. The root installer always
-uses context and Compose project `acob-<port>-<name>` and writes the unpacked
-extension to `.local/acob-<port>-<name>/extension`; the first example writes
-`.local/acob-58346-default/extension`. Names allow lowercase letters, digits,
-and internal hyphens and cannot start or end with a hyphen. Load the generated
-context artifact rather than `dist/`.
+`PORT` defaults to `58346`, but `NAME` is required. The root installer uses
+context and Compose project `acob-<port>-<name>` and builds a managed Chromium
+image with this extension already loaded. Names allow lowercase letters, digits,
+and internal hyphens and cannot start or end with a hyphen. Load `dist/` manually
+only for native extension development.
 
 The context prefixes Compose network, volume, container, and image resources
 and is the default MCP registration name used by root `install-opencode` and
@@ -165,18 +164,26 @@ Chromium process requires an external browser supervisor or user action.
 
 ## Runtime Configuration
 
-The popup displays controls defined centrally in `src/settings.ts`. Defaults
-include the unified proxy at `http://127.0.0.1:58346`, one-second polling, a
-batch size of four, and up to eight concurrent executions. The same settings
-module owns validation and the remaining tab, timeout, screenshot, recording,
-console, and retry limits. These settings remain local to the extension; the
-server, Python client, and MCP service do not expose a settings endpoint or
-method. A read-only MCP URL (`<Server URL>/mcp`) is shown beneath the Server URL.
+The popup displays controls defined centrally in `src/settings.ts`. On first
+installation, the built `settings.json` seeds extension-local storage after
+every value is normalized through that settings module. Later starts and
+extension updates use the stored configuration and do not reread the file.
+`settings.example.json` is the committed default and documents the complete
+build-time shape. An ignored local `settings.json` overrides it when present.
+Set `ACOB_BASE_URL` during `npm run build` to replace the bundled initial server URL; the browser image uses
+`http://acob-proxy`, while an ordinary native build defaults to
+`http://127.0.0.1:58346`.
+
+The defaults include one-second polling, a batch size of four, up to eight
+concurrent executions, and `allowCleanup: false`. The same settings module owns
+validation and the remaining tab, timeout, screenshot, recording, console, and
+retry limits. These settings remain local to the extension; the server, Python
+client, and MCP service do not expose a settings endpoint or method.
 
 All extensions connected to one server consume its same global queue. Use the
 root `make install PORT=... NAME=...` workflow when separate local installations
-are needed; `NAME` is required, and each generated extension must point at its
-own distinct-port stack. Run one extension per stack when deterministic queue
+are needed; `NAME` is required, and each managed browser belongs to its own
+distinct-port stack. Run one extension per stack when deterministic queue
 ownership matters.
 
 ## Permissions And Safety

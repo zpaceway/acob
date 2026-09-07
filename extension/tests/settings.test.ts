@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { ACOBSettings as settings } from "../src/settings.js";
+
+test("keeps example first-install settings aligned with defaults", async () => {
+  const example = JSON.parse(
+    await readFile(new URL("../settings.example.json", import.meta.url), "utf8"),
+  ) as unknown;
+
+  assert.deepEqual(example, settings.normalizeConfiguration());
+});
 
 test("normalizes a complete default configuration", () => {
   const configuration = settings.normalizeConfiguration();

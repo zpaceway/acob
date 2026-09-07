@@ -138,12 +138,12 @@ make -C .. install PORT=58346 NAME=default
 make -C .. install PORT=61554 NAME=alexandro
 ```
 
-This builds `acob-srv` and `acob-mcp`, fronts them with nginx on localhost,
-and creates a project-specific network and server data volume. Only the proxy
-publishes the selected host port. It also emits the matching unpacked extension
-to `.local/acob-58346-default/extension`. The first example uses Compose project
-and context `acob-58346-default`; all named installs apply the project prefix to
-network, volume, container, and image resources. `NAME` allows lowercase
+This builds `acob-srv`, `acob-mcp`, the proxy image, and a managed Chromium
+browser with the extension preinstalled. It creates a project-specific network,
+server data volume, and browser profile volume. The proxy publishes the selected
+API/MCP host port. The first example uses Compose project and context
+`acob-58346-default`; all named installs apply the project prefix to network,
+volume, container, and image resources. `NAME` allows lowercase
 letters, digits, and internal hyphens and cannot start or end with a hyphen.
 Lifecycle commands must receive the same `PORT` and `NAME`. Distinct
 installations still require distinct ports because only one process can bind a

@@ -15,7 +15,8 @@ to controllers.
 
 The intended product shape is:
 
-- A user runs one local stack and its matching Chromium extension.
+- A user runs one local stack and its managed Chromium browser, or connects one
+  manually loaded Chromium extension for native development.
 - Controllers request typed, bounded browser operations.
 - The extension evaluates local policy before touching a tab or page.
 - Common workflows use semantic inspection and deterministic interactions.
@@ -108,7 +109,7 @@ Python client or MCP host
 
 ### Repository And Tooling
 
-- Server, client, MCP, extension, and website are independently owned
+- Server, browser, client, MCP, extension, proxy, and website are independently owned
   components.
 - Python components use Ruff, Black, Pyright, and component-specific tests.
 - The server also uses ty, Django checks, and migration drift checks.
@@ -661,6 +662,7 @@ websites.
 | Server | Hardened container and source-checkout workflow. |
 | Python client | Wheel and source distribution with typed metadata and clean-install tests. |
 | MCP adapter | Source-run service and non-root container with authenticated HTTP defaults. |
+| Browser | Chromium image with a virtual display, persistent profile, and optional browser-based noVNC. |
 | Extension | Reproducible unpacked directory and deterministic archive with checksums. |
 | Protocol | Repository-owned schemas and fixtures, published when external implementers need them. |
 | Website | Static deployment without a package registry artifact. |
@@ -670,18 +672,18 @@ conformance, and smoke tests without introducing a root runtime dependency
 graph.
 
 The root installation workflow requires `NAME`; for example,
-`make install PORT=58346 NAME=default` builds a matching extension at
-`.local/acob-58346-default/extension` and starts an isolated Compose project,
-network, and volume from the root `compose.yaml`. The root `compose.yaml`
-defines all three services (`acob-srv`, `acob-mcp`, `acob-proxy`). Only that
-instance's proxy binds its localhost port; native
+`make install PORT=58346 NAME=default` builds a managed Chromium image with the
+extension preinstalled and starts an isolated Compose project, network, and
+volumes from the root `compose.yaml`. The root `compose.yaml` defines four
+services (`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`). That instance's
+proxy binds its localhost port; optional noVNC is served under `/vnc` on that
+same origin only when its process is enabled. Native
 server and MCP development ports remain `58347` and `58348`.
 
 `NAME` distinguishes user or work contexts. For example,
 `make install PORT=61554 NAME=alexandro` uses installation context and Compose
-project `acob-61554-alexandro`, writes the extension to
-`.local/acob-61554-alexandro/extension`, prefixes that project's network,
-volume, container, and image resources, and becomes the default MCP registration
+project `acob-61554-alexandro`, prefixes that project's network, volume,
+container, and image resources, and becomes the default MCP registration
 name for the root OpenCode and Claude installers. The context is always
 `acob-<port>-<name>`. Names allow lowercase letters, digits, and internal hyphens
 and cannot start or end with a hyphen. Lifecycle commands must receive the same

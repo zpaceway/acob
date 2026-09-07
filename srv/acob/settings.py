@@ -75,6 +75,7 @@ WSGI_APPLICATION = "acob.wsgi.application"
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATA_DIR = Path(os.environ.get("ACOB_DATA_DIR", BASE_DIR))
+ACOB_PUBLIC_URL = os.environ.get("ACOB_PUBLIC_URL", "").rstrip("/")
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
