@@ -29,8 +29,9 @@ TypeScript declaration files, the jQuery and Turndown browser distributions,
 and their licenses. Do not edit `dist/` directly.
 
 The same tasks are available as `make install`, `make typecheck`, `make test`,
-and `make build`. Unit tests cover settings, keyboard validation, and timeout
-cleanup; type-only contracts are checked by TypeScript. Changes to the manifest,
+and `make build`. Unit tests cover settings, input command construction and
+serialization, keyboard validation, and timeout cleanup; type-only contracts
+are checked by TypeScript. Changes to the manifest,
 service worker, offscreen polling, popup, Chrome APIs, or debugger behavior
 require a manual unpacked-extension test against a running server.
 
@@ -65,14 +66,20 @@ evaluation semantics.
 ## Browser Actions
 
 Tab management actions are `list`, `navigate`, `focus`, `close`, and `reload`.
-`reload` waits for the target tab to finish loading. `scroll` moves a target tab
-vertically by a finite `y` distance in CSS pixels; positive values move down and
-negative values move up. It returns the requested distance with a `scrolled`
-confirmation.
+`focus` activates the tab and focuses its browser window. `reload` waits for the
+target tab to finish loading. `scroll` leaves browser focus unchanged and dispatches
+trusted wheel input at a visible scrollable surface by a finite `y` distance in
+CSS pixels; positive values move down and negative values move up. It returns
+the requested distance with a `scrolled` confirmation.
 
 Instructions with a known target tab run in a per-tab queue. Work on different
 tabs can still overlap, while reloads, navigation, input, screenshots, and
-JavaScript on the same tab execute in claim order.
+JavaScript on the same tab execute in claim order. Focus, click, keyboard, and
+scroll also share a browser-global input queue so another tab cannot become
+active between input targeting and dispatch. Click, keyboard, and scroll leave
+focus unchanged and fail with a focus hint when their target tab is hidden; use
+the separate `focus` action first when needed, or try `javascript` when browser
+focus should remain unchanged.
 
 ## Batches
 

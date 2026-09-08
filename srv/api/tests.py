@@ -158,8 +158,10 @@ class InstructionApiTests(TestCase):
                 "action": "batch",
                 "actions": [
                     {"action": "list"},
+                    {"action": "navigate", "url": "https://example.com"},
                     {"action": "scroll", "tid": 12, "y": 500},
                     {"action": "click", "tid": 12, "selector": "button"},
+                    {"action": "keyboard", "tid": 12, "text": "ACOB"},
                 ],
             },
         )
@@ -170,10 +172,19 @@ class InstructionApiTests(TestCase):
             response.json()["payload"]["actions"],
             [
                 {"action": "list"},
-                {"action": "scroll", "tid": 12, "y": 500},
+                {"action": "navigate", "url": "https://example.com"},
+                {"action": "scroll", "tid": 12, "y": 500.0},
                 {"action": "click", "tid": 12, "selector": "button"},
+                {
+                    "action": "keyboard",
+                    "tid": 12,
+                    "text": "ACOB",
+                    "modifiers": [],
+                },
             ],
         )
+        self.assertNotIn("tid", response.json()["payload"]["actions"][1])
+        self.assertNotIn("key", response.json()["payload"]["actions"][4])
         self.assertEqual(Instruction.objects.count(), 1)
         instruction = Instruction.objects.get()
         self.assertEqual(instruction.action, Instruction.Action.BATCH)

@@ -128,6 +128,7 @@ def create_batch_instruction(request: HttpRequest) -> JsonResponse:
     payload = request_model.model_dump(
         mode="json",
         exclude={"action"},
+        exclude_none=True,
     )
     instruction = Instruction.objects.create(
         action=Instruction.Action.BATCH,

@@ -1,6 +1,15 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +46,6 @@ const assets = [
   "icon-32.png",
   "icon-48.png",
   "icon-128.png",
-  "manifest.json",
   "offscreen.html",
   "popup.html",
   "settings.example.json",
@@ -59,6 +67,20 @@ execFileSync(
   ],
   { cwd: extensionDirectory, stdio: "inherit" },
 );
+const workerHash = createHash("sha256");
+const emittedJavaScript = (await readdir(outputDirectory, { recursive: true }))
+  .filter((file) => file.endsWith(".js"))
+  .sort();
+for (const file of emittedJavaScript) {
+  workerHash.update(file);
+  workerHash.update(await readFile(path.join(outputDirectory, file)));
+}
+const backgroundPath = path.join(outputDirectory, "background.js");
+const backgroundFilename = `background-${workerHash.digest("hex")}.js`;
+await rename(
+  backgroundPath,
+  path.join(outputDirectory, backgroundFilename),
+);
 await mkdir(outputDirectory, { recursive: true });
 const localSettingsPath = path.join(extensionDirectory, "settings.json");
 const settingsPath = existsSync(localSettingsPath)
@@ -70,6 +92,14 @@ const bundledSettings = JSON.parse(
 if (configuredBaseUrl) {
   bundledSettings.baseUrl = configuredBaseUrl.replace(/\/+$/, "");
 }
+const manifest = JSON.parse(
+  await readFile(path.join(extensionDirectory, "manifest.json"), "utf8"),
+) as { background: { service_worker: string } };
+manifest.background.service_worker = backgroundFilename;
+await writeFile(
+  path.join(outputDirectory, "manifest.json"),
+  `${JSON.stringify(manifest, null, 2)}\n`,
+);
 await writeFile(
   path.join(outputDirectory, "settings.json"),
   `${JSON.stringify(bundledSettings, null, 2)}\n`,

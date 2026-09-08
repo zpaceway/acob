@@ -389,17 +389,16 @@ true when that tab is active and its window is focused. `navigate` requires a
 non-empty `url`; it navigates the supplied `tid`, or creates an inactive
 background tab when `tid` is omitted, waits for the page load event, and
 returns the tab details. New-tab navigation fails when the browser already has
-the maximum number of tabs configured in the extension. Only `focus` activates
-a tab within its own window. It never raises or focuses the window, so it
-cannot steal focus from another application. `focus` and `close` require a
-`tid`.
+the maximum number of tabs configured in the extension. `focus` activates a tab
+and focuses its browser window. `focus` and `close` require a `tid`.
 
 `reload` requires a `tid`, reloads that tab, waits for its page load event, and
 returns updated tab details. `scroll` requires a `tid` and finite numeric `y`;
-it scrolls vertically by that many CSS pixels, with positive values moving down
-and negative values moving up. Its result is `{ "scrolled": true, "y": ... }`.
+it leaves browser focus unchanged and dispatches trusted wheel input at a
+visible scrollable surface, with positive values moving down and negative values moving up. Its
+result is `{ "scrolled": true, "y": ... }`.
 
-`click` requires a positive `tid` and a non-empty CSS `selector`. The extension leaves browser focus unchanged, scrolls the selected element into view, and sends mouse movement, press, and release input at the center of its rendered border box. The browser performs normal coordinate hit-testing, so an overlay or another element visually above the selected element receives the click instead. The result includes the selector and click coordinates.
+`click` requires a positive `tid` and a non-empty CSS `selector`. The extension leaves browser focus unchanged, scrolls the selected element into view, and sends mouse movement, press, and release input at the center of its largest rendered content fragment. The browser performs normal coordinate hit-testing, so an overlay or another element visually above the selected element receives the click instead. The result includes the selector and click coordinates.
 
 `keyboard` requires a positive `tid` and exactly one of `text` or `key`. Text
 input sends `Input.insertText` to the control that has page focus and reports
@@ -408,8 +407,16 @@ value. Named keys are `ArrowDown`, `ArrowLeft`, `ArrowRight`, `ArrowUp`,
 `Backspace`, `Delete`, `End`, `Enter`, `Escape`, `Home`, `PageDown`, `PageUp`,
 `Space`, and `Tab`; a single-character key is also accepted. Key input can
 include unique `alt`, `ctrl`, `meta`, and `shift` modifiers. The extension
-leaves tab and window focus unchanged, so the agent must focus the intended page
-control first, usually with `click`.
+leaves browser focus unchanged, so the target tab and intended page control
+must already have focus.
+
+`focus`, `scroll`, `click`, and `keyboard` share one browser-global input lane.
+This prevents concurrent actions for different tabs from switching the active
+tab between an input action's targeting and dispatch phases.
+Use `focus` before input when needed, preferably in the same batch so the
+dependency is explicit and ordered. Input against a hidden tab fails with a
+hint to call `focus` or try `javascript` instead of reporting a browser event
+that Chromium dropped.
 
 `screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains the public download URL served by the ACOB server itself, not image data:
 

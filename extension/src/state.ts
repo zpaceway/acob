@@ -41,6 +41,7 @@ export const state = {
   reinstallScheduled: false,
   tabCreationQueue: Promise.resolve() as Promise<void>,
   tabExecutionQueues: new Map<number, Promise<void>>(),
+  browserInputQueue: Promise.resolve() as Promise<void>,
   proxyQueue: Promise.resolve() as Promise<void>,
   proxyCredentials: null as ProxyCredentials | null,
 };

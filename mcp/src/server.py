@@ -273,7 +273,7 @@ def create_server(
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
     ) -> Tab:
-        """Activate a Chromium tab within its window without raising the window."""
+        """Activate a Chromium tab and focus its browser window."""
         return await _client(ctx).focus(
             tid,
             timeout=timeout,

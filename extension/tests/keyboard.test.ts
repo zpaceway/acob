@@ -6,6 +6,7 @@ import {
   keyboardCharacter,
   NAMED_KEYBOARD_KEYS,
 } from "../src/types.js";
+import { describeKey } from "../src/keys.js";
 
 test("accepts named keys and single Unicode characters", () => {
   assert.equal(isKeyboardKey("Enter"), true);
@@ -24,4 +25,19 @@ test("rejects unsupported multi-character keys", () => {
     /exactly one non-whitespace character/,
   );
   assert.throws(() => keyboardCharacter(" "), /non-whitespace/);
+});
+
+test("describes shifted characters with native key metadata", () => {
+  assert.deepEqual(describeKey("a", true), {
+    key: "A",
+    code: "KeyA",
+    keyCode: 65,
+    text: "A",
+  });
+  assert.deepEqual(describeKey("1", true), {
+    key: "!",
+    code: "Digit1",
+    keyCode: 49,
+    text: "!",
+  });
 });

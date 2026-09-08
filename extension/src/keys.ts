@@ -5,7 +5,6 @@ export interface KeyDefinition {
   code?: string;
   keyCode?: number;
   text?: string;
-  unmodifiedText?: string;
 }
 
 export const MODIFIER_BITS: Record<KeyboardModifier, number> = {
@@ -95,29 +94,26 @@ export function describeKey(key: string, shiftPressed: boolean): KeyDefinition {
 
   const upperKey = key.toUpperCase();
   if (/^[A-Z]$/.test(upperKey)) {
-    const unmodifiedText = key.toLowerCase();
     const text = shiftPressed ? upperKey : key;
     return {
       key: text,
       code: `Key${upperKey}`,
       keyCode: upperKey.charCodeAt(0),
       text,
-      unmodifiedText,
     };
   }
 
-  const unmodifiedText = UNSHIFTED_CHARACTERS[key] ?? key;
-  const characterDefinition = CHARACTER_DEFINITIONS[unmodifiedText];
+  const unshiftedText = UNSHIFTED_CHARACTERS[key] ?? key;
+  const characterDefinition = CHARACTER_DEFINITIONS[unshiftedText];
   if (characterDefinition) {
     const text = shiftPressed
-      ? (SHIFTED_CHARACTERS[unmodifiedText] ?? key)
+      ? (SHIFTED_CHARACTERS[unshiftedText] ?? key)
       : key;
     return {
       key: text,
       ...characterDefinition,
       text,
-      unmodifiedText,
     };
   }
-  return { key, text: key, unmodifiedText: key };
+  return { key, text: key };
 }

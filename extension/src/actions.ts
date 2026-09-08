@@ -29,6 +29,41 @@ import type {
   UnserializableJavaScriptResult,
 } from "./types.js";
 
+async function waitForPageInputReady(
+  target: chrome.debugger.DebuggerSession,
+  configuration: Configuration,
+): Promise<void> {
+  const evaluation = await withTimeout(
+    sendCdpCommand(target, "Runtime.evaluate", {
+      expression: `
+        new Promise((resolve) => {
+          const ready = () => setTimeout(
+            () => requestAnimationFrame(() =>
+              requestAnimationFrame(() => resolve(true))
+            ),
+            100,
+          );
+          if (document.visibilityState === "visible") {
+            ready();
+            return;
+          }
+          const onVisibilityChange = () => {
+            if (document.visibilityState !== "visible") return;
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+            ready();
+          };
+          document.addEventListener("visibilitychange", onVisibilityChange);
+        })
+      `,
+      awaitPromise: true,
+      returnByValue: true,
+    }),
+    Math.min(configuration.httpRequestTimeoutMs, 3000),
+    "The focused tab did not become ready for input; try again or use javascript",
+  );
+  throwEvaluationException(evaluation);
+}
+
 export async function executeJavaScript(
   tid: number,
   script: string,
@@ -134,6 +169,7 @@ export async function executeClick(
   configuration: Configuration,
 ): Promise<ClickResult> {
   return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
+    await waitForPageInputReady(target, configuration);
     const { root } = await sendCdpCommand(
       target,
       "DOM.getDocument",
@@ -152,26 +188,152 @@ export async function executeClick(
     await sendCdpCommand(target, "DOM.scrollIntoViewIfNeeded", {
       nodeId,
     });
-    const { model } = await sendCdpCommand(
-      target,
-      "DOM.getBoxModel",
-      { nodeId },
+    const [{ quads }, { cssVisualViewport }] = await Promise.all([
+      sendCdpCommand(target, "DOM.getContentQuads", { nodeId }),
+      sendCdpCommand(target, "Page.getLayoutMetrics"),
+    ]);
+    const clipPolygon = (
+      points: { x: number; y: number }[],
+      inside: (point: { x: number; y: number }) => boolean,
+      intersect: (
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+      ) => { x: number; y: number },
+    ): { x: number; y: number }[] => {
+      const clipped: { x: number; y: number }[] = [];
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index]!;
+        const end = points[(index + 1) % points.length]!;
+        const startInside = inside(start);
+        const endInside = inside(end);
+        if (startInside && endInside) {
+          clipped.push(end);
+        } else if (startInside) {
+          clipped.push(intersect(start, end));
+        } else if (endInside) {
+          clipped.push(intersect(start, end), end);
+        }
+      }
+      return clipped;
+    };
+    const clipAtX = (
+      points: { x: number; y: number }[],
+      boundary: number,
+      keepGreater: boolean,
+    ) => clipPolygon(
+      points,
+      ({ x }) => keepGreater ? x >= boundary : x <= boundary,
+      (start, end) => {
+        const ratio = (boundary - start.x) / (end.x - start.x);
+        return { x: boundary, y: start.y + ratio * (end.y - start.y) };
+      },
     );
-    const border = model.border;
-    if (border.length < 8) {
-      throw new Error(`Element has an invalid clickable box: ${selector}`);
-    }
-    const x = (border[0]! + border[2]! + border[4]! + border[6]!) / 4;
-    const y = (border[1]! + border[3]! + border[5]! + border[7]!) / 4;
-
-    if (
-      model.width < 1 ||
-      model.height < 1 ||
-      !Number.isFinite(x) ||
-      !Number.isFinite(y)
-    ) {
+    const clipAtY = (
+      points: { x: number; y: number }[],
+      boundary: number,
+      keepGreater: boolean,
+    ) => clipPolygon(
+      points,
+      ({ y }) => keepGreater ? y >= boundary : y <= boundary,
+      (start, end) => {
+        const ratio = (boundary - start.y) / (end.y - start.y);
+        return { x: start.x + ratio * (end.x - start.x), y: boundary };
+      },
+    );
+    const candidates = quads
+      .filter((quad) => quad.length >= 8)
+      .map((quad) => {
+        let points = [
+          { x: quad[0]!, y: quad[1]! },
+          { x: quad[2]!, y: quad[3]! },
+          { x: quad[4]!, y: quad[5]! },
+          { x: quad[6]!, y: quad[7]! },
+        ];
+        const originalArea = Math.abs(
+          points.reduce((sum, point, index) => {
+            const next = points[(index + 1) % points.length]!;
+            return sum + point.x * next.y - point.y * next.x;
+          }, 0),
+        ) / 2;
+        points = clipAtX(points, cssVisualViewport.offsetX, true);
+        points = clipAtX(
+          points,
+          cssVisualViewport.offsetX + cssVisualViewport.clientWidth,
+          false,
+        );
+        points = clipAtY(points, cssVisualViewport.offsetY, true);
+        points = clipAtY(
+          points,
+          cssVisualViewport.offsetY + cssVisualViewport.clientHeight,
+          false,
+        );
+        let x = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+        let y = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+        const area = Math.abs(
+          points.reduce((sum, point, index) => {
+            const next = points[(index + 1) % points.length]!;
+            return sum + point.x * next.y - point.y * next.x;
+          }, 0),
+        ) / 2;
+        const viewportCenter = {
+          x: cssVisualViewport.offsetX + cssVisualViewport.clientWidth / 2,
+          y: cssVisualViewport.offsetY + cssVisualViewport.clientHeight / 2,
+        };
+        const crossProducts = points.map((point, index) => {
+          const next = points[(index + 1) % points.length]!;
+          return (next.x - point.x) * (viewportCenter.y - point.y) -
+            (next.y - point.y) * (viewportCenter.x - point.x);
+        });
+        const centerInside = crossProducts.every((cross) => cross >= 0) ||
+          crossProducts.every((cross) => cross <= 0);
+        if (area < originalArea - 0.001 && centerInside) {
+          x = viewportCenter.x;
+          y = viewportCenter.y;
+        } else if (area < originalArea - 0.001 && points.length > 0) {
+          let closest = points[0]!;
+          let closestDistance = Number.POSITIVE_INFINITY;
+          for (let index = 0; index < points.length; index += 1) {
+            const start = points[index]!;
+            const end = points[(index + 1) % points.length]!;
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const denominator = dx * dx + dy * dy;
+            const ratio = denominator === 0
+              ? 0
+              : Math.max(0, Math.min(1,
+                ((viewportCenter.x - start.x) * dx +
+                  (viewportCenter.y - start.y) * dy) / denominator,
+              ));
+            const candidate = {
+              x: start.x + ratio * dx,
+              y: start.y + ratio * dy,
+            };
+            const distance = (candidate.x - viewportCenter.x) ** 2 +
+              (candidate.y - viewportCenter.y) ** 2;
+            if (distance < closestDistance) {
+              closest = candidate;
+              closestDistance = distance;
+            }
+          }
+          x = closest.x * 0.75 + x * 0.25;
+          y = closest.y * 0.75 + y * 0.25;
+        }
+        return { area, x, y };
+      })
+      .filter(
+        ({ area, x, y }) =>
+          area >= 1 &&
+          Number.isFinite(x) &&
+          Number.isFinite(y) &&
+          x >= 0 &&
+          y >= 0,
+      )
+      .sort((left, right) => right.area - left.area);
+    const point = candidates[0];
+    if (!point) {
       throw new Error(`Element has no clickable box: ${selector}`);
     }
+    const { x, y } = point;
 
     await sendCdpCommand(target, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
@@ -235,44 +397,89 @@ export async function executeScroll(
   configuration: Configuration,
 ): Promise<ScrollResult> {
   return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
+    await waitForPageInputReady(target, configuration);
     const evaluation = await sendCdpCommand(target, "Runtime.evaluate", {
       expression: `
         (() => {
           const distance = ${y};
-          const canScroll = (el) => el.scrollHeight - el.clientHeight > 1;
           const doc = document.scrollingElement || document.documentElement;
-          if (canScroll(doc)) {
-            window.scrollBy({ left: 0, top: distance, behavior: "instant" });
-            return;
-          }
+          const room = (el) => distance > 0
+            ? el.scrollHeight - el.clientHeight - el.scrollTop
+            : el.scrollTop;
+          const canScroll = (el) => {
+            const style = getComputedStyle(el);
+            return (el === doc || ["auto", "scroll", "overlay"].includes(style.overflowY)) &&
+              room(el) > 1;
+          };
           const centerX = Math.floor(window.innerWidth / 2);
           const centerY = Math.floor(window.innerHeight / 2);
           let node = document.elementFromPoint(centerX, centerY);
           while (node) {
             if (canScroll(node)) {
-              node.scrollTop += distance;
-              return;
+              const rect = node.getBoundingClientRect();
+              return {
+                x: Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2)),
+                y: Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2)),
+              };
             }
             node = node.parentElement;
+          }
+          if (canScroll(doc)) {
+            return { x: centerX, y: centerY };
           }
           let best = null;
           let bestRoom = 0;
           for (const el of document.querySelectorAll("*")) {
-            const room = el.scrollHeight - el.clientHeight;
-            if (room > 1 && room > bestRoom) {
-              bestRoom = room;
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            const visible = rect.width > 0 && rect.height > 0 &&
+              rect.bottom > 0 && rect.right > 0 &&
+              rect.top < window.innerHeight && rect.left < window.innerWidth &&
+              style.display !== "none" && style.visibility !== "hidden";
+            const remaining = room(el);
+            if (visible && canScroll(el) && remaining > bestRoom) {
+              bestRoom = remaining;
               best = el;
             }
           }
           if (best) {
-            best.scrollTop += distance;
+            const rect = best.getBoundingClientRect();
+            return {
+              x: Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2)),
+              y: Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2)),
+            };
           }
+          return { x: centerX, y: centerY };
         })()
       `,
       returnByValue: true,
       userGesture: true,
     });
     throwEvaluationException(evaluation);
+    const point = evaluation.result.value as { x?: unknown; y?: unknown } | undefined;
+    if (
+      !point ||
+      typeof point.x !== "number" ||
+      typeof point.y !== "number" ||
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y)
+    ) {
+      throw new Error("Chromium could not determine a scroll target");
+    }
+    await sendCdpCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: point.x,
+      y: point.y,
+      pointerType: "mouse",
+    });
+    await sendCdpCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x: point.x,
+      y: point.y,
+      deltaX: 0,
+      deltaY: y,
+      pointerType: "mouse",
+    });
     return { scrolled: true, y };
   });
 }
@@ -283,6 +490,7 @@ export async function executeKeyboard(
   configuration: Configuration,
 ): Promise<KeyboardTextResult | KeyboardKeyResult> {
   return withDebugger(tid, configuration.debuggerProtocolVersion, async (target) => {
+    await waitForPageInputReady(target, configuration);
     if ("text" in payload) {
       await sendCdpCommand(target, "Input.insertText", {
         text: payload.text,
@@ -313,10 +521,11 @@ export async function executeKeyboard(
       keyEvent.windowsVirtualKeyCode = definition.keyCode;
     }
     const keyDownEvent = { ...keyEvent };
+    if (definition.text) {
+      keyDownEvent.unmodifiedText = definition.text;
+    }
     if (definition.text && !hasCommandModifier) {
       keyDownEvent.text = definition.text;
-      keyDownEvent.unmodifiedText =
-        definition.unmodifiedText ?? definition.text;
     }
 
     await sendCdpCommand(target, "Input.dispatchKeyEvent", {

@@ -1,6 +1,6 @@
 {
   "name": "@zpaceway/acob-extension",
-  "version": "0.12.0",
+  "version": "0.12.5",
   "description": "Chromium extension for executing ACOB browser instructions.",
   "keywords": [
     "browser-automation",
@@ -32,7 +32,7 @@
   "scripts": {
     "build": "tsx build.ts",
     "prepack": "npm run build",
-    "test": "tsx --test tests/settings.test.ts tests/storage.test.ts tests/keyboard.test.ts tests/timeouts.test.ts tests/validation.test.ts tests/proxy.test.ts tests/console.test.ts tests/cleanup.test.ts",
+    "test": "tsx --test tests/settings.test.ts tests/storage.test.ts tests/keyboard.test.ts tests/timeouts.test.ts tests/validation.test.ts tests/proxy.test.ts tests/console.test.ts tests/cleanup.test.ts tests/tabs.test.ts tests/actions.test.ts tests/input.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

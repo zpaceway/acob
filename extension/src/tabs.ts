@@ -45,6 +45,20 @@ export function createTabWithinLimit(
   return creation;
 }
 
+export async function activateTab(tid: number): Promise<chrome.tabs.Tab> {
+  const tab = await chrome.tabs.update(tid, { active: true });
+  if (!tab) {
+    throw new Error(`Chromium did not return activated tab ${tid}`);
+  }
+  return tab;
+}
+
+export async function focusTab(tid: number): Promise<chrome.tabs.Tab> {
+  const tab = await activateTab(tid);
+  await chrome.windows.update(tab.windowId, { focused: true });
+  return tab;
+}
+
 export function waitForTab(tid: number, timeoutMs: number): Promise<chrome.tabs.Tab> {
   return new Promise<chrome.tabs.Tab>((resolve, reject) => {
     const timeoutId = setTimeout(() => {

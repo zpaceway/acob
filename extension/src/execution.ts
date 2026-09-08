@@ -13,11 +13,16 @@ import {
   executeConsoleStop,
 } from "./console.js";
 import { executeCleanup } from "./cleanup.js";
+import {
+  assertTabFocusedForInput,
+  runInBrowserInputQueue,
+} from "./input.js";
 import { executeProxy } from "./proxy.js";
 import { instructionApiUrl } from "./lifecycle.js";
 import { state } from "./state.js";
 import {
   createTabWithinLimit,
+  focusTab,
   reloadTab,
   tabDetails,
   waitForTab,
@@ -33,6 +38,16 @@ import type {
 } from "./types.js";
 
 type NonBatchAction = Exclude<InstructionAction, "batch">;
+interface ExecutionQueuesHeld {
+  browserInput: boolean;
+  tabs: boolean;
+}
+
+const noExecutionQueuesHeld: ExecutionQueuesHeld = {
+  browserInput: false,
+  tabs: false,
+};
+
 function runInTabExecutionQueue<Result>(
   tid: number,
   operation: () => Promise<Result>,
@@ -52,9 +67,29 @@ function runInTabExecutionQueue<Result>(
   return result;
 }
 
+function runInTabExecutionQueues<Result>(
+  tids: number[],
+  operation: () => Promise<Result>,
+): Promise<Result> {
+  return [...new Set(tids)]
+    .sort((left, right) => left - right)
+    .reduceRight<() => Promise<Result>>(
+      (next, tid) => () => runInTabExecutionQueue(tid, next),
+      operation,
+    )();
+}
+
+function runBrowserInputOperation<Result>(
+  queueHeld: boolean,
+  operation: () => Promise<Result>,
+): Promise<Result> {
+  return queueHeld ? operation() : runInBrowserInputQueue(operation);
+}
+
 async function runInstructionAction(
   instruction: SupportedInstruction,
   configuration: Configuration,
+  queuesHeld: ExecutionQueuesHeld,
 ): Promise<ExtensionInstructionResult> {
   const { action, payload } = instruction;
 
@@ -80,11 +115,9 @@ async function runInstructionAction(
   }
 
   if (action === "focus") {
-    const focusedTab = await chrome.tabs.update(payload.tid, { active: true });
-    if (!focusedTab) {
-      throw new Error(`Chromium did not return focused tab ${payload.tid}`);
-    }
-    return tabDetails(focusedTab);
+    return runBrowserInputOperation(queuesHeld.browserInput, async () =>
+      tabDetails(await focusTab(payload.tid))
+    );
   }
 
   if (action === "navigate") {
@@ -112,8 +145,10 @@ async function runInstructionAction(
   }
 
   if (action === "scroll") {
-    await chrome.tabs.get(payload.tid);
-    return executeScroll(payload.tid, payload.y, configuration);
+    return runBrowserInputOperation(queuesHeld.browserInput, async () => {
+      await assertTabFocusedForInput(payload.tid);
+      return executeScroll(payload.tid, payload.y, configuration);
+    });
   }
 
   if (action === "javascript") {
@@ -122,13 +157,17 @@ async function runInstructionAction(
   }
 
   if (action === "click") {
-    await chrome.tabs.get(payload.tid);
-    return executeClick(payload.tid, payload.selector, configuration);
+    return runBrowserInputOperation(queuesHeld.browserInput, async () => {
+      await assertTabFocusedForInput(payload.tid);
+      return executeClick(payload.tid, payload.selector, configuration);
+    });
   }
 
   if (action === "keyboard") {
-    await chrome.tabs.get(payload.tid);
-    return executeKeyboard(payload.tid, payload, configuration);
+    return runBrowserInputOperation(queuesHeld.browserInput, async () => {
+      await assertTabFocusedForInput(payload.tid);
+      return executeKeyboard(payload.tid, payload, configuration);
+    });
   }
 
   if (action === "screenshot") {
@@ -175,47 +214,71 @@ async function runInstructionAction(
   }
 
   if (action === "batch") {
-    const entries: InstructionResultRequest[] = [];
-    const keepAlive = setInterval(() => undefined, 20_000);
-    try {
-      for (const subAction of payload.actions) {
-        if (state.reinstallScheduled) {
-          entries.push({ error: "Extension reinstall is in progress" });
-          continue;
+    const executeBatch = async (
+      subActionQueuesHeld: ExecutionQueuesHeld,
+    ): Promise<InstructionResultRequest[]> => {
+      const entries: InstructionResultRequest[] = [];
+      const keepAlive = setInterval(() => undefined, 20_000);
+      try {
+        for (const subAction of payload.actions) {
+          if (state.reinstallScheduled) {
+            entries.push({ error: "Extension reinstall is in progress" });
+            continue;
+          }
+          const { action: subActionName, ...subPayload } = subAction;
+          const subInstruction = {
+            id: instruction.id,
+            action: subActionName,
+            payload: subPayload,
+          } as SupportedInstruction<NonBatchAction>;
+          try {
+            entries.push({
+              result: await runInstruction(
+                subInstruction,
+                configuration,
+                subActionQueuesHeld,
+              ),
+            });
+          } catch (error) {
+            entries.push({
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
-        const { action: subActionName, ...subPayload } = subAction;
-        const subInstruction = {
-          id: instruction.id,
-          action: subActionName,
-          payload: subPayload,
-        } as SupportedInstruction<NonBatchAction>;
-        try {
-          entries.push({
-            result: await runInstruction(subInstruction, configuration),
-          });
-        } catch (error) {
-          entries.push({
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+      } finally {
+        clearInterval(keepAlive);
       }
-    } finally {
-      clearInterval(keepAlive);
+      return entries;
+    };
+    const holdsBrowserInput = payload.actions.some(({ action }) =>
+      ["focus", "scroll", "click", "keyboard"].includes(action)
+    );
+    if (!holdsBrowserInput) {
+      return executeBatch(noExecutionQueuesHeld);
     }
-    return entries;
+    const tids = payload.actions.flatMap((subAction) =>
+      "tid" in subAction ? [subAction.tid] : []
+    );
+    return runInTabExecutionQueues(tids, () =>
+      runInBrowserInputQueue(() =>
+        executeBatch({ browserInput: true, tabs: true })
+      )
+    );
   }
 
   throw new Error(`Unknown action: ${action}`);
 }
 
-function runInstruction(
+export function runInstruction(
   instruction: SupportedInstruction,
   configuration: Configuration,
+  queuesHeld: ExecutionQueuesHeld = noExecutionQueuesHeld,
 ): Promise<ExtensionInstructionResult> {
   const { payload } = instruction;
   const tid = "tid" in payload ? payload.tid : undefined;
-  const operation = () => runInstructionAction(instruction, configuration);
-  return tid === undefined
+  const operation = () =>
+    runInstructionAction(instruction, configuration, queuesHeld);
+  return tid === undefined || queuesHeld.tabs
     ? operation()
     : runInTabExecutionQueue(tid, operation);
 }

@@ -149,13 +149,16 @@ tab = await client.reload(123)
 scrolled = await client.scroll(123, 500)
 ```
 
-Only `focus()` activates a tab within its own window; it never raises or
-focuses the window, so other applications keep OS focus. Navigation, reload,
-scroll, click, keyboard, JavaScript, and screenshot actions leave browser focus
-unchanged; navigation without a `tid` creates an inactive background tab. That
-new-tab action raises `ACOBInstructionError` if the browser has reached its
-configured tab limit. Navigating an existing `tid` is unaffected by the limit.
-Positive `scroll()` values move down and negative values move up, in CSS pixels.
+`focus()` activates a tab and focuses its browser window. `scroll()`, `click()`,
+and `keyboard()` leave focus unchanged and are serialized across tabs so focus
+cannot change midway through an action. Focus the target first when needed;
+hidden-tab input fails with a hint to call `focus` or try `javascript` instead
+of silently dropping events.
+Navigation without a `tid` creates an inactive background tab. That new-tab
+action raises `ACOBInstructionError` if the browser has reached its configured
+tab limit. Navigating an existing `tid` is unaffected by the limit. Positive
+`scroll()` values dispatch wheel input downward and negative values upward, in
+CSS pixels.
 
 `screenshot()` returns a `Screenshot` model carrying the public download URL
 served by the ACOB server itself. The client never transfers the image

@@ -463,7 +463,7 @@ class ACOBClient:
         *,
         timeout: float | None = None,
     ) -> Tab:
-        """Activate a Chromium tab within its window without raising the window."""
+        """Activate a Chromium tab and focus its browser window."""
         return self._expect_model(
             await self.execute("focus", tid=tid, timeout=timeout),
             Tab,
