@@ -25,6 +25,29 @@ done
 width=${ACOB_BROWSER_WIDTH:-1920}
 height=${ACOB_BROWSER_HEIGHT:-1080}
 
+extension_dir=/opt/acob-extension
+bundled_settings="${extension_dir}/settings.json"
+if [ -n "${ACOB_EXTENSION_SETTINGS:-}" ]; then
+  if [ ! -f "$bundled_settings" ]; then
+    echo "error: bundled extension settings not found at $bundled_settings" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$ACOB_EXTENSION_SETTINGS" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "error: ACOB_EXTENSION_SETTINGS must be a JSON object" >&2
+    exit 1
+  fi
+  tmp_settings="$(mktemp)"
+  if ! printf '%s' "$ACOB_EXTENSION_SETTINGS" | jq -s '.[0] * .[1]' \
+    "$bundled_settings" - >"$tmp_settings"; then
+    echo "error: could not merge ACOB_EXTENSION_SETTINGS over bundled settings" >&2
+    rm -f "$tmp_settings"
+    exit 1
+  fi
+  cat "$tmp_settings" >"$bundled_settings"
+  rm -f "$tmp_settings"
+  echo "Applied ACOB_EXTENSION_SETTINGS override to bundled extension settings"
+fi
+
 chown acob:acob /data
 # Container recreation changes the hostname recorded in Chromium's profile lock.
 # No Chromium process exists yet in this container, so these artifacts are stale.

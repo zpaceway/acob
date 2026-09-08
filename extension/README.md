@@ -175,12 +175,23 @@ The popup displays controls defined centrally in `src/settings.ts`. On first
 installation, the built `settings.json` seeds extension-local storage after
 every value is normalized through that settings module. Later starts and
 extension updates use the stored configuration and do not reread the file.
-`settings.example.json` is the committed default and documents the complete
-build-time shape. An ignored local `settings.json` overrides it when present.
+`src/settings.defaults.ts` is the single source of default values. Every
+`src/settings.ts` definition default is imported from it, so normalization,
+the popup, and storage seeding all take their defaults from that file. Edit
+the values there and rebuild; `build.ts` writes them into the bundled
+`settings.json` (plus any `ACOB_BASE_URL` / `ACOB_EXTENSION_SETTINGS`
+overrides).
 Set `ACOB_BASE_URL` during `npm run build` to replace the bundled initial server
-URL. The root installation workflow builds the extension with
+URL, or set `ACOB_EXTENSION_SETTINGS` to a JSON object that is merged over the
+defaults (it wins over `ACOB_BASE_URL` when both set a value). The root
+installation workflow builds the extension with
 `http://acob-proxy` before passing `extension/dist/` into the browser image,
-while an ordinary native build defaults to `http://127.0.0.1:58346`.
+while an ordinary native build defaults to `http://127.0.0.1:58346`. To change
+the managed browser's defaults without rebuilding its image, set
+`ACOB_EXTENSION_SETTINGS` on the `acob-browser` container
+instead; the entrypoint merges it over the bundled `settings.json` at startup.
+That still only seeds fresh profiles: a persisted `browser-data` volume keeps
+its stored configuration until it is purged.
 
 The defaults include one-second polling, a batch size of four, up to eight
 concurrent executions, and `allowCleanup: false`. The same settings module owns

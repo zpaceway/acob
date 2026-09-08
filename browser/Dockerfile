@@ -9,6 +9,7 @@ RUN apt-get update \
         fonts-liberation \
         fonts-noto-color-emoji \
         gosu \
+        jq \
         novnc \
         procps \
         tini \

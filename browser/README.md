@@ -15,7 +15,24 @@ The root `compose.yaml` is the supported runtime. It persists the Chromium
 profile in the stack-local `browser-data` volume and gives the bundled extension
 an initial server URL of `http://acob-proxy`. The extension reads its bundled
 `settings.json` only when its profile has no stored extension settings; later
-image rebuilds do not overwrite profile settings.
+image rebuilds do not overwrite profile settings. That bundled file is built
+from the extension's defaults in `src/settings.defaults.ts`
+(see `../extension/README.md`).
+
+To override the baked-in defaults without rebuilding the image, set
+`ACOB_EXTENSION_SETTINGS` to a JSON object when starting the stack:
+
+```bash
+ACOB_EXTENSION_SETTINGS='{"baseUrl":"http://acob-proxy","allowCleanup":true}' make up PORT=58346 NAME=default
+```
+
+The entrypoint validates the object with `jq` and merges it over the bundled
+`settings.json` before launching Chromium, so a partial object is enough
+(e.g. just `{"baseUrl": ...}`). It only seeds fresh
+profiles: a persisted `browser-data` volume keeps its stored extension
+settings, so purge the stack (`make purge PORT=... NAME=...`) or clear the
+profile when a seed change must take effect. An invalid JSON object
+fails container startup with a clear error.
 
 The browser image consumes a built extension directory through Docker's named
 `extension` build context. It does not install Node dependencies or compile the

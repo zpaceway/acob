@@ -7,6 +7,7 @@ import type {
   SettingValues,
   StorageKey,
 } from "./types.js";
+import { defaultSettings } from "./settings.defaults.js";
 
 const MEBIBYTE_IN_BYTES = 1024 * 1024;
 const MAX_HTTP_REQUEST_TIMEOUT_MS = 30_000;
@@ -21,7 +22,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const definitions: SettingDefinitions = {
   baseUrl: {
-    defaultValue: "http://127.0.0.1:58346",
+    defaultValue: defaultSettings.baseUrl,
     valueType: "url",
     inputType: "url",
     label: "Server URL",
@@ -31,7 +32,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   allowCleanup: {
-    defaultValue: false,
+    defaultValue: defaultSettings.allowCleanup,
     valueType: "boolean",
     inputType: "checkbox",
     label: "Allow browser cleanup",
@@ -40,7 +41,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   instructionsPerPoll: {
-    defaultValue: 4,
+    defaultValue: defaultSettings.instructionsPerPoll,
     valueType: "integer",
     inputType: "number",
     label: "Instructions per poll",
@@ -52,7 +53,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   maxConcurrentExecutions: {
-    defaultValue: 8,
+    defaultValue: defaultSettings.maxConcurrentExecutions,
     valueType: "integer",
     inputType: "number",
     label: "Concurrent executions",
@@ -63,7 +64,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   maxTabs: {
-    defaultValue: 20,
+    defaultValue: defaultSettings.maxTabs,
     valueType: "integer",
     inputType: "number",
     label: "Maximum tabs",
@@ -74,7 +75,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   pollIntervalMs: {
-    defaultValue: 1000,
+    defaultValue: defaultSettings.pollIntervalMs,
     valueType: "integer",
     inputType: "number",
     label: "Poll interval (ms)",
@@ -86,7 +87,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   tabLoadTimeoutMs: {
-    defaultValue: 30000,
+    defaultValue: defaultSettings.tabLoadTimeoutMs,
     valueType: "integer",
     inputType: "number",
     label: "Tab load timeout (ms)",
@@ -98,7 +99,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   httpRequestTimeoutMs: {
-    defaultValue: 30000,
+    defaultValue: defaultSettings.httpRequestTimeoutMs,
     valueType: "integer",
     inputType: "number",
     label: "HTTP request timeout (ms)",
@@ -110,7 +111,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   javascriptTimeoutMs: {
-    defaultValue: 60000,
+    defaultValue: defaultSettings.javascriptTimeoutMs,
     valueType: "integer",
     inputType: "number",
     label: "JavaScript timeout (ms)",
@@ -122,7 +123,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   maxScreenshotSizeMiB: {
-    defaultValue: 30,
+    defaultValue: defaultSettings.maxScreenshotSizeMiB,
     valueType: "integer",
     inputType: "number",
     label: "Screenshot limit (MiB)",
@@ -134,7 +135,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   maxRecordingDurationSec: {
-    defaultValue: 300,
+    defaultValue: defaultSettings.maxRecordingDurationSec,
     valueType: "integer",
     inputType: "number",
     label: "Recording duration (s)",
@@ -146,7 +147,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   maxRecordingSizeMiB: {
-    defaultValue: 512,
+    defaultValue: defaultSettings.maxRecordingSizeMiB,
     valueType: "integer",
     inputType: "number",
     label: "Recording limit (MiB)",
@@ -158,7 +159,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   consoleTimeoutSec: {
-    defaultValue: 180,
+    defaultValue: defaultSettings.consoleTimeoutSec,
     valueType: "integer",
     inputType: "number",
     label: "Console timeout (s)",
@@ -170,7 +171,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   consoleMaxSizeMiB: {
-    defaultValue: 2,
+    defaultValue: defaultSettings.consoleMaxSizeMiB,
     valueType: "integer",
     inputType: "number",
     label: "Console limit (MiB)",
@@ -182,7 +183,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   resultRetryAttempts: {
-    defaultValue: 3,
+    defaultValue: defaultSettings.resultRetryAttempts,
     valueType: "integer",
     inputType: "number",
     label: "Result retry attempts",
@@ -194,7 +195,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   resultRetryDelayMs: {
-    defaultValue: 1000,
+    defaultValue: defaultSettings.resultRetryDelayMs,
     valueType: "integer",
     inputType: "number",
     label: "Result retry delay (ms)",
@@ -206,7 +207,7 @@ const definitions: SettingDefinitions = {
     visible: true,
   },
   popupStatusDurationMs: {
-    defaultValue: 2500,
+    defaultValue: defaultSettings.popupStatusDurationMs,
     valueType: "integer",
     inputType: "number",
     label: "Popup status duration (ms)",
@@ -218,7 +219,7 @@ const definitions: SettingDefinitions = {
     visible: false,
   },
   debuggerProtocolVersion: {
-    defaultValue: "1.3",
+    defaultValue: defaultSettings.debuggerProtocolVersion,
     valueType: "string",
     inputType: "text",
     label: "Debugger protocol version",

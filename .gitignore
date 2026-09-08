@@ -6,6 +6,3 @@
 
 # User level tool caches
 .local
-
-# Local extension installation defaults
-extension/settings.json

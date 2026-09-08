@@ -1,4 +1,9 @@
-{
+// Single source of default setting values. Edit the values here and rebuild;
+// src/settings.ts imports them for every definition default, and build.ts
+// writes them into the bundled dist/settings.json.
+import type { SettingValues } from "./types.js";
+
+export const defaultSettings: SettingValues = {
   "baseUrl": "http://127.0.0.1:58346",
   "allowCleanup": false,
   "instructionsPerPoll": 4,
@@ -17,4 +22,4 @@
   "resultRetryDelayMs": 1000,
   "popupStatusDurationMs": 2500,
   "debuggerProtocolVersion": "1.3"
-}
+};

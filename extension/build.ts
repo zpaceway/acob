@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -13,6 +12,8 @@ import {
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { ACOBSettings } from "./src/settings.js";
 
 const require = createRequire(import.meta.url);
 const extensionDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,24 @@ if (configuredBaseUrl) {
     );
   }
 }
+const configuredSettingsJson = process.env.ACOB_EXTENSION_SETTINGS;
+let configuredSettingsOverride: Record<string, unknown> | undefined;
+if (configuredSettingsJson) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(configuredSettingsJson);
+  } catch {
+    throw new Error("ACOB_EXTENSION_SETTINGS must be a JSON object");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed)
+  ) {
+    throw new Error("ACOB_EXTENSION_SETTINGS must be a JSON object");
+  }
+  configuredSettingsOverride = parsed as Record<string, unknown>;
+}
 const packageExecutable = (
   packageName: string,
   executablePath: string,
@@ -48,7 +67,6 @@ const assets = [
   "icon-128.png",
   "offscreen.html",
   "popup.html",
-  "settings.example.json",
 ];
 const jqueryDistDirectory = path.dirname(require.resolve("jquery"));
 const turndownDirectory = path.dirname(
@@ -82,15 +100,16 @@ await rename(
   path.join(outputDirectory, backgroundFilename),
 );
 await mkdir(outputDirectory, { recursive: true });
-const localSettingsPath = path.join(extensionDirectory, "settings.json");
-const settingsPath = existsSync(localSettingsPath)
-  ? localSettingsPath
-  : path.join(extensionDirectory, "settings.example.json");
-const bundledSettings = JSON.parse(
-  await readFile(settingsPath, "utf8"),
-) as Record<string, unknown>;
+// The bundled first-install settings come from the settings module, whose
+// defaults live in src/settings.defaults.ts.
+const bundledSettings: Record<string, unknown> = {
+  ...ACOBSettings.normalizeConfiguration(),
+};
 if (configuredBaseUrl) {
   bundledSettings.baseUrl = configuredBaseUrl.replace(/\/+$/, "");
+}
+if (configuredSettingsOverride) {
+  Object.assign(bundledSettings, configuredSettingsOverride);
 }
 const manifest = JSON.parse(
   await readFile(path.join(extensionDirectory, "manifest.json"), "utf8"),

@@ -109,8 +109,9 @@ adding aliases, shims, or deprecation layers.
     per-action payloads, `InstructionRequest` discriminated union,
     `InstructionResultFor` (request -> result type mapping),
     `ExtensionInstructionResult`, runtime message types, settings types.
-  - `settings.ts` — centralized settings definitions (name, default, bounds,
-    label, hint, visibility). The popup renders settings from these
+  - `settings.ts` — centralized settings definitions (name, bounds,
+    label, hint, visibility; defaults live in `settings.defaults.ts` and are
+    imported here). The popup renders settings from these
     definitions automatically; the offscreen/worker read them at runtime.
   - `validation.ts` — runtime guards (`isSupportedInstruction`) for claimed
     instructions; keep in sync with `types.ts` unions and server schemas.
@@ -209,7 +210,11 @@ adding aliases, shims, or deprecation layers.
   process boundary. This is not stealth or fingerprint evasion.
 - `browser-data` persists the browser profile. The extension reads bundled
   `settings.json` only when no extension settings are stored, so image rebuilds
-  do not overwrite user settings.
+  do not overwrite user settings. That bundled file is built from
+  `extension/src/settings.defaults.ts`; `ACOB_EXTENSION_SETTINGS` (JSON object,
+  merged with `jq`) on the `acob-browser` container overrides
+  it at startup without an image rebuild, but still only seeds fresh profiles.
+  `browser/Dockerfile` installs `jq` for that merge.
 - `ACOB_VNC_ENABLED=true` starts passwordless x11vnc plus noVNC/websockify.
   nginx serves the lightweight client and WebSocket under `/vnc`; no separate
   VNC host port is published. VNC stays disabled by default.
@@ -237,8 +242,9 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
    the payload, the `*InstructionRequest`, the result types, and extend
    `InstructionPayloadMap`, `InstructionRequest`,
    `InstructionResultFor`, and `ExtensionInstructionResult`.
-2. `extension/src/settings.ts` + `extension/src/types.ts` `SettingValues`:
-   add any new settings (defaults, bounds, labels).
+2. `extension/src/settings.defaults.ts` + `extension/src/settings.ts` +
+   `extension/src/types.ts` `SettingValues`: add any new settings (default
+   value in `settings.defaults.ts`, bounds and labels in `settings.ts`).
 3. `extension/src/validation.ts`: extend `isSupportedInstruction`.
 4. `extension/src/execution.ts`: dispatch the action (per-tab queue via
    `"tid" in payload` when it targets a tab).

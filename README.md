@@ -71,7 +71,11 @@ make install PORT=58346 NAME=default EXTENSION_PATH=/path/to/extension
 ```
 
 A custom path is used as-is and must contain `manifest.json` with the intended
-build-time settings.
+build-time settings. To override the managed browser's baked-in extension
+defaults without rebuilding its image, set `ACOB_EXTENSION_SETTINGS` to a JSON
+object when starting the stack;
+see [`browser/README.md`](browser/README.md). Overrides only seed fresh
+profiles.
 
 `NAME` is required and distinguishes a user or work context. The installation
 context is always `acob-<port>-<name>`:

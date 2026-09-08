@@ -1,40 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { ACOBSettings as settings } from "../src/settings.js";
-
-test("keeps example first-install settings aligned with defaults", async () => {
-  const example = JSON.parse(
-    await readFile(new URL("../settings.example.json", import.meta.url), "utf8"),
-  ) as unknown;
-
-  assert.deepEqual(example, settings.normalizeConfiguration());
-});
+import { defaultSettings } from "../src/settings.defaults.js";
 
 test("normalizes a complete default configuration", () => {
   const configuration = settings.normalizeConfiguration();
 
-  assert.deepEqual(configuration, {
-    baseUrl: "http://127.0.0.1:58346",
-    allowCleanup: false,
-    instructionsPerPoll: 4,
-    maxConcurrentExecutions: 8,
-    maxTabs: 20,
-    pollIntervalMs: 1000,
-    tabLoadTimeoutMs: 30000,
-    httpRequestTimeoutMs: 30000,
-    javascriptTimeoutMs: 60000,
-    maxScreenshotSizeMiB: 30,
-    maxRecordingDurationSec: 300,
-    maxRecordingSizeMiB: 512,
-    consoleTimeoutSec: 180,
-    consoleMaxSizeMiB: 2,
-    resultRetryAttempts: 3,
-    resultRetryDelayMs: 1000,
-    popupStatusDurationMs: 2500,
-    debuggerProtocolVersion: "1.3",
-  });
+  assert.deepEqual(configuration, defaultSettings);
 });
 
 test("accepts valid custom settings and canonicalizes the server URL", () => {
@@ -95,23 +68,23 @@ test("replaces invalid values with their centralized defaults", () => {
     debuggerProtocolVersion: "latest",
   });
 
-  assert.equal(configuration.baseUrl, "http://127.0.0.1:58346");
-  assert.equal(configuration.instructionsPerPoll, 4);
-  assert.equal(configuration.maxConcurrentExecutions, 8);
-  assert.equal(configuration.maxTabs, 20);
-  assert.equal(configuration.pollIntervalMs, 1000);
-  assert.equal(configuration.tabLoadTimeoutMs, 30000);
-  assert.equal(configuration.httpRequestTimeoutMs, 30000);
-  assert.equal(configuration.javascriptTimeoutMs, 60000);
-  assert.equal(configuration.maxScreenshotSizeMiB, 30);
-  assert.equal(configuration.maxRecordingDurationSec, 300);
-  assert.equal(configuration.maxRecordingSizeMiB, 512);
-  assert.equal(configuration.consoleTimeoutSec, 180);
-  assert.equal(configuration.consoleMaxSizeMiB, 2);
-  assert.equal(configuration.resultRetryAttempts, 3);
-  assert.equal(configuration.resultRetryDelayMs, 1000);
-  assert.equal(configuration.popupStatusDurationMs, 2500);
-  assert.equal(configuration.debuggerProtocolVersion, "1.3");
+  assert.equal(configuration.baseUrl, defaultSettings.baseUrl);
+  assert.equal(configuration.instructionsPerPoll, defaultSettings.instructionsPerPoll);
+  assert.equal(configuration.maxConcurrentExecutions, defaultSettings.maxConcurrentExecutions);
+  assert.equal(configuration.maxTabs, defaultSettings.maxTabs);
+  assert.equal(configuration.pollIntervalMs, defaultSettings.pollIntervalMs);
+  assert.equal(configuration.tabLoadTimeoutMs, defaultSettings.tabLoadTimeoutMs);
+  assert.equal(configuration.httpRequestTimeoutMs, defaultSettings.httpRequestTimeoutMs);
+  assert.equal(configuration.javascriptTimeoutMs, defaultSettings.javascriptTimeoutMs);
+  assert.equal(configuration.maxScreenshotSizeMiB, defaultSettings.maxScreenshotSizeMiB);
+  assert.equal(configuration.maxRecordingDurationSec, defaultSettings.maxRecordingDurationSec);
+  assert.equal(configuration.maxRecordingSizeMiB, defaultSettings.maxRecordingSizeMiB);
+  assert.equal(configuration.consoleTimeoutSec, defaultSettings.consoleTimeoutSec);
+  assert.equal(configuration.consoleMaxSizeMiB, defaultSettings.consoleMaxSizeMiB);
+  assert.equal(configuration.resultRetryAttempts, defaultSettings.resultRetryAttempts);
+  assert.equal(configuration.resultRetryDelayMs, defaultSettings.resultRetryDelayMs);
+  assert.equal(configuration.popupStatusDurationMs, defaultSettings.popupStatusDurationMs);
+  assert.equal(configuration.debuggerProtocolVersion, defaultSettings.debuggerProtocolVersion);
 });
 
 test("validates the cleanup toggle as a strict boolean", () => {
