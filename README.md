@@ -348,8 +348,9 @@ layout and deployment expectations.
 
 Call the MCP `api` tool (no arguments) or Python `await client.api()` to obtain
 the API guide and documentation URLs without queueing browser work. Open
-`/api/docs/` on your stack for Swagger UI, or fetch `/api/openapi.json` for the
-OpenAPI 3.1 contract. `GET /api/` returns structured documentation links and
+`/api/docs/` on your stack for Swagger UI with the Python client alongside
+the API, or fetch `/api/openapi.json` for the OpenAPI 3.1 contract with the
+same client reference. `GET /api/` returns structured documentation links and
 the submit/poll/consume workflow.
 
 Documentation uses the incoming request's scheme, host and port for links,

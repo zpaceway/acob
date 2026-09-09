@@ -35,9 +35,19 @@ class DocumentationTests(SimpleTestCase):
                 self.assertIn(
                     origin + "/api/instructions/", schema["info"]["description"]
                 )
+                self.assertIn("ACOBClient", docs["guide"][0])
+                self.assertIn("## Python client", schema["info"]["description"])
+                self.assertIn("ACOBClient", schema["info"]["description"])
+                self.assertIn(
+                    f'ACOBClient(endpoint="{origin}")',
+                    schema["info"]["description"],
+                )
                 self.assertNotIn("media.test", json.dumps(schema))
                 html = self.client.get("/api/docs/", HTTP_HOST=host, secure=secure)
                 self.assertContains(html, origin)
+                self.assertContains(html, "Python client")
+                self.assertContains(html, "ACOBClient")
+                self.assertContains(html, f'ACOBClient(endpoint="{origin}")')
 
     def test_schema_references_resolve_and_routes_exist(self) -> None:
         document = openapi_document("http://docs.test")

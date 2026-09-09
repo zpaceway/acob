@@ -12,7 +12,21 @@
     <p>API origin: <code>{{ docs.base_url }}</code></p>
     <p><a href="{{ docs.openapi_url }}">OpenAPI JSON</a> · <a href="/api/">Agent quick start</a></p>
   </header>
-  <div id="swagger-ui"></div>
+  <section>
+    <h2>Python client</h2>
+    <p>Prefer <code>ACOBClient</code> over raw HTTP. Install from the monorepo (<code>python -m pip install ./client</code>) and target this stack explicitly; <code>await client.api()</code> returns the same links and guide as <a href="/api/">GET /api/</a> without browser work.</p>
+    <pre>from acob import ACOBClient
+
+async with ACOBClient(endpoint="{{ docs.base_url }}") as client:
+    tabs = await client.list()
+    tab = await client.navigate("https://example.com")
+    screenshot = await client.screenshot(tab.tid)
+    print(screenshot.url)</pre>
+  </section>
+  <section>
+    <h2>API</h2>
+    <div id="swagger-ui"></div>
+  </section>
   <script src="/api/docs/assets/swagger-ui-bundle.js"></script>
   <script>
     window.ui = SwaggerUIBundle({

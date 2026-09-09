@@ -92,8 +92,10 @@ promiscuous within its stack.
 ## API
 
 `GET /api/` returns request-aware links and a queue usage guide. Swagger UI at
-`/api/docs/` loads locally packaged assets; `/api/openapi.json` generates OpenAPI
-3.1 from the actual Pydantic request/response models. Cross-field validators
+`/api/docs/` loads locally packaged assets and presents the Python client
+alongside the API; `/api/openapi.json` generates OpenAPI
+3.1 from the actual Pydantic request/response models, including the same
+client reference. Cross-field validators
 are explained in action descriptions. The result envelope remains arbitrary
 JSON where the runtime does not enforce a structured result.
 

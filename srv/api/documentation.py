@@ -18,7 +18,9 @@ from . import schemas
 
 GUIDE = [
     (
-        "Read swagger_url for interactive documentation or fetch openapi_url for the "
+        "Prefer the Python ACOBClient over raw HTTP; await client.api() returns "
+        "these same links and guide without browser work. Read swagger_url for "
+        "interactive API and client reference or fetch openapi_url for the "
         "machine-readable OpenAPI 3.1 contract. URLs describe this request's origin."
     ),
     (
@@ -424,6 +426,22 @@ def openapi_document(origin: str) -> dict[str, Any]:
                         "Save the returned id, then GET "
                         f"`{origin}/api/instructions/{{instruction_id}}/` "
                         "until terminal. Save that response: it is delivered once."
+                    ),
+                    "## Python client",
+                    (
+                        "Prefer `ACOBClient` over raw HTTP. Install with "
+                        "`python -m pip install ./client` and target this stack via "
+                        f'`ACOBClient(endpoint="{origin}")` (default '
+                        "`http://127.0.0.1:58346`). `await client.api()` returns the "
+                        "same links and guide without browser work."
+                    ),
+                    (
+                        f"```python\nfrom acob import ACOBClient\n\n"
+                        f'async with ACOBClient(endpoint="{origin}") as client:\n'
+                        f"    tabs = await client.list()\n"
+                        f'    tab = await client.navigate("https://example.com")\n'
+                        f"    screenshot = await client.screenshot(tab.tid)\n"
+                        f"    print(screenshot.url)\n```"
                     ),
                     *GUIDE[1:],
                     "## Action reference",
