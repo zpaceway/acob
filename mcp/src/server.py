@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from acob import (
     ACOBClient,
+    ApiDocumentation,
     BatchResultEntry,
     CleanupResult,
     ClickResult,
@@ -48,8 +49,9 @@ from pydantic import (
     StrictInt,
     StringConstraints,
 )
+from starlette.requests import Request
 
-SERVER_VERSION = "0.15.0"
+SERVER_VERSION = "0.16.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
@@ -62,6 +64,9 @@ SERVER_INSTRUCTIONS = (
     "configured by the ACOB_ENDPOINT environment variable. It uses the user's "
     "live tabs and authenticated browser state, so tool calls can cause real "
     "side effects.\n\n"
+    "Call api to learn the REST API workflow and obtain request-aware Swagger UI "
+    "and OpenAPI JSON URLs. Fetch the OpenAPI document for exact request schemas; "
+    "the documentation tool does not enqueue browser work.\n\n"
     "Begin with list and identify the target from its title, URL, "
     "and domain before using a tab ID. Never guess a tab ID or alter an unrelated "
     "tab. Await navigation and use the returned tid before dependent actions.\n\n"
@@ -124,6 +129,7 @@ NAMED_KEYS = {
 }
 
 TOOL_ARGUMENT_NAMES = {
+    "api": frozenset(),
     "list": frozenset({"timeout"}),
     "navigate": frozenset({"tid", "url", "timeout"}),
     "focus": frozenset({"tid", "timeout"}),
@@ -187,6 +193,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = DEFAULT_MCP_PORT
     endpoint: str = ""
+    api_same_origin: bool = False
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -197,6 +204,7 @@ class Settings:
             host=values.get("ACOB_MCP_HOST", "127.0.0.1"),
             port=_port(values.get("ACOB_MCP_PORT", str(DEFAULT_MCP_PORT))),
             endpoint=_required_url(values, "ACOB_ENDPOINT"),
+            api_same_origin=_boolean(values, "ACOB_API_SAME_ORIGIN"),
         )
 
 
@@ -238,6 +246,38 @@ def create_server(
         lifespan=lifespan,
         middleware=[_enforce_tool_arguments],
     )
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        ),
+    )
+    async def api(ctx: Context[AppContext]) -> ApiDocumentation:
+        """Explain the REST API and link to Swagger UI and OpenAPI schemas.
+
+        Read the guide first, then fetch openapi_url for payloads and responses
+        or open swagger_url for interactive documentation. No browser work is queued.
+        """
+        docs = await _client(ctx).api()
+        request = ctx.request_context.request
+        if settings.api_same_origin and isinstance(request, Request):
+            origin = str(request.base_url).rstrip("/")
+            return docs.model_copy(
+                update={
+                    "base_url": origin,
+                    "swagger_url": f"{origin}/api/docs/",
+                    "openapi_url": f"{origin}/api/openapi.json",
+                    "instructions_url": f"{origin}/api/instructions/",
+                    "instruction_url_template": (
+                        f"{origin}/api/instructions/{{instruction_id}}/"
+                    ),
+                    "batch_url": f"{origin}/api/instructions/batch/",
+                }
+            )
+        return docs
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
@@ -618,6 +658,13 @@ def _required_url(environ: Mapping[str, str], name: str) -> str:
     ):
         raise ValueError(f"{name} must be a valid HTTP or HTTPS URL")
     return normalized
+
+
+def _boolean(environ: Mapping[str, str], name: str) -> bool:
+    value = environ.get(name, "false").lower()
+    if value not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return value == "true"
 
 
 def _validate_keyboard(

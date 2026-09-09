@@ -48,6 +48,10 @@ if [ -n "${ACOB_EXTENSION_SETTINGS:-}" ]; then
   echo "Applied ACOB_EXTENSION_SETTINGS override to bundled extension settings"
 fi
 
+# /data is ephemeral (no volume): every container recreate starts from a fresh
+# Chromium profile, so a stale profile can never break the extension after an
+# upgrade. The directory only survives stop/start of the same container.
+mkdir -p /data
 chown acob:acob /data
 # Container recreation changes the hostname recorded in Chromium's profile lock.
 # No Chromium process exists yet in this container, so these artifacts are stale.
@@ -90,6 +94,7 @@ fi
 exec gosu acob chromium \
   --user-data-dir=/data \
   --no-sandbox \
+  --host-resolver-rules="MAP localhost host.docker.internal" \
   --load-extension=/opt/acob-extension \
   --disable-extensions-except=/opt/acob-extension \
   --no-first-run \

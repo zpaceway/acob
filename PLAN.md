@@ -55,6 +55,9 @@ Python client or MCP host
 - Extension recovery delivers its reinstall command through the instruction
   queue with a token and acknowledgement handshake.
 - Local development and container workflows use Django, SQLite, and Uvicorn.
+- Request-aware API discovery at `/api/`, locally hosted Swagger UI at
+  `/api/docs/`, and OpenAPI 3.1 at `/api/openapi.json` document the implemented
+  queue contract using validation-model schemas and the incoming origin.
 
 ### Extension
 
@@ -102,6 +105,8 @@ Python client or MCP host
 - Separate stack instances and proxy ports provide execution isolation.
 - Tool schemas are derived from typed functions and reject unknown arguments.
 - The tool set mirrors the high-level Python client action set.
+- The read-only `api` tool provides the queue guide and Swagger/OpenAPI links;
+  unified deployments derive those links from the MCP request origin.
 - Screenshots and recordings are returned to MCP as public download URLs.
 - Server instructions emphasize tab discovery, untrusted page content,
   side-effect awareness, and preservation of unrelated browser state.

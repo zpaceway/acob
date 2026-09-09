@@ -58,7 +58,7 @@ test("replaces invalid values with their centralized defaults", () => {
     httpRequestTimeoutMs: 30001,
     javascriptTimeoutMs: 90001,
     maxScreenshotSizeMiB: 31,
-    maxRecordingDurationSec: 301,
+    maxRecordingDurationSec: 601,
     maxRecordingSizeMiB: 513,
     consoleTimeoutSec: 301,
     consoleMaxSizeMiB: 11,

@@ -33,6 +33,16 @@ class _ResultModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class ApiDocumentation(_ResultModel):
+    base_url: str
+    swagger_url: str
+    openapi_url: str
+    instructions_url: str
+    instruction_url_template: str
+    batch_url: str
+    guide: list[str]
+
+
 class Tab(_ResultModel):
     tid: int
     window_id: int
@@ -285,6 +295,15 @@ class ACOBClient:
             self._closed = True
             self._close_task = asyncio.create_task(self._close_http_client())
         await asyncio.shield(self._close_task)
+
+    async def api(self) -> ApiDocumentation:
+        """Read API documentation and queue usage without browser work."""
+        result = await self._request_json(
+            "GET",
+            f"{self.endpoint}/api/",
+            timeout=min(self._REQUEST_TIMEOUT, self.timeout),
+        )
+        return self._expect_model(result, ApiDocumentation, "api")
 
     async def submit(self, action: str, /, **payload: JsonValue) -> JsonObject:
         """Submit an instruction without waiting for Chromium to execute it."""

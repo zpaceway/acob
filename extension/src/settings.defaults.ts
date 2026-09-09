@@ -14,7 +14,7 @@ export const defaultSettings: SettingValues = {
   "httpRequestTimeoutMs": 30000,
   "javascriptTimeoutMs": 60000,
   "maxScreenshotSizeMiB": 30,
-  "maxRecordingDurationSec": 300,
+  "maxRecordingDurationSec": 600,
   "maxRecordingSizeMiB": 512,
   "consoleTimeoutSec": 180,
   "consoleMaxSizeMiB": 2,

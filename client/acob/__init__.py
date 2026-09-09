@@ -7,6 +7,7 @@ from .client import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
+    ApiDocumentation,
     BatchResultEntry,
     CleanupResult,
     ClickResult,
@@ -30,7 +31,7 @@ from .client import (
     Tab,
 )
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -41,6 +42,7 @@ __all__ = [
     "ACOBInstructionError",
     "ACOBProtocolError",
     "ACOBTimeoutError",
+    "ApiDocumentation",
     "BatchResultEntry",
     "CleanupResult",
     "ClickResult",

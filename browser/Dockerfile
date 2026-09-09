@@ -27,8 +27,6 @@ RUN chmod 0755 /usr/local/bin/acob-browser
 ENV ACOB_VNC_ENABLED=false \
     DISPLAY=:99
 
-VOLUME ["/data"]
-
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
     CMD pgrep -u acob -x chromium >/dev/null \
         && { [ "$ACOB_VNC_ENABLED" != "true" ] \

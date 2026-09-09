@@ -153,6 +153,11 @@ Open `http://127.0.0.1:58346/vnc` in a browser. nginx serves noVNC's lightweight
 client and proxies its WebSocket over the existing stack port. See
 [`browser/README.md`](browser/README.md).
 
+Inside the managed browser, `http://localhost:<port>` reaches host dev servers
+(e.g. `:5173`, `:3000`; bind the server to `0.0.0.0`). Chromium remaps the
+`localhost` hostname to the host gateway while the stack keeps its internal
+Docker network. See [`browser/README.md`](browser/README.md).
+
 ## Browser extension
 
 Install the extension toolchain and create a production build:
@@ -317,7 +322,7 @@ Its MCP image includes the adapter and `acob-client`. For standalone native
 development, run `acob-srv` or another reachable ACOB API independently with
 `make -C srv dev` and `make -C mcp run`.
 
-MCP tools mirror the Python client's high-level methods: `list`, `navigate`,
+MCP tools mirror the Python client's high-level methods: `api`, `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `record`, `proxy`, `cleanup`, `console`, `javascript`, and `reinstall`.
 Structured results use SDK-generated output schemas. `screenshot` always
@@ -341,10 +346,31 @@ layout and deployment expectations.
 
 ## API
 
+Call the MCP `api` tool (no arguments) or Python `await client.api()` to obtain
+the API guide and documentation URLs without queueing browser work. Open
+`/api/docs/` on your stack for Swagger UI, or fetch `/api/openapi.json` for the
+OpenAPI 3.1 contract. `GET /api/` returns structured documentation links and
+the submit/poll/consume workflow.
+
+Documentation uses the incoming request's scheme, host and port for links,
+curl examples and Swagger's API server. It is generated per request, so it
+works across named stacks and custom ports. `ACOB_PUBLIC_URL` only affects
+capture URLs. Swagger's assets are bundled locally and its external validator
+is disabled. “Try it out” executes real API requests; extension-only routes
+are explicitly marked and must not be used by controllers.
+
+Compose enables `ACOB_API_SAME_ORIGIN` for MCP because API and MCP share the
+proxy origin. Standalone MCP leaves it disabled and returns documentation for
+its configured `ACOB_ENDPOINT`, which may use a different port. Reconnect MCP
+clients after installing an update to discover the `api` tool.
+
 The stack exposes one flat REST surface:
 
 | Method | Route | Purpose |
 | --- | --- | --- |
+| `GET` | `/api/` | Request-aware API links and usage guide. |
+| `GET` | `/api/docs/` | Locally hosted Swagger UI. |
+| `GET` | `/api/openapi.json` | OpenAPI 3.1 schemas and operation documentation. |
 | `POST` | `/api/instructions/` | Validate and enqueue one instruction. |
 | `POST` | `/api/instructions/batch/` | Validate and enqueue one sequential batch. |
 | `GET` | `/api/instructions/next/` | Claim pending work from the global queue. |
@@ -422,7 +448,7 @@ dependency is explicit and ordered. Input against a hidden tab fails with a
 hint to call `focus` or try `javascript` instead of reporting a browser event
 that Chromium dropped.
 
-`screenshot` requires a positive `tid` and captures the visible viewport as PNG. Set `full_page` to `true` to capture beyond the viewport. The completed result contains the public download URL served by the ACOB server itself, not image data:
+`screenshot` requires a positive `tid` and captures the full page as PNG by default. Set `full_page` to `false` to capture only the visible viewport. The completed result contains the public download URL served by the ACOB server itself, not image data:
 
 ```json
 {
@@ -435,8 +461,8 @@ that Chromium dropped.
 The server stores the capture locally under its media root and serves the
 bytes at `/api/media/<filename>`; the instruction result carries only that
 URL. Clients and the MCP server relay the URL without downloading it; fetching
-the image is left to the user or agent. The server controls the lifetime of
-the URL, which dies with the media files when the server restarts. When
+the image is left to the user or agent. Media reads do not delete files;
+Compose persists them in the server-data volume until it is purged. When
 storing the capture fails, the instruction completes as failed with a clear
 error. Encoded captures are limited to 30 MiB; larger captures complete as
 failed instructions rather than being submitted.
@@ -445,7 +471,7 @@ failed instructions rather than being submitted.
 recording of that tab. It completes almost immediately with `{started}`;
 the recording continues in the background until `record` with `method: stop`
 for the same `tid` or the extension's maximum recording duration (default
-5 minutes) is reached. Only one recording per tab is allowed. Set
+10 minutes) is reached. Only one recording per tab is allowed. Set
 `full_page` to `true` to record the tab's whole scrollable content instead
 of only the visible viewport:
 
@@ -473,7 +499,7 @@ screenshots. Recordings are encoded as MP4 (H.264) when the browser's
 {
   "url": "https://acob.example/api/media/recording-42-<id>.mp4",
   "content_type": "video/mp4",
-  "duration": 300.0,
+  "duration": 600.0,
   "stopped_reason": "max_duration",
   "message": "Recording stopped because the maximum duration was reached"
 }

@@ -1,8 +1,12 @@
 from django.urls import path
 
-from . import views
+from . import documentation, views
 
 urlpatterns = [
+    path("", documentation.api_documentation, name="api-documentation"),
+    path("docs/", documentation.swagger, name="swagger"),
+    path("docs/assets/<str:name>", documentation.swagger_asset, name="swagger-asset"),
+    path("openapi.json", documentation.openapi, name="openapi"),
     path(
         "reinstall/",
         views.reinstall,

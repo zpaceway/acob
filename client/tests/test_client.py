@@ -16,6 +16,7 @@ from acob import (
     ACOBInstructionError,
     ACOBProtocolError,
     ACOBTimeoutError,
+    ApiDocumentation,
     BatchResultEntry,
     CleanupResult,
     ClickResult,
@@ -71,6 +72,26 @@ class FailingTransport(httpx.AsyncBaseTransport):
 
 
 class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_api_reads_documentation_without_enqueuing(self) -> None:
+        client = self.make_client()
+        body = {
+            "base_url": "http://acob.test",
+            "swagger_url": "http://acob.test/api/docs/",
+            "openapi_url": "http://acob.test/api/openapi.json",
+            "instructions_url": "http://acob.test/api/instructions/",
+            "instruction_url_template": "http://acob.test/api/instructions/{instruction_id}/",
+            "batch_url": "http://acob.test/api/instructions/batch/",
+            "guide": ["Poll until terminal; save the one-use result."],
+        }
+        requests = self.add_responses(client, [(200, body), (200, {"guide": []})])
+        self.assertEqual(await client.api(), ApiDocumentation.model_validate(body))
+        with self.assertRaises(ACOBProtocolError):
+            await client.api()
+        self.assertEqual(
+            [(r.method, str(r.url)) for r in requests],
+            [("GET", "http://acob.test/api/")] * 2,
+        )
+
     def make_client(self, endpoint: str = "http://acob.test/") -> ACOBClient:
         client = ACOBClient(
             endpoint=endpoint,

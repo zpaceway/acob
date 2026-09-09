@@ -74,6 +74,7 @@ and it never downloads the image itself.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ACOB_ENDPOINT` | required | ACOB API origin, always taken from the environment. |
+| `ACOB_API_SAME_ORIGIN` | `false` | Use the MCP HTTP request origin for documentation URLs. Compose sets `true` for its unified API/MCP proxy. |
 | `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
 | `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
@@ -85,7 +86,7 @@ default `http://127.0.0.1:58347`; override any value with Make variables when
 needed. The recommended full stack uses the proxy on `58346`, while the MCP
 container reaches the API internally at `http://acob-srv:58347`.
 
-The tools are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
+The tools are `api`, `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `record`, `console`, `proxy`, `cleanup`,
 `javascript`, `execute_batch`, and `reinstall`. The `screenshot` tool always
 returns the
@@ -114,6 +115,19 @@ sequentially with one request for the whole cascade, returning one result or
 error entry per action.
 
 ## Docker
+
+The read-only `api` tool takes no arguments and returns `base_url`, `swagger_url`,
+`openapi_url`, `instructions_url`, `instruction_url_template`, `batch_url`, and
+a `guide` covering submission, bounded polling, one-use terminal responses,
+batch execution, errors and extension-only routes. Fetch `openapi_url` for exact
+payload schemas or open `swagger_url` for interactive documentation. Discovery
+does not enqueue browser work and does not require an available extension.
+
+With `ACOB_API_SAME_ORIGIN=true`, URLs follow each MCP HTTP request's scheme,
+host and port rather than the internal Docker API address. This only changes
+documentation links; execution always uses `ACOB_ENDPOINT`. Leave it false for
+standalone MCP on a separate API port. Non-HTTP calls use the API's own returned
+links. Restart/reconnect clients after upgrading so `tools/list` includes `api`.
 
 The image uses the sibling client project, so its build context is the
 monorepo root. There is no component Compose file; use the root `compose.yaml`

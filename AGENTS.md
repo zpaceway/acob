@@ -67,6 +67,13 @@ adding aliases, shims, or deprecation layers.
   `/api/instructions/batch/`, `/api/instructions/next/`, instruction detail and
   result routes, `/api/reinstall/`, `/api/reinstall/acknowledge/`, and
   `/api/media/<name>`.
+- `srv/api/documentation.py` serves `/api/` discovery, `/api/docs/` Swagger UI
+  with locally bundled assets, and `/api/openapi.json`. OpenAPI schemas come
+  from Pydantic models; operation descriptions document cross-field validators.
+  Documentation uses the incoming request origin, not `ACOB_PUBLIC_URL`.
+  The client `api()` method and MCP `api` tool expose typed discovery. Compose
+  enables `ACOB_API_SAME_ORIGIN` so MCP links follow its HTTP request origin;
+  standalone MCP defaults to the configured API's documentation links.
 - Strict Pydantic request models in `srv/api/schemas.py` (`ApiModel`:
   `extra="forbid"`, `strict=True`). Instruction requests are a discriminated
   union on `action` via `instruction_adapter`. Numeric bounds are explicit
@@ -95,6 +102,7 @@ adding aliases, shims, or deprecation layers.
   service name.
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
   helpers, `patch` for media storage failures).
+- Documentation tests are in `srv/tests/`; `make -C srv test` runs both suites.
 - Migration history was intentionally reset during this pre-release refactor
   and now consists of one `srv/api/migrations/0001_initial.py`. There is no
   upgrade path for an older local schema: destroy/recreate the local database
@@ -208,12 +216,16 @@ adding aliases, shims, or deprecation layers.
 - Chromium runs as non-root on Xvfb. Its inner sandbox is disabled because
   standard Docker blocks the required nested namespaces; the container is the
   process boundary. This is not stealth or fingerprint evasion.
-- `browser-data` persists the browser profile. The extension reads bundled
-  `settings.json` only when no extension settings are stored, so image rebuilds
-  do not overwrite user settings. That bundled file is built from
+- The managed browser keeps no persistent profile: `/data` has no volume, so
+  every container recreate starts from a fresh Chromium profile and a stale
+  profile can never break the extension's service worker after an upgrade.
+  The extension reads bundled
+  `settings.json` only when no extension settings are stored, so every fresh
+  profile picks up the baked-in defaults. That bundled file is built from
   `extension/src/settings.defaults.ts`; `ACOB_EXTENSION_SETTINGS` (JSON object,
   merged with `jq`) on the `acob-browser` container overrides
-  it at startup without an image rebuild, but still only seeds fresh profiles.
+  it at startup without an image rebuild, and always takes effect on the next
+  container recreate.
   `browser/Dockerfile` installs `jq` for that merge.
 - `ACOB_VNC_ENABLED=true` starts passwordless x11vnc plus noVNC/websockify.
   nginx serves the lightweight client and WebSocket under `/vnc`; no separate
@@ -287,8 +299,8 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
 ### Extension
 
 - Discriminated unions for requests; guard functions for claimed data;
-  runtime bounds match server bounds (e.g. `maxRecordingDurationSec` 300 s
-  == server `MAX_RECORDING_DURATION_SECONDS` 300).
+  runtime bounds match server bounds (e.g. `maxRecordingDurationSec` 600 s
+  == server `MAX_RECORDING_DURATION_SECONDS` 600).
 - Everything that targets a known tab runs through `runInTabExecutionQueue`
   so same-tab work stays ordered while other tabs run concurrently.
 - All debugger work runs through `withDebugger` in `cdp.ts`, which acquires
@@ -327,7 +339,7 @@ action with a `method` forms the lifecycle (one recording per tab):
   delivers the video through the normal result path (base64 -> server upload
   -> public URL).
 - Auto-stop: the worker timer at `maxRecordingDurationSec * 1000` (default
-  300 s, 5 minutes) stops the recording even when the stop call arrives
+  600 s, 10 minutes) stops the recording even when the stop call arrives
   late; the stop result then carries `stopped_reason: "max_duration"` and a
   message instead of failing. The finalized video is held in the session
   until the first stop delivers it (single delivery).
@@ -419,9 +431,10 @@ make install PORT=61554 NAME=alexandro
   noVNC, and all other paths to Django. The MCP container reaches Django at
   `http://acob-srv:58347` on the internal network.
 - SQLite and media are persisted in that project's `srv-data` volume; the
-  Chromium profile is persisted in `browser-data`. Lifecycle commands must
-  receive the same `PORT` and `NAME`; `down` preserves both volumes and `purge`
-  removes them.
+  Chromium profile is ephemeral (no volume on `/data`), so every reinstall or
+  container recreate starts from a fresh profile. Lifecycle commands must
+  receive the same `PORT` and `NAME`; `down` preserves the `srv-data` volume
+  and `purge` removes it.
 - Run another independent stack with another port, for example `make install
   PORT=58356 NAME=secondary`. Each stack starts its own managed browser and MCP
   endpoint; extensions sharing a stack still race to claim its global queue.
@@ -444,8 +457,8 @@ External URLs for `PORT=58346`:
 2. Bump versions per the Version bumping rules when the protocol changed.
 3. Reinstall the selected stack with `make install PORT=<port> NAME=<name>`.
    Use the same context arguments as the original installation. This rebuilds
-   the browser image and restarts services while preserving data and browser
-   profile volumes.
+   the browser image and restarts services while preserving the `srv-data`
+   volume; the browser profile is ephemeral, so it starts fresh.
 4. Never commit generated `extension/dist/` or `.local/` contents.
 5. **After updating the MCP, restart/reconnect the MCP client** (e.g. the
    opencode session that called it). Tool input/output schemas are captured

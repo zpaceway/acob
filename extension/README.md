@@ -99,7 +99,7 @@ same tab fails the second entry with a clear error.
 `record` with `method: start` (`{tid}`, optional `full_page`) starts a video
 recording of the tab and completes immediately with `{started}`; the recording
 continues in the background until `record` with `method: stop` (`{tid}`) for
-the same tab or `maxRecordingDurationSec` (default 300 s, 5 minutes). Only one
+the same tab or `maxRecordingDurationSec` (default 600 s, 10 minutes). Only one
 recording per tab is allowed. `full_page: true`
 records the whole scrollable content instead of the viewport: the worker
 measures the content size up front and re-measures it each frame so growing
@@ -190,8 +190,8 @@ while an ordinary native build defaults to `http://127.0.0.1:58346`. To change
 the managed browser's defaults without rebuilding its image, set
 `ACOB_EXTENSION_SETTINGS` on the `acob-browser` container
 instead; the entrypoint merges it over the bundled `settings.json` at startup.
-That still only seeds fresh profiles: a persisted `browser-data` volume keeps
-its stored configuration until it is purged.
+Every container recreate starts the managed browser from a fresh (ephemeral)
+profile, so the merged result always takes effect there.
 
 The defaults include one-second polling, a batch size of four, up to eight
 concurrent executions, and `allowCleanup: false`. The same settings module owns

@@ -1,8 +1,10 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, create_autospec, patch
 
 from acob import (
     ACOBClient,
+    ApiDocumentation,
     BatchResultEntry,
     CleanupResult,
     ClickResult,
@@ -21,7 +23,9 @@ from acob import (
     Tab,
 )
 from mcp import Client, MCPError
+from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.types import CallToolResult, TextContent
+from starlette.requests import Request
 from typing_extensions import override
 
 from src.server import (
@@ -123,6 +127,54 @@ class AppContextTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MCPServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_api_links_follow_request_only_in_same_origin_mode(self) -> None:
+        docs = ApiDocumentation(
+            base_url="http://api.test:58347",
+            swagger_url="http://api.test:58347/api/docs/",
+            openapi_url="http://api.test:58347/api/openapi.json",
+            instructions_url="http://api.test:58347/api/instructions/",
+            instruction_url_template="http://api.test:58347/api/instructions/{instruction_id}/",
+            batch_url="http://api.test:58347/api/instructions/batch/",
+            guide=["Save the terminal response; it is consumed."],
+        )
+        self.acob.api.return_value = docs
+        for same_origin in (False, True):
+            for host in ("localhost:61554", "[::1]:61555"):
+
+                async def request_context(
+                    ctx: ServerRequestContext[AppContext, object],
+                    call_next: CallNext,
+                    host: str = host,
+                ) -> HandlerResult:
+                    request = Request(
+                        {
+                            "type": "http",
+                            "scheme": "https",
+                            "path": "/mcp",
+                            "root_path": "",
+                            "headers": [(b"host", host.encode())],
+                        }
+                    )
+                    return await call_next(replace(ctx, request=request))
+
+                server = create_server(
+                    Settings(api_same_origin=same_origin), client=self.acob
+                )
+                server.middleware.insert(0, request_context)
+                async with Client(server, raise_exceptions=True) as client:
+                    result = await client.call_tool("api", {})
+                    tools = {t.name: t for t in (await client.list_tools()).tools}
+                content = result.structured_content
+                assert content is not None
+                origin = f"https://{host}" if same_origin else docs.base_url
+                self.assertEqual(content["base_url"], origin)
+                self.assertEqual(content["swagger_url"], origin + "/api/docs/")
+                self.assertEqual(content["guide"], docs.guide)
+                self.assertEqual(tools["api"].input_schema.get("properties", {}), {})
+                assert tools["api"].annotations is not None
+                self.assertTrue(tools["api"].annotations.read_only_hint)
+        self.acob.submit.assert_not_called()
+
     @override
     async def asyncSetUp(self) -> None:
         self.acob = create_autospec(ACOBClient, instance=True)
@@ -159,6 +211,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {tool.name for tool in result.tools},
             {
+                "api",
                 "cleanup",
                 "click",
                 "close",

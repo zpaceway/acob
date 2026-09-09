@@ -18,7 +18,7 @@ check:
 
 test:
 	@echo "Running tests..."
-	uv run manage.py test api
+	uv run manage.py test api tests
 
 migrations:
 	@echo "Running migrations..."

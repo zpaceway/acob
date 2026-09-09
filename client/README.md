@@ -93,6 +93,13 @@ Keep a client within one event loop. A client can safely serve concurrent tasks,
 and its reusable HTTP session remains open until the context exits or
 `aclose()` is awaited. A closed client cannot be reused.
 
+## API Documentation
+
+Use `await client.api()` to read an `ApiDocumentation` model containing the
+API origin, Swagger and OpenAPI URLs, instruction/batch URLs, a polling URL
+template and a usage guide. This performs only `GET /api/` and works without
+a polling extension. The returned links follow the API request's host and port.
+
 ## Parallel Execution
 
 Independent actions can be submitted and polled concurrently with

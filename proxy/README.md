@@ -99,6 +99,7 @@ Manual MCP configuration for the default port is:
 The default proxy exposes the flat, single-queue interfaces:
 
 - REST API: `http://127.0.0.1:58346/api/instructions/`
+- API guide: `/api/`, Swagger UI: `/api/docs/`, OpenAPI: `/api/openapi.json`
 - Media: `http://127.0.0.1:58346/api/media/<file>`
 - Reinstall: `http://127.0.0.1:58346/api/reinstall/`
 - MCP Streamable HTTP: `http://127.0.0.1:58346/mcp`
@@ -130,6 +131,11 @@ native `make -C srv run` and `make -C mcp run` when direct host access on
 `58347` and `58348` is needed.
 
 ## nginx Configuration
+
+Documentation is served by Django through the generic `/` route. nginx preserves
+the request Host including its port, so generated documentation targets the
+origin the caller used. Compose sets `ACOB_API_SAME_ORIGIN=true` for MCP to
+produce matching links while retaining its internal API execution endpoint.
 
 `proxy/Dockerfile` copies `nginx.conf` into the proxy image. The configuration:
 

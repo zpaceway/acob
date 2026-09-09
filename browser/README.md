@@ -11,11 +11,15 @@ disabled because standard Docker blocks the nested namespace operations it
 requires; the container remains the process isolation boundary. Do not expose
 this local-only stack to untrusted networks or run untrusted browser workloads.
 
-The root `compose.yaml` is the supported runtime. It persists the Chromium
-profile in the stack-local `browser-data` volume and gives the bundled extension
+The root `compose.yaml` is the supported runtime. The Chromium profile in
+`/data` is ephemeral: no volume is mounted there, so every container recreate
+(`make install`, `make up --build` with a changed image, `make down` followed
+by `make up`) starts from a fresh profile. A stale profile can therefore never
+survive an upgrade and break the extension's service worker. The profile only
+survives stop/start of the same container. The bundled extension gets
 an initial server URL of `http://acob-proxy`. The extension reads its bundled
-`settings.json` only when its profile has no stored extension settings; later
-image rebuilds do not overwrite profile settings. That bundled file is built
+`settings.json` only when its profile has no stored extension settings, so
+every fresh profile picks up the baked-in defaults. That bundled file is built
 from the extension's defaults in `src/settings.defaults.ts`
 (see `../extension/README.md`).
 
@@ -28,10 +32,9 @@ ACOB_EXTENSION_SETTINGS='{"baseUrl":"http://acob-proxy","allowCleanup":true}' ma
 
 The entrypoint validates the object with `jq` and merges it over the bundled
 `settings.json` before launching Chromium, so a partial object is enough
-(e.g. just `{"baseUrl": ...}`). It only seeds fresh
-profiles: a persisted `browser-data` volume keeps its stored extension
-settings, so purge the stack (`make purge PORT=... NAME=...`) or clear the
-profile when a seed change must take effect. An invalid JSON object
+(e.g. just `{"baseUrl": ...}`). Every fresh profile picks the merged result
+up, so the override always takes effect on the next container recreate. An
+invalid JSON object
 fails container startup with a clear error.
 
 The browser image consumes a built extension directory through Docker's named
@@ -65,6 +68,27 @@ proxies its WebSocket to websockify inside the browser container. x11vnc listens
 only inside that container, and no separate host port is published. Passwordless
 VNC is intended solely for trusted local development; leave it disabled
 otherwise.
+
+## Accessing Host Ports and Other Docker Networks
+
+The stack keeps its internal `acob` bridge network: the browser reaches the
+extension's server URL at `http://acob-proxy` like any other container. To keep
+`localhost` usable, Chromium launches with
+`--host-resolver-rules="MAP localhost host.docker.internal"`, so navigating the
+managed browser to `http://localhost:5173` reaches your host dev server with
+the URL and origin intact. No per-port configuration is needed; every host port
+(`:5173`, `:3000`, any other) works through `localhost`. `compose.yaml` maps
+`host.docker.internal` to the host gateway as the remap target, so keep that
+`extra_hosts` entry. Bind the dev server to `0.0.0.0` (e.g. Vite
+`--host 0.0.0.0`), not `127.0.0.1`, otherwise the gateway address cannot reach
+it. The `Host` header stays `localhost`, so no Vite `allowedHosts` change is
+needed. Sibling containers with published ports work the same way, e.g.
+`http://localhost:<published-port>`.
+
+Limit: the remap covers the `localhost` hostname only. The literal
+`http://127.0.0.1:<port>` bypasses DNS resolution and still reaches the browser
+container itself, so use the `localhost` hostname. Navigating to
+`http://host.docker.internal:<port>` directly keeps working as an escape hatch.
 
 ## Verification
 

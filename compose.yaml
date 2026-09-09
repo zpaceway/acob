@@ -21,6 +21,7 @@ services:
       - "58348"
     environment:
       ACOB_ENDPOINT: ${ACOB_ENDPOINT:-http://acob-srv:58347}
+      ACOB_API_SAME_ORIGIN: ${ACOB_API_SAME_ORIGIN:-true}
       ACOB_TIMEOUT: ${ACOB_TIMEOUT:-60}
       ACOB_POLL_INTERVAL: ${ACOB_POLL_INTERVAL:-0.5}
       ACOB_MCP_HOST: 0.0.0.0
@@ -33,6 +34,8 @@ services:
       context: ./browser
       additional_contexts:
         extension: ${ACOB_EXTENSION_PATH:-./extension/dist}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ACOB_BROWSER_HEIGHT: ${ACOB_BROWSER_HEIGHT:-1080}
       ACOB_BROWSER_WIDTH: ${ACOB_BROWSER_WIDTH:-1920}
@@ -40,8 +43,6 @@ services:
       ACOB_VNC_ENABLED: ${ACOB_VNC_ENABLED:-false}
     expose:
       - "6080"
-    volumes:
-      - browser-data:/data
     shm_size: 1gb
     restart: unless-stopped
     depends_on:
@@ -63,5 +64,4 @@ networks:
   acob: {}
 
 volumes:
-  browser-data: {}
   srv-data: {}

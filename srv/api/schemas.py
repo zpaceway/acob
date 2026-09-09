@@ -26,7 +26,7 @@ MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
 # Console buffers are capped raw (10 MiB max setting); base64 inflates by 4/3.
 MAX_CONSOLE_BASE64_LENGTH = 14 * 1024 * 1024
-MAX_RECORDING_DURATION_SECONDS = 300
+MAX_RECORDING_DURATION_SECONDS = 600
 MAX_INSTRUCTION_CLAIM_LIMIT = 20
 MAX_BATCH_ACTIONS = 20
 MAX_PROXY_LENGTH = 2048
@@ -56,6 +56,16 @@ KEYBOARD_KEYS = {
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ApiDocumentation(ApiModel):
+    base_url: str
+    swagger_url: str
+    openapi_url: str
+    instructions_url: str
+    instruction_url_template: str
+    batch_url: str
+    guide: list[str]
 
 
 class JavaScriptInstruction(ApiModel):

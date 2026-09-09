@@ -91,11 +91,25 @@ promiscuous within its stack.
 
 ## API
 
+`GET /api/` returns request-aware links and a queue usage guide. Swagger UI at
+`/api/docs/` loads locally packaged assets; `/api/openapi.json` generates OpenAPI
+3.1 from the actual Pydantic request/response models. Cross-field validators
+are explained in action descriptions. The result envelope remains arbitrary
+JSON where the runtime does not enforce a structured result.
+
+Links, the OpenAPI server and curl examples use the current request's scheme,
+Host and port, independently of `ACOB_PUBLIC_URL`. nginx preserves Host,
+including the port. No documentation is cached across origins. Native HTTPS
+requests retain their scheme; the shipped proxy serves HTTP only.
+
 All routes are flat under `/api/` and operate on the one queue for this local
 server.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
+| `GET` | `/api/` | Documentation links and queue usage guide. |
+| `GET` | `/api/docs/` | Swagger UI with locally served assets. |
+| `GET` | `/api/openapi.json` | Generated OpenAPI 3.1 contract. |
 | `POST` | `/api/instructions/` | Validate and enqueue an instruction. |
 | `POST` | `/api/instructions/batch/` | Enqueue one instruction that runs up to 20 actions sequentially. |
 | `GET` | `/api/instructions/next/?limit=1` | Claim 1 to 20 pending instructions for the extension. |
