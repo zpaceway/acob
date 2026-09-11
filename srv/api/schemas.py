@@ -35,6 +35,9 @@ MAX_PROXY_HOST_LENGTH = 253
 MAX_PROXY_PORT = 65535
 MIN_PROXY_PORT = 1
 MAX_PROXY_CREDENTIAL_LENGTH = 255
+MAX_WAIT_TIMEOUT_MS = 90000
+MIN_WAIT_TIMEOUT_MS = 1
+WaitTimeoutMs = Annotated[int, Field(ge=MIN_WAIT_TIMEOUT_MS, le=MAX_WAIT_TIMEOUT_MS)]
 PROXY_SCHEMES = {"http", "https", "socks5"}
 
 KEYBOARD_KEYS = {
@@ -80,6 +83,14 @@ class ClickInstruction(ApiModel):
     action: Literal["click"]
     tid: Tid
     selector: NonEmptyString
+    bid: Bid | None = None
+
+
+class WaitInstruction(ApiModel):
+    action: Literal["wait"]
+    tid: Tid
+    selector: NonEmptyString
+    timeout_ms: WaitTimeoutMs | None = None
     bid: Bid | None = None
 
 
@@ -256,7 +267,8 @@ InstructionRequest = Annotated[
     | RecordInstruction
     | ReloadInstruction
     | ScreenshotInstruction
-    | ScrollInstruction,
+    | ScrollInstruction
+    | WaitInstruction,
     Field(discriminator="action"),
 ]
 instruction_adapter: TypeAdapter[InstructionRequest] = TypeAdapter(InstructionRequest)
@@ -340,6 +352,11 @@ class RecordStopUploadResult(ApiModel):
 class ScrollResult(ApiModel):
     scrolled: Literal[True]
     y: ScrollY
+
+
+class WaitResult(ApiModel):
+    waited: Literal[True]
+    selector: NonEmptyString
 
 
 class CleanupResult(ApiModel):

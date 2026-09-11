@@ -67,7 +67,7 @@ Python client or MCP host
 - The service worker polls through an offscreen document.
 - Configuration and recovery state use local extension storage.
 - Supported actions are `list`, `navigate`, `focus`, `close`, `reload`,
-  `scroll`, `click`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`,
+  `scroll`, `click`, `wait`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`,
   `console`, `javascript`, and `batch` (up to 20 actions executed sequentially
   with one result or error entry per action).
 - Targeted operations are serialized per tab while different tabs can run

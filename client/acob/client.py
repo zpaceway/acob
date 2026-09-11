@@ -30,6 +30,8 @@ ConsoleMethod: TypeAlias = Literal["start", "capture", "stop"]
 Bid: TypeAlias = str
 BID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 MAX_PROXY_LENGTH = 2048
+MAX_WAIT_TIMEOUT_MS = 90000
+MIN_WAIT_TIMEOUT_MS = 1
 
 
 class _ResultModel(BaseModel):
@@ -82,6 +84,19 @@ class ClickResult(_ResultModel):
     selector: str
     x: float
     y: float
+    bid: str | None = None
+
+
+class WaitResult(_ResultModel):
+    waited: Literal[True]
+    selector: str
+    tid: int
+    bid: str | None = None
+
+
+class _WaitMetadata(_ResultModel):
+    waited: Literal[True]
+    selector: str
     bid: str | None = None
 
 
@@ -656,6 +671,46 @@ class ACOBClient:
             ),
             ClickResult,
             "click",
+        )
+
+    async def wait_for_selector(
+        self,
+        tid: int,
+        selector: str,
+        *,
+        timeout_ms: int | None = None,
+        timeout: float | None = None,
+        bid: str | None = None,
+    ) -> WaitResult:
+        """Wait for a CSS selector to match an element in the tab.
+
+        The wait survives navigations and reloads while polling; it fails
+        fast when the tab is closed or the selector is invalid. ``timeout_ms``
+        (1-90000) bounds the browser-side wait; omit it for the extension's
+        ``waitTimeoutMs`` default. ``timeout`` bounds the whole client call.
+        """
+        self._validate_tid(tid)
+        if not isinstance(selector, str) or not selector.strip():
+            raise ValueError("selector must be a non-empty string")
+        payload: JsonObject = {"tid": tid, "selector": selector}
+        if timeout_ms is not None:
+            if (
+                isinstance(timeout_ms, bool)
+                or not isinstance(timeout_ms, int)
+                or not MIN_WAIT_TIMEOUT_MS <= timeout_ms <= MAX_WAIT_TIMEOUT_MS
+            ):
+                raise ValueError("timeout_ms must be an integer from 1 to 90000")
+            payload["timeout_ms"] = timeout_ms
+        result = self._expect_model(
+            await self.execute("wait", timeout=timeout, bid=bid, **payload),
+            _WaitMetadata,
+            "wait",
+        )
+        return WaitResult(
+            waited=result.waited,
+            selector=result.selector,
+            tid=tid,
+            bid=result.bid if result.bid is not None else bid,
         )
 
     @overload

@@ -805,6 +805,107 @@ class InstructionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["details"][0]["field"], "click.selector")
 
+    def test_accepts_wait_instruction(self) -> None:
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12, "selector": "button[type=submit]"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["action"], "wait")
+        self.assertEqual(response.json()["payload"]["tid"], 12)
+        self.assertEqual(response.json()["payload"]["selector"], "button[type=submit]")
+        self.assertNotIn("timeout_ms", response.json()["payload"])
+
+    def test_wait_accepts_optional_timeout(self) -> None:
+        response = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12, "selector": "button", "timeout_ms": 5000},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payload"]["timeout_ms"], 5000)
+
+    def test_wait_requires_target_tab_and_selector(self) -> None:
+        missing_tid = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "selector": "button"},
+        )
+        missing_selector = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12},
+        )
+        empty_selector = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12, "selector": "  "},
+        )
+
+        self.assertEqual(missing_tid.status_code, 400)
+        self.assertEqual(missing_tid.json()["details"][0]["field"], "wait.tid")
+        self.assertEqual(missing_selector.status_code, 400)
+        self.assertEqual(empty_selector.status_code, 400)
+        self.assertEqual(empty_selector.json()["details"][0]["field"], "wait.selector")
+
+    def test_wait_rejects_invalid_timeout(self) -> None:
+        for timeout_ms in (0, -1, 90001, "5000", 1.5):
+            with self.subTest(timeout_ms=timeout_ms):
+                response = self.post_json(
+                    self.instruction_path(),
+                    {
+                        "action": "wait",
+                        "tid": 12,
+                        "selector": "button",
+                        "timeout_ms": timeout_ms,
+                    },
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.json()["details"][0]["field"], "wait.timeout_ms"
+                )
+
+    def test_wait_result_is_validated(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12, "selector": "button"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": {"waited": True, "selector": "button"}},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(
+            completed.json()["result"], {"waited": True, "selector": "button"}
+        )
+
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "wait", "tid": 12, "selector": "button"},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        rejected = self.post_result(
+            instruction_id,
+            {"result": {"waited": False, "selector": "button"}},
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+    def test_batch_accepts_wait(self) -> None:
+        response = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [
+                    {"action": "wait", "tid": 12, "selector": "button"},
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+
     def test_accepts_keyboard_text_and_key_instructions(self) -> None:
         text = self.post_json(
             self.instruction_path(),

@@ -13,6 +13,7 @@ export interface SettingValues {
   maxTabs: number;
   pollIntervalMs: number;
   tabLoadTimeoutMs: number;
+  waitTimeoutMs: number;
   httpRequestTimeoutMs: number;
   javascriptTimeoutMs: number;
   maxScreenshotSizeMiB: number;
@@ -119,7 +120,8 @@ export type InstructionAction =
   | "record"
   | "reload"
   | "screenshot"
-  | "scroll";
+  | "scroll"
+  | "wait";
 export type InstructionStatus =
   | "pending"
   | "processing"
@@ -212,6 +214,12 @@ export interface ScrollPayload {
 export interface ClickPayload {
   tid: number;
   selector: string;
+}
+
+export interface WaitPayload {
+  tid: number;
+  selector: string;
+  timeout_ms?: number;
 }
 
 export interface JavaScriptPayload {
@@ -309,6 +317,7 @@ export interface InstructionPayloadMap {
   reload: ReloadTabPayload;
   screenshot: ScreenshotPayload;
   scroll: ScrollPayload;
+  wait: WaitPayload;
 }
 
 export type SupportedInstruction<
@@ -385,6 +394,11 @@ export interface ScrollInstructionRequest extends ScrollPayload {
 
 export interface ClickInstructionRequest extends ClickPayload {
   action: "click";
+  bid?: Bid;
+}
+
+export interface WaitInstructionRequest extends WaitPayload {
+  action: "wait";
   bid?: Bid;
 }
 
@@ -486,7 +500,8 @@ export type InstructionRequest =
   | RecordInstructionRequest
   | ReloadTabInstructionRequest
   | ScreenshotInstructionRequest
-  | ScrollInstructionRequest;
+  | ScrollInstructionRequest
+  | WaitInstructionRequest;
 
 export interface TabDetails {
   tid: number;
@@ -513,6 +528,11 @@ export interface CleanupResult {
 export interface ScrollResult {
   scrolled: true;
   y: number;
+}
+
+export interface WaitResult {
+  waited: true;
+  selector: string;
 }
 
 export interface ClickResult {
@@ -653,7 +673,9 @@ export type InstructionResultFor<
                     ? TabDetails
                     : Request extends { action: "scroll" }
                       ? ScrollResult
-                      : never;
+                      : Request extends { action: "wait" }
+                        ? WaitResult
+                        : never;
 
 export type InstructionResult = InstructionResultFor<InstructionRequest>;
 
@@ -670,6 +692,7 @@ export type ExtensionInstructionResult =
   | ClosedTab
   | CleanupResult
   | ScrollResult
+  | WaitResult
   | ClickResult
   | KeyboardTextResult
   | KeyboardKeyResult

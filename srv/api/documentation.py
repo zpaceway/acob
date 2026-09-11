@@ -92,6 +92,13 @@ ACTION_DESCRIPTIONS = {
         "Click the center of a CSS-selected element using real input. Normal "
         "hit-testing applies, including overlays. Returns clicked, selector, x and y."
     ),
+    "WaitInstruction": (
+        "Wait for a CSS selector to match an element in the tab. Survives "
+        "navigations and reloads while waiting; fails fast when the tab is "
+        "closed or the selector is invalid. Optional timeout_ms (1-90000, "
+        "default from the extension waitTimeoutMs setting) bounds the wait. "
+        "Returns waited and selector."
+    ),
     "KeyboardInstruction": (
         "Exactly one of text or key is required. Text must be nonempty and cannot "
         "use modifiers. Key is one character or a supported named key. Modifiers "
@@ -434,6 +441,7 @@ def openapi_document(origin: str) -> dict[str, Any]:
         schemas.ConsoleStartResult,
         schemas.ConsoleCaptureUploadResult,
         schemas.ScrollResult,
+        schemas.WaitResult,
         schemas.CleanupResult,
         schemas.ProxySetResult,
         schemas.ProxyUnsetResult,

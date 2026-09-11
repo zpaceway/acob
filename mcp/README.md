@@ -87,7 +87,7 @@ needed. The recommended full stack uses the proxy on `58346`, while the MCP
 container reaches the API internally at `http://acob-srv:58347`.
 
 The tools are `api`, `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record`, `console`, `proxy`, `cleanup`,
+`click`, `wait`, `keyboard`, `screenshot`, `record`, `console`, `proxy`, `cleanup`,
 `javascript`, `execute_batch`, and `reinstall`. Every browser tool except `api`
 and `reinstall` accepts an optional `bid` (32 lowercase hex) targeting one
 browser — copy it from the extension popup's read-only Browser ID field; omit
@@ -105,7 +105,11 @@ extension's maximum duration was reached first. `console` with
 captures console messages keyed by tab (one per tab); `capture` returns a
 cumulative snapshot as a public JSON download URL without stopping, and
 `stop` delivers the final snapshot URL, so the agent downloads the file
-itself when it needs the entries. `proxy` with `method: set`
+itself when it needs the entries. `wait` waits for a CSS selector to match an
+element in the tab (`tid`, `selector`, optional `timeout_ms` 1-90000); it
+survives navigations and reloads while polling, fails fast when the tab is
+closed or the selector is invalid, and returns `{waited, selector, tid}`.
+`proxy` with `method: set`
 (`http://`, `https://`, or `socks5://` with optional auth) or `method: unset`
 controls the browser-wide egress proxy; it is global, not per-tab, and
 results never echo credentials. `cleanup` clears all browser data except the

@@ -7,6 +7,7 @@ import {
   executeScreenshot,
   executeScroll,
 } from "./actions.js";
+import { executeWait } from "./wait.js";
 import {
   executeConsoleCapture,
   executeConsoleStart,
@@ -162,6 +163,16 @@ async function runInstructionAction(
       await assertTabFocusedForInput(payload.tid);
       return executeClick(payload.tid, payload.selector, configuration);
     });
+  }
+
+  if (action === "wait") {
+    await chrome.tabs.get(payload.tid);
+    return executeWait(
+      payload.tid,
+      payload.selector,
+      payload.timeout_ms ?? undefined,
+      configuration,
+    );
   }
 
   if (action === "keyboard") {

@@ -27,6 +27,15 @@ npm run build
 `npm run test:coverage` enforces at least 90% line and function coverage over
 `src/`; keep it green when adding features.
 
+`wait` (`{tid, selector}`, optional `timeout_ms` 1-90000 ms, default from the
+`waitTimeoutMs` setting) polls for a CSS selector to match an element and
+returns `{waited: true, selector}`. It re-acquires its debugger session on
+every poll so navigations and reloads do not fail the wait: the browser may
+reload or navigate to a different final page and the wait still completes when
+the selector appears there. It fails fast when the tab is closed or the
+selector is invalid, times out with `Timed out waiting for selector: ...`,
+and holds a service-worker keep-alive across the poll loop like batches.
+
 Load `dist/` as an unpacked extension in Chromium 116 or newer. The build emits
 the service worker, popup and offscreen modules, extension assets, source maps,
 TypeScript declaration files, the jQuery and Turndown browser distributions,

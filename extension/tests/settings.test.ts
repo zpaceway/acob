@@ -18,6 +18,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
     maxTabs: 50,
     pollIntervalMs: 250,
     tabLoadTimeoutMs: 45000,
+    waitTimeoutMs: 15000,
     httpRequestTimeoutMs: 10000,
     javascriptTimeoutMs: 45000,
     maxScreenshotSizeMiB: 12,
@@ -35,6 +36,7 @@ test("accepts valid custom settings and canonicalizes the server URL", () => {
   assert.equal(configuration.instructionsPerPoll, 8);
   assert.equal(configuration.maxConcurrentExecutions, 40);
   assert.equal(configuration.tabLoadTimeoutMs, 45000);
+  assert.equal(configuration.waitTimeoutMs, 15000);
   assert.equal(configuration.httpRequestTimeoutMs, 10000);
   assert.equal(configuration.javascriptTimeoutMs, 45000);
   assert.equal(configuration.maxRecordingDurationSec, 60);
@@ -55,6 +57,7 @@ test("replaces invalid values with their centralized defaults", () => {
     maxTabs: -1,
     pollIntervalMs: 0,
     tabLoadTimeoutMs: 90001,
+    waitTimeoutMs: 90001,
     httpRequestTimeoutMs: 30001,
     javascriptTimeoutMs: 90001,
     maxScreenshotSizeMiB: 31,
@@ -74,6 +77,7 @@ test("replaces invalid values with their centralized defaults", () => {
   assert.equal(configuration.maxTabs, defaultSettings.maxTabs);
   assert.equal(configuration.pollIntervalMs, defaultSettings.pollIntervalMs);
   assert.equal(configuration.tabLoadTimeoutMs, defaultSettings.tabLoadTimeoutMs);
+  assert.equal(configuration.waitTimeoutMs, defaultSettings.waitTimeoutMs);
   assert.equal(configuration.httpRequestTimeoutMs, defaultSettings.httpRequestTimeoutMs);
   assert.equal(configuration.javascriptTimeoutMs, defaultSettings.javascriptTimeoutMs);
   assert.equal(configuration.maxScreenshotSizeMiB, defaultSettings.maxScreenshotSizeMiB);

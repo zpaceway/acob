@@ -11,6 +11,7 @@ export const defaultSettings: SettingValues = {
   "maxTabs": 20,
   "pollIntervalMs": 1000,
   "tabLoadTimeoutMs": 30000,
+  "waitTimeoutMs": 30000,
   "httpRequestTimeoutMs": 30000,
   "javascriptTimeoutMs": 60000,
   "maxScreenshotSizeMiB": 30,

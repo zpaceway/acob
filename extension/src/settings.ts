@@ -18,6 +18,7 @@ const MAX_CONSOLE_SIZE_MIB = 10;
 const MAX_RESULT_RETRY_ATTEMPTS = 3;
 const MAX_RESULT_RETRY_DELAY_MS = 30_000;
 const MAX_TAB_LOAD_TIMEOUT_MS = 90_000;
+const MAX_WAIT_TIMEOUT_MS = 90_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const definitions: SettingDefinitions = {
@@ -94,6 +95,18 @@ const definitions: SettingDefinitions = {
     hint: "Maximum wait for a navigated tab to finish loading.",
     min: 1,
     max: MAX_TAB_LOAD_TIMEOUT_MS,
+    step: 1,
+    editable: true,
+    visible: true,
+  },
+  waitTimeoutMs: {
+    defaultValue: defaultSettings.waitTimeoutMs,
+    valueType: "integer",
+    inputType: "number",
+    label: "Wait timeout (ms)",
+    hint: "Default maximum wait for a selector to appear when wait omits timeout_ms.",
+    min: 1,
+    max: MAX_WAIT_TIMEOUT_MS,
     step: 1,
     editable: true,
     visible: true,

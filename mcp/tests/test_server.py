@@ -22,6 +22,7 @@ from acob import (
     Screenshot,
     ScrollResult,
     Tab,
+    WaitResult,
 )
 from mcp import Client, MCPError
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
@@ -229,6 +230,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "reload",
                 "screenshot",
                 "scroll",
+                "wait",
             },
         )
         tools = {tool.name: tool for tool in result.tools}
@@ -284,6 +286,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             {"timeout", "bid"},
         )
         self.assertEqual(tools["cleanup"].input_schema.get("required", []), [])
+        self.assertEqual(
+            set(tools["wait"].input_schema["properties"]),
+            {"tid", "selector", "timeout_ms", "timeout", "bid"},
+        )
+        self.assertEqual(
+            set(tools["wait"].input_schema["required"]),
+            {"tid", "selector"},
+        )
         self.assertEqual(
             set(tools["execute_batch"].input_schema["properties"]),
             {"actions", "timeout", "bid"},
@@ -730,6 +740,32 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.acob.cleanup.assert_not_awaited()
+
+    async def test_waits_for_selector_through_the_client(self) -> None:
+        self.acob.wait_for_selector.return_value = WaitResult(
+            waited=True,
+            selector="button",
+            tid=12,
+        )
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            result = await client.call_tool(
+                "wait",
+                {"tid": 12, "selector": "button", "timeout_ms": 5000},
+            )
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(
+            result.structured_content,
+            {"waited": True, "selector": "button", "tid": 12, "bid": None},
+        )
+        self.acob.wait_for_selector.assert_awaited_once_with(
+            12,
+            "button",
+            timeout_ms=5000,
+            timeout=None,
+            bid=None,
+        )
 
     async def test_returns_javascript_json_values(self) -> None:
         self.acob.javascript.return_value = {"title": "Example", "count": 2}

@@ -362,7 +362,7 @@ development, run `acob-srv` or another reachable ACOB API independently with
 `make -C srv dev` and `make -C mcp run`.
 
 MCP tools mirror the Python client's high-level methods: `api`, `list`, `navigate`,
-`focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
+`focus`, `close`, `reload`, `scroll`, `click`, `wait`, `keyboard`, `screenshot`,
 `record`, `proxy`, `cleanup`, `console`, `javascript`, and `reinstall`.
 Every browser tool except `api` and `reinstall` accepts an optional `bid`
 (32 lowercase hex) to target one browser; responses carry the executor `bid`.
@@ -441,6 +441,8 @@ Supported instructions:
 {"action":"reload","tid":123}
 {"action":"scroll","tid":123,"y":500}
 {"action":"click","tid":123,"selector":"button[type=submit]"}
+{"action":"wait","tid":123,"selector":"button[type=submit]"}
+{"action":"wait","tid":123,"selector":"button[type=submit]","timeout_ms":5000}
 {"action":"keyboard","tid":123,"text":"ACOB"}
 {"action":"keyboard","tid":123,"key":"Enter","modifiers":[]}
 {"action":"screenshot","tid":123,"full_page":false}
@@ -484,6 +486,16 @@ visible scrollable surface, with positive values moving down and negative values
 result is `{ "scrolled": true, "y": ... }`.
 
 `click` requires a positive `tid` and a non-empty CSS `selector`. The extension leaves browser focus unchanged, scrolls the selected element into view, and sends mouse movement, press, and release input at the center of its largest rendered content fragment. The browser performs normal coordinate hit-testing, so an overlay or another element visually above the selected element receives the click instead. The result includes the selector and click coordinates.
+
+`wait` requires a positive `tid` and a non-empty CSS `selector`, with an
+optional `timeout_ms` (integer 1-90000; omit it for the extension's
+`waitTimeoutMs` default of 30000 ms). It polls for the selector to match an
+element and returns `{ "waited": true, "selector": ... }`. The wait survives
+navigations and reloads while polling — the browser may reload or navigate to
+a different final page and the wait still completes when the selector appears
+there. It fails fast when the tab is closed or the selector is invalid, and
+times out with `Timed out waiting for selector: ...` when the deadline passes.
+Prefer `wait` over arbitrary sleeps after navigation-triggering interactions.
 
 `keyboard` requires a positive `tid` and exactly one of `text` or `key`. Text
 input sends `Input.insertText` to the control that has page focus and reports

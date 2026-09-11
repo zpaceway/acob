@@ -23,6 +23,7 @@ class Instruction(models.Model):
         RELOAD = "reload"
         SCREENSHOT = "screenshot"
         SCROLL = "scroll"
+        WAIT = "wait"
 
     class Status(models.TextChoices):
         PENDING = "pending"

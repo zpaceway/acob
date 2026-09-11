@@ -34,6 +34,7 @@ from acob import (
     Screenshot,
     ScrollResult,
     Tab,
+    WaitResult,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
         _reloaded: Tab = await client.reload(1)
         _scrolled: ScrollResult = await client.scroll(1, 500)
         _clicked: ClickResult = await client.click(1, "button")
+        _waited: WaitResult = await client.wait_for_selector(1, "button")
         _inserted: KeyboardTextResult = await client.keyboard(1, text="ACOB")
         _pressed: KeyboardKeyResult = await client.keyboard(1, key="Enter")
         _screenshot: Screenshot = await client.screenshot(1)
@@ -1125,6 +1127,76 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             {"action": "cleanup"},
         )
 
+    async def test_wait_for_selector_returns_waited(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 23, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 23,
+                        "status": "completed",
+                        "result": {"waited": True, "selector": "button"},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.wait_for_selector(12, "button", timeout_ms=5000)
+
+        self.assertIsInstance(result, WaitResult)
+        self.assertTrue(result.waited)
+        self.assertEqual(result.selector, "button")
+        self.assertEqual(result.tid, 12)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "wait", "tid": 12, "selector": "button", "timeout_ms": 5000},
+        )
+
+    async def test_wait_for_selector_omits_timeout_by_default(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 24, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 24,
+                        "status": "completed",
+                        "result": {"waited": True, "selector": "button"},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.wait_for_selector(12, "button")
+
+        self.assertTrue(result.waited)
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "wait", "tid": 12, "selector": "button"},
+        )
+
+    async def test_wait_for_selector_rejects_invalid_arguments(self) -> None:
+        client = self.make_client()
+        self.add_responses(client, [])
+        invalid_tids: list[Any] = [0, -1, True, "9"]
+        invalid_selectors: list[Any] = ["", "  ", None, 123]
+        invalid_timeouts: list[Any] = [0, -1, 90001, "5000", 1.5, True]
+
+        for tid in invalid_tids:
+            with self.subTest(tid=tid), self.assertRaises(ValueError):
+                await client.wait_for_selector(tid, "button")
+        for selector in invalid_selectors:
+            with self.subTest(selector=selector), self.assertRaises(ValueError):
+                await client.wait_for_selector(12, selector)
+        for timeout_ms in invalid_timeouts:
+            with self.subTest(timeout_ms=timeout_ms), self.assertRaises(ValueError):
+                await client.wait_for_selector(12, "button", timeout_ms=timeout_ms)
+
     async def test_action_methods_reject_malformed_browser_results(self) -> None:
         client = self.make_client()
 
@@ -1166,6 +1238,19 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             await client.cleanup()
+
+        with (
+            patch.object(
+                client,
+                "execute",
+                AsyncMock(return_value={"waited": False, "selector": "button"}),
+            ),
+            self.assertRaisesRegex(
+                ACOBProtocolError,
+                "wait returned an invalid result",
+            ),
+        ):
+            await client.wait_for_selector(12, "button")
 
     async def test_javascript_returns_the_value_unchanged(self) -> None:
         client = self.make_client()

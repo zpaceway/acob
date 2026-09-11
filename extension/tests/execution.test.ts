@@ -483,6 +483,29 @@ test("runInstruction dispatches click", async () => {
   assert.equal(result.clicked, true);
 });
 
+test("runInstruction dispatches wait", async () => {
+  resetExecution();
+  const result = (await runInstruction(
+    { id: 1, action: "wait", payload: { tid: 12, selector: "button" } },
+    testConfiguration(),
+  )) as { waited: boolean; selector: string };
+  assert.equal(result.waited, true);
+  assert.equal(result.selector, "button");
+});
+
+test("runInstruction dispatches wait with timeout_ms", async () => {
+  resetExecution();
+  const result = (await runInstruction(
+    {
+      id: 1,
+      action: "wait",
+      payload: { tid: 12, selector: "button", timeout_ms: 5000 },
+    },
+    testConfiguration(),
+  )) as { waited: boolean };
+  assert.equal(result.waited, true);
+});
+
 test("runInstruction dispatches keyboard text", async () => {
   resetExecution();
   const result = (await runInstruction(

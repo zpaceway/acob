@@ -30,6 +30,7 @@ from acob import (
     Screenshot,
     ScrollResult,
     Tab,
+    WaitResult,
 )
 from mcp import MCPError
 from mcp.server import MCPServer
@@ -51,13 +52,13 @@ from pydantic import (
 )
 from starlette.requests import Request
 
-SERVER_VERSION = "0.17.0"
+SERVER_VERSION = "0.18.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
-    "management, real mouse and keyboard input, screenshots, recordings, and "
-    "console captures, browser proxy control, browser cleanup, JavaScript, "
-    "and extension recovery."
+    "management, real mouse and keyboard input, screenshots, recordings, "
+    "console captures, selector waits, browser proxy control, browser "
+    "cleanup, JavaScript, and extension recovery."
 )
 SERVER_INSTRUCTIONS = (
     "ACOB controls the Chromium session connected to the local ACOB installation "
@@ -77,8 +78,10 @@ SERVER_INSTRUCTIONS = (
     "response carries the bid of the browser that executed it, so a targeted "
     "call echoes its bid and an untargeted call reports whichever browser "
     "claimed it.\n\n"
-    "Prefer list, navigate, focus, close, reload, scroll, click, and keyboard for "
-    "normal browser interaction. Use screenshot to inspect visual state; it "
+    "Prefer list, navigate, focus, close, reload, scroll, click, and keyboard "
+    "for normal browser interaction. Use wait to wait for a CSS selector to "
+    "appear; it survives navigations and reloads while polling. Use "
+    "screenshot to inspect visual state; it "
     "returns the public download URL served by the ACOB server, so "
     "download the image yourself when you need its pixels. Use javascript only "
     "for bounded, page-specific work or compact structured extraction; return "
@@ -144,6 +147,7 @@ TOOL_ARGUMENT_NAMES = {
     "reload": frozenset({"tid", "timeout", "bid"}),
     "scroll": frozenset({"tid", "y", "timeout", "bid"}),
     "click": frozenset({"tid", "selector", "timeout", "bid"}),
+    "wait": frozenset({"tid", "selector", "timeout_ms", "timeout", "bid"}),
     "keyboard": frozenset({"tid", "text", "key", "modifiers", "timeout", "bid"}),
     "screenshot": frozenset({"tid", "full_page", "timeout", "bid"}),
     "record": frozenset({"method", "tid", "full_page", "timeout", "bid"}),
@@ -187,6 +191,16 @@ ScrollY = Annotated[
     Field(
         allow_inf_nan=False,
         description="Relative vertical distance in CSS pixels; positive is down.",
+    ),
+]
+WaitTimeoutMs = Annotated[
+    StrictInt,
+    Field(
+        ge=1,
+        le=90000,
+        description=(
+            "Browser-side wait deadline in ms; omit for the extension default."
+        ),
     ),
 ]
 BatchAction = dict[str, JsonValue]
@@ -413,6 +427,29 @@ def create_server(
         return await _client(ctx).click(
             tid,
             selector,
+            timeout=timeout,
+            bid=bid,
+        )
+
+    @server.tool(
+        annotations=ToolAnnotations(open_world_hint=True),
+    )
+    async def wait(
+        tid: PositiveTid,
+        selector: NonEmptyString,
+        ctx: Context[AppContext],
+        timeout_ms: WaitTimeoutMs | None = None,
+        timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
+    ) -> WaitResult:
+        """Wait for a CSS selector to match an element in the tab.
+
+        The wait survives navigations and reloads while polling; it fails
+        fast when the tab is closed or the selector is invalid."""
+        return await _client(ctx).wait_for_selector(
+            tid,
+            selector,
+            timeout_ms=timeout_ms,
             timeout=timeout,
             bid=bid,
         )

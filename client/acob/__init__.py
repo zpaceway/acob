@@ -31,9 +31,10 @@ from .client import (
     Screenshot,
     ScrollResult,
     Tab,
+    WaitResult,
 )
 
-__version__ = "0.19.0"
+__version__ = "0.20.0"
 
 __all__ = [
     "BID_PATTERN",
@@ -68,5 +69,6 @@ __all__ = [
     "Screenshot",
     "ScrollResult",
     "Tab",
+    "WaitResult",
     "__version__",
 ]

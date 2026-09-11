@@ -19,6 +19,7 @@ import type {
   SettingName,
   SupportedInstruction,
   TabDetails,
+  WaitResult,
 } from "../src/types.js";
 
 type Equal<Left, Right> =
@@ -49,6 +50,12 @@ type ScrollResultIsTyped = Expect<
   Equal<
     InstructionResultFor<{ action: "scroll"; tid: number; y: number }>,
     ScrollResult
+  >
+>;
+type WaitResultIsTyped = Expect<
+  Equal<
+    InstructionResultFor<{ action: "wait"; tid: number; selector: string }>,
+    WaitResult
   >
 >;
 type RecordStartResultIsTyped = Expect<
@@ -193,6 +200,8 @@ const reloadTabResultIsTyped: ReloadTabResultIsTyped = true;
 void reloadTabResultIsTyped;
 const scrollResultIsTyped: ScrollResultIsTyped = true;
 void scrollResultIsTyped;
+const waitResultIsTyped: WaitResultIsTyped = true;
+void waitResultIsTyped;
 const recordStartResultIsTyped: RecordStartResultIsTyped = true;
 void recordStartResultIsTyped;
 const recordStopResultIsTyped: RecordStopResultIsTyped = true;

@@ -294,3 +294,58 @@ test("accepts cleanup inside batches", () => {
 
   assert.equal(isSupportedInstruction(value), true);
 });
+
+test("accepts wait with selector and optional timeout", () => {
+  assert.equal(
+    isSupportedInstruction(instruction("wait", { tid: 12, selector: "button" })),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("wait", { tid: 12, selector: "button", timeout_ms: 5000 }),
+    ),
+    true,
+  );
+});
+
+test("rejects invalid wait payloads", () => {
+  assert.equal(isSupportedInstruction(instruction("wait", { tid: 12 })), false);
+  assert.equal(
+    isSupportedInstruction(instruction("wait", { selector: "button" })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("wait", { tid: 0, selector: "button" })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(instruction("wait", { tid: 12, selector: "  " })),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("wait", { tid: 12, selector: "button", timeout_ms: 0 }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("wait", { tid: 12, selector: "button", timeout_ms: 90001 }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("wait", { tid: 12, selector: "button", timeout_ms: "5000" }),
+    ),
+    false,
+  );
+});
+
+test("accepts wait inside batches", () => {
+  const value = instruction("batch", {
+    actions: [{ action: "wait", tid: 12, selector: "button" }],
+  });
+
+  assert.equal(isSupportedInstruction(value), true);
+});

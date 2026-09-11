@@ -32,6 +32,7 @@ async def main() -> None:
 
         await client.scroll(tid, 500)
         await client.click(tid, "a")
+        await client.wait_for_selector(tid, "a")
         await client.keyboard(tid, text="ACOB")
         await client.keyboard(tid, key="Enter")
         title = await client.javascript(tid, "document.title")
@@ -146,7 +147,9 @@ completion; `None` when untargeted) — read it on the result (e.g. `tab.bid`,
 `screenshot.bid`):
 
 ```python
-tab = await client.navigate("https://example.com", bid="0123456789abcdef0123456789abcdef")
+tab = await client.navigate(
+    "https://example.com", bid="0123456789abcdef0123456789abcdef"
+)
 tabs = await client.list()  # untargeted; any connected browser may claim it
 print(tab.bid)
 ```
@@ -155,7 +158,8 @@ Structured results are validated Pydantic models. `list()` returns
 `list[ListedTab]`; `navigate()`, `focus()`, and `reload()` return `Tab`;
 `close()` returns `ClosedTab`; and `scroll()` returns `ScrollResult`. Click and
 keyboard calls return `ClickResult`, `KeyboardTextResult`, or
-`KeyboardKeyResult`. Model fields use attribute access, such as `tab.tid` and
+`KeyboardKeyResult`. `wait_for_selector()` returns `WaitResult`
+(`{waited, selector, tid}`). Model fields use attribute access, such as `tab.tid` and
 `clicked.x`. `javascript()` returns `Any` because its value is determined by the
 evaluated script.
 
@@ -180,6 +184,18 @@ action raises `ACOBInstructionError` if the browser has reached its configured
 tab limit. Navigating an existing `tid` is unaffected by the limit. Positive
 `scroll()` values dispatch wheel input downward and negative values upward, in
 CSS pixels.
+
+`wait_for_selector()` waits for a CSS selector to match an element in the tab
+and returns a `WaitResult` (`{waited, selector, tid}`). The wait survives
+navigations and reloads while polling, fails fast when the tab is closed or
+the selector is invalid, and times out with a clear error. Pass
+`timeout_ms=` (1-90000) to bound the browser-side wait; omit it for the
+extension's `waitTimeoutMs` default:
+
+```python
+waited = await client.wait_for_selector(tid, "button[type=submit]")
+print(waited.waited, waited.selector, waited.tid)
+```
 
 `screenshot()` returns a `Screenshot` model carrying the public download URL
 served by the ACOB server itself. The client never transfers the image

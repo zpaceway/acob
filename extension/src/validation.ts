@@ -147,6 +147,32 @@ function isSupportedActionPayload(
       isPositiveInteger(payload.tid) && typeof payload.selector === "string"
     );
   }
+  if (action === "wait") {
+    if (
+      !isPositiveInteger(payload.tid) ||
+      typeof payload.selector !== "string" ||
+      payload.selector.trim().length === 0
+    ) {
+      return false;
+    }
+    if (
+      payload.timeout_ms === undefined ||
+      payload.timeout_ms === null
+    ) {
+      return Object.keys(payload).every(
+        (key) => key === "tid" || key === "selector",
+      );
+    }
+    return (
+      typeof payload.timeout_ms === "number" &&
+      Number.isSafeInteger(payload.timeout_ms) &&
+      payload.timeout_ms >= 1 &&
+      payload.timeout_ms <= 90000 &&
+      Object.keys(payload).every(
+        (key) => key === "tid" || key === "selector" || key === "timeout_ms",
+      )
+    );
+  }
   if (action === "javascript") {
     return isPositiveInteger(payload.tid) && typeof payload.script === "string";
   }

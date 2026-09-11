@@ -194,7 +194,7 @@ server.
 | `GET` | `/api/media/<name>` | Serve a stored screenshot, recording, or console capture. |
 
 Supported actions are `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
-`click`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`, `console`, and
+`click`, `wait`, `keyboard`, `screenshot`, `record`, `proxy`, `cleanup`, `console`, and
 `javascript`. See the root [API guide](../README.md#api) for payload examples.
 
 Every instruction request accepts an optional `bid` (32 lowercase hex,

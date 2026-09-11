@@ -45,6 +45,7 @@ from .schemas import (
     ScrollResult,
     ValidationErrorResponse,
     ValidationIssue,
+    WaitResult,
     batch_results_adapter,
     instruction_adapter,
 )
@@ -357,6 +358,7 @@ ACTION_RESULT_PROCESSED = frozenset(
         Instruction.Action.SCROLL,
         Instruction.Action.CONSOLE,
         Instruction.Action.CLEANUP,
+        Instruction.Action.WAIT,
     }
 )
 
@@ -591,31 +593,38 @@ def _prepare_action_result(
     if action == Instruction.Action.CONSOLE:
         return _prepare_console_result(result_value, payload, request)
 
-    if action == Instruction.Action.SCROLL:
-        try:
-            return (
-                ScrollResult.model_validate(result_value).model_dump(mode="json"),
-                None,
-            )
-        except ValidationError as error:
-            raise InvalidResultDataError(
-                "Invalid scroll result",
-                validation_error=error,
-            ) from error
-
-    if action == Instruction.Action.CLEANUP:
-        try:
-            return (
-                CleanupResult.model_validate(result_value).model_dump(mode="json"),
-                None,
-            )
-        except ValidationError as error:
-            raise InvalidResultDataError(
-                "Invalid cleanup result",
-                validation_error=error,
-            ) from error
+    if action in (
+        Instruction.Action.SCROLL,
+        Instruction.Action.CLEANUP,
+        Instruction.Action.WAIT,
+    ):
+        return _prepare_simple_result(action, result_value)
 
     return result_value, None
+
+
+def _prepare_simple_result(
+    action: str,
+    result_value: JsonValue,
+) -> tuple[JsonValue | None, str | None]:
+    """Validate scroll/cleanup/wait results that need no hosting."""
+    model: type[ScrollResult | CleanupResult | WaitResult] | None = None
+    label = ""
+    if action == Instruction.Action.SCROLL:
+        model, label = ScrollResult, "Invalid scroll result"
+    elif action == Instruction.Action.CLEANUP:
+        model, label = CleanupResult, "Invalid cleanup result"
+    elif action == Instruction.Action.WAIT:
+        model, label = WaitResult, "Invalid wait result"
+    if model is None:
+        return result_value, None
+    try:
+        return model.model_validate(result_value).model_dump(mode="json"), None
+    except ValidationError as error:
+        raise InvalidResultDataError(
+            label,
+            validation_error=error,
+        ) from error
 
 
 def _host_screenshot(
