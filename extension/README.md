@@ -20,8 +20,12 @@ From this directory:
 npm ci
 npm run typecheck
 npm test
+npm run test:coverage
 npm run build
 ```
+
+`npm run test:coverage` enforces at least 90% line and function coverage over
+`src/`; keep it green when adding features.
 
 Load `dist/` as an unpacked extension in Chromium 116 or newer. The build emits
 the service worker, popup and offscreen modules, extension assets, source maps,
@@ -29,8 +33,10 @@ TypeScript declaration files, the jQuery and Turndown browser distributions,
 and their licenses. Do not edit `dist/` directly.
 
 The same tasks are available as `make install`, `make typecheck`, `make test`,
-and `make build`. Unit tests cover settings, input command construction and
-serialization, keyboard validation, and timeout cleanup; type-only contracts
+and `make build`. Unit tests cover the full action surface (tabs, input,
+JavaScript, screenshots, recording, console capture, proxy, cleanup,
+execution dispatch, background polling, offscreen sink, and popup);
+type-only contracts in `tests/types.contract.ts`
 are checked by TypeScript. Changes to the manifest,
 service worker, offscreen polling, popup, Chrome APIs, or debugger behavior
 require a manual unpacked-extension test against a running server.
@@ -38,11 +44,11 @@ require a manual unpacked-extension test against a running server.
 For a complete isolated local installation, run this from the repository root:
 
 ```bash
-make install PORT=58346 NAME=default
-make install PORT=61554 NAME=alexandro
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
+make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro
 ```
 
-`PORT` defaults to `58346`, but `NAME` is required. The root installer uses
+`ACOB_PROXY_PORT` defaults to `58346`, but `ACOB_APPLICATION_NAME` is required. The root installer uses
 context and Compose project `acob-<port>-<name>` and builds a managed Chromium
 image with this extension already loaded. Names allow lowercase letters, digits,
 and internal hyphens and cannot start or end with a hyphen. Load `dist/` manually
@@ -50,7 +56,7 @@ only for native extension development.
 
 The context prefixes Compose network, volume, container, and image resources
 and is the default MCP registration name used by root `install-opencode` and
-`install-claude`. Use the same `PORT` and `NAME` for lifecycle commands.
+`install-claude`. Use the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME` for lifecycle commands.
 Different installations still require different ports because only one process
 can bind a host port. Names label user or work contexts; beyond the
 per-browser `bid` target they add no protocol routing, and untargeted work on
@@ -204,11 +210,12 @@ extension updates use the stored configuration and do not reread the file.
 `src/settings.ts` definition default is imported from it, so normalization,
 the popup, and storage seeding all take their defaults from that file. Edit
 the values there and rebuild; `build.ts` writes them into the bundled
-`settings.json` (plus any `ACOB_BASE_URL` / `ACOB_EXTENSION_SETTINGS`
+`settings.json` (plus any `ACOB_EXTENSION_BASE_URL` / `ACOB_EXTENSION_SETTINGS`
 overrides).
-Set `ACOB_BASE_URL` during `npm run build` to replace the bundled initial server
+Set `ACOB_EXTENSION_BASE_URL` during `npm run build` to replace the bundled initial server
 URL, or set `ACOB_EXTENSION_SETTINGS` to a JSON object that is merged over the
-defaults (it wins over `ACOB_BASE_URL` when both set a value). The root
+defaults (per-setting `ACOB_EXTENSION_*` variables win over both; see
+`../browser/README.md` for the full variable table). The root
 installation workflow builds the extension with
 `http://acob-proxy` before passing `extension/dist/` into the browser image,
 while an ordinary native build defaults to `http://127.0.0.1:58346`. To change
@@ -227,8 +234,8 @@ client, and MCP service do not expose a settings endpoint or method.
 All extensions connected to one server consume its same global queue with
 per-browser `bid` targeting: each browser receives untargeted work plus work
 targeted at its own `bid`, and ignores the rest. Use the
-root `make install PORT=... NAME=...` workflow when separate local installations
-are needed; `NAME` is required, and each managed browser belongs to its own
+root `make install ACOB_PROXY_PORT=... ACOB_APPLICATION_NAME=...` workflow when separate local installations
+are needed; `ACOB_APPLICATION_NAME` is required, and each managed browser belongs to its own
 distinct-port stack. Run one extension per stack (or target every instruction
 with `bid`) when deterministic queue ownership matters.
 

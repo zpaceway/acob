@@ -21,19 +21,6 @@ const configuredOutput = process.env.ACOB_EXTENSION_OUTPUT_DIR;
 const outputDirectory = configuredOutput
   ? path.resolve(extensionDirectory, configuredOutput)
   : path.join(extensionDirectory, "dist");
-const configuredBaseUrl = process.env.ACOB_BASE_URL;
-if (configuredBaseUrl) {
-  const baseUrl = new URL(configuredBaseUrl);
-  if (
-    (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") ||
-    baseUrl.search ||
-    baseUrl.hash
-  ) {
-    throw new Error(
-      "ACOB_BASE_URL must be an HTTP(S) URL without a query or fragment",
-    );
-  }
-}
 const configuredSettingsJson = process.env.ACOB_EXTENSION_SETTINGS;
 let configuredSettingsOverride: Record<string, unknown> | undefined;
 if (configuredSettingsJson) {
@@ -51,6 +38,126 @@ if (configuredSettingsJson) {
     throw new Error("ACOB_EXTENSION_SETTINGS must be a JSON object");
   }
   configuredSettingsOverride = parsed as Record<string, unknown>;
+}
+function readStringSettingEnv(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  return raw;
+}
+function readBooleanSettingEnv(name: string): boolean | undefined {
+  const raw = readStringSettingEnv(name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error(`${name} must be true or false`);
+}
+function readIntegerSettingEnv(name: string): number | undefined {
+  const raw = readStringSettingEnv(name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  return value;
+}
+// Per-setting overrides. Each ACOB_EXTENSION_<SETTING> wins over the
+// ACOB_EXTENSION_SETTINGS JSON object. Empty means unset.
+const extensionEnvOverride: Record<string, unknown> = {};
+function applyStringEnv(envName: string, settingKey: string): void {
+  const value = readStringSettingEnv(envName);
+  if (value !== undefined) {
+    extensionEnvOverride[settingKey] = value;
+  }
+}
+function applyBooleanEnv(envName: string, settingKey: string): void {
+  const value = readBooleanSettingEnv(envName);
+  if (value !== undefined) {
+    extensionEnvOverride[settingKey] = value;
+  }
+}
+function applyIntegerEnv(envName: string, settingKey: string): void {
+  const value = readIntegerSettingEnv(envName);
+  if (value !== undefined) {
+    extensionEnvOverride[settingKey] = value;
+  }
+}
+applyStringEnv("ACOB_EXTENSION_BASE_URL", "baseUrl");
+applyBooleanEnv("ACOB_EXTENSION_ALLOW_CLEANUP", "allowCleanup");
+applyIntegerEnv(
+  "ACOB_EXTENSION_INSTRUCTIONS_PER_POLL",
+  "instructionsPerPoll",
+);
+applyIntegerEnv(
+  "ACOB_EXTENSION_MAX_CONCURRENT_EXECUTIONS",
+  "maxConcurrentExecutions",
+);
+applyIntegerEnv("ACOB_EXTENSION_MAX_TABS", "maxTabs");
+applyIntegerEnv("ACOB_EXTENSION_POLL_INTERVAL_MS", "pollIntervalMs");
+applyIntegerEnv("ACOB_EXTENSION_TAB_LOAD_TIMEOUT_MS", "tabLoadTimeoutMs");
+applyIntegerEnv(
+  "ACOB_EXTENSION_HTTP_REQUEST_TIMEOUT_MS",
+  "httpRequestTimeoutMs",
+);
+applyIntegerEnv("ACOB_EXTENSION_JAVASCRIPT_TIMEOUT_MS", "javascriptTimeoutMs");
+applyIntegerEnv(
+  "ACOB_EXTENSION_MAX_SCREENSHOT_SIZE_MIB",
+  "maxScreenshotSizeMiB",
+);
+applyIntegerEnv(
+  "ACOB_EXTENSION_MAX_RECORDING_DURATION_SEC",
+  "maxRecordingDurationSec",
+);
+applyIntegerEnv(
+  "ACOB_EXTENSION_MAX_RECORDING_SIZE_MIB",
+  "maxRecordingSizeMiB",
+);
+applyIntegerEnv("ACOB_EXTENSION_CONSOLE_TIMEOUT_SEC", "consoleTimeoutSec");
+applyIntegerEnv("ACOB_EXTENSION_CONSOLE_MAX_SIZE_MIB", "consoleMaxSizeMiB");
+applyIntegerEnv("ACOB_EXTENSION_RESULT_RETRY_ATTEMPTS", "resultRetryAttempts");
+applyIntegerEnv("ACOB_EXTENSION_RESULT_RETRY_DELAY_MS", "resultRetryDelayMs");
+applyIntegerEnv(
+  "ACOB_EXTENSION_POPUP_STATUS_DURATION_MS",
+  "popupStatusDurationMs",
+);
+applyStringEnv(
+  "ACOB_EXTENSION_DEBUGGER_PROTOCOL_VERSION",
+  "debuggerProtocolVersion",
+);
+if (typeof extensionEnvOverride.baseUrl === "string") {
+  const rawBaseUrl = extensionEnvOverride.baseUrl;
+  let parsedBaseUrl: URL;
+  try {
+    parsedBaseUrl = new URL(rawBaseUrl);
+  } catch {
+    throw new Error(
+      "ACOB_EXTENSION_BASE_URL must be an HTTP(S) URL without a query or fragment",
+    );
+  }
+  if (
+    (parsedBaseUrl.protocol !== "http:" &&
+      parsedBaseUrl.protocol !== "https:") ||
+    parsedBaseUrl.search ||
+    parsedBaseUrl.hash
+  ) {
+    throw new Error(
+      "ACOB_EXTENSION_BASE_URL must be an HTTP(S) URL without a query or fragment",
+    );
+  }
+  extensionEnvOverride.baseUrl = rawBaseUrl.replace(/\/+$/, "");
 }
 const packageExecutable = (
   packageName: string,
@@ -105,12 +212,10 @@ await mkdir(outputDirectory, { recursive: true });
 const bundledSettings: Record<string, unknown> = {
   ...ACOBSettings.normalizeConfiguration(),
 };
-if (configuredBaseUrl) {
-  bundledSettings.baseUrl = configuredBaseUrl.replace(/\/+$/, "");
-}
 if (configuredSettingsOverride) {
   Object.assign(bundledSettings, configuredSettingsOverride);
 }
+Object.assign(bundledSettings, extensionEnvOverride);
 const manifest = JSON.parse(
   await readFile(path.join(extensionDirectory, "manifest.json"), "utf8"),
 ) as { background: { service_worker: string } };

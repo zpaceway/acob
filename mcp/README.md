@@ -11,7 +11,7 @@ MCP host -> acob-mcp -> acob-client -> Django REST API -> Chromium extension
 
 The project is a service, not an installable Python package. Runtime code lives
 directly in `src/` and is started through the Makefile. One process controls the
-single global queue of the ACOB installation selected by `ACOB_ENDPOINT`.
+single global queue of the ACOB installation selected by `ACOB_MCP_ENDPOINT`.
 
 ## Requirements
 
@@ -53,12 +53,12 @@ service is available on the single proxy port (`58346`):
 ```
 
 Nothing is configurable per connection. The ACOB API origin always comes from
-the `ACOB_ENDPOINT` environment variable, and every connection uses that
+the `ACOB_MCP_ENDPOINT` environment variable, and every connection uses that
 installation's same queue and Chromium extension.
 
-The root installer requires `NAME` and names every installation context
+The root installer requires `ACOB_APPLICATION_NAME` and names every installation context
 `acob-<port>-<name>`. Root `install-opencode` and `install-claude` use that same
-context as the default MCP registration name; `MCP_NAME` can override the
+context as the default MCP registration name; `ACOB_MCP_NAME` can override the
 registration label. The name distinguishes a user or work context only. It is
 not sent through MCP or the browser protocol and adds no queue routing beyond
 the per-tool `bid` target; untargeted work on that stack still may be claimed
@@ -73,14 +73,14 @@ and it never downloads the image itself.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ACOB_ENDPOINT` | required | ACOB API origin, always taken from the environment. |
-| `ACOB_API_SAME_ORIGIN` | `false` | Use the MCP HTTP request origin for documentation URLs. Compose sets `true` for its unified API/MCP proxy. |
-| `ACOB_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
-| `ACOB_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
+| `ACOB_MCP_ENDPOINT` | required | ACOB API origin, always taken from the environment. |
+| `ACOB_MCP_API_SAME_ORIGIN` | `false` | Use the MCP HTTP request origin for documentation URLs. Compose sets `true` for its unified API/MCP proxy. |
+| `ACOB_MCP_TIMEOUT` | `60` | Default result-wait deadline in seconds. |
+| `ACOB_MCP_POLL_INTERVAL` | `0.5` | REST result polling interval in seconds. |
 | `ACOB_MCP_HOST` | `127.0.0.1` | HTTP bind address. |
 | `ACOB_MCP_PORT` | `58348` | HTTP listen port. |
 
-`ACOB_ENDPOINT` is required: the service refuses to start without it. `make run`
+`ACOB_MCP_ENDPOINT` is required: the service refuses to start without it. `make run`
 sets `ACOB_MCP_HOST` to `0.0.0.0` and supplies the native-development API
 default `http://127.0.0.1:58347`; override any value with Make variables when
 needed. The recommended full stack uses the proxy on `58346`, while the MCP
@@ -127,9 +127,9 @@ batch execution, errors and extension-only routes. Fetch `openapi_url` for exact
 payload schemas or open `swagger_url` for interactive documentation. Discovery
 does not enqueue browser work and does not require an available extension.
 
-With `ACOB_API_SAME_ORIGIN=true`, URLs follow each MCP HTTP request's scheme,
+With `ACOB_MCP_API_SAME_ORIGIN=true`, URLs follow each MCP HTTP request's scheme,
 host and port rather than the internal Docker API address. This only changes
-documentation links; execution always uses `ACOB_ENDPOINT`. Leave it false for
+documentation links; execution always uses `ACOB_MCP_ENDPOINT`. Leave it false for
 standalone MCP on a separate API port. Non-HTTP calls use the API's own returned
 links. Restart/reconnect clients after upgrading so `tools/list` includes `api`.
 
@@ -152,8 +152,8 @@ no host port. It requires an API reachable as `http://acob-srv:58347` on that
 network. For the complete single-port deployment, use the root installer:
 
 ```bash
-make -C .. install PORT=58346 NAME=default
-make -C .. install PORT=61554 NAME=alexandro
+make -C .. install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
+make -C .. install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro
 ```
 
 This builds `acob-srv`, `acob-mcp`, the proxy image, and a managed Chromium
@@ -161,9 +161,9 @@ browser with the extension preinstalled. It creates a project-specific network,
 server data volume, and browser profile volume. The proxy publishes the selected
 API/MCP host port. The first example uses Compose project and context
 `acob-58346-default`; all named installs apply the project prefix to network,
-volume, container, and image resources. `NAME` allows lowercase
+volume, container, and image resources. `ACOB_APPLICATION_NAME` allows lowercase
 letters, digits, and internal hyphens and cannot start or end with a hyphen.
-Lifecycle commands must receive the same `PORT` and `NAME`. Distinct
+Lifecycle commands must receive the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME`. Distinct
 installations still require distinct ports because only one process can bind a
 host port. The Dockerfile starts the service with `make run`. Build it without
 Compose, from the monorepo root:

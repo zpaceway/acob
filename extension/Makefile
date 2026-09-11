@@ -12,6 +12,10 @@ test:
 	@echo "Running browser extension tests..."
 	npm test
 
+coverage:
+	@echo "Running browser extension tests with coverage..."
+	npm run test:coverage
+
 build:
 	@echo "Building browser extension..."
 	$(MAKE) install

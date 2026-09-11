@@ -11,6 +11,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.16.0",
     "ruff>=0.16.0",
     "ty>=0.0.75",
 ]
@@ -71,3 +72,12 @@ python-version = "3.10"
 
 [tool.ty.rules]
 all = "error"
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true

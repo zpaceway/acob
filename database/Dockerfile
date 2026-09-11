@@ -1,7 +1,9 @@
 FROM postgres:17
 
-# Default credentials for local Compose development. Override with
-# POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD at runtime.
+# Default credentials for local Compose development. The supported interface
+# is ACOB_DATABASE_PORTGRES_* (see compose.yaml, which maps them to the
+# POSTGRES_* variables the official postgres image entrypoint requires).
+# These POSTGRES_* defaults only cover standalone image runs.
 ENV POSTGRES_DB=acob \
     POSTGRES_USER=acob \
     POSTGRES_PASSWORD=acob

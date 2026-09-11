@@ -347,7 +347,7 @@ class InstructionApiTests(TestCase):
             tempfile.TemporaryDirectory() as media_dir,
             override_settings(
                 MEDIA_ROOT=Path(media_dir),
-                ACOB_PUBLIC_URL="http://127.0.0.1:58466",
+                ACOB_SRV_PUBLIC_URL="http://127.0.0.1:58466",
             ),
         ):
             completed = self.post_result(

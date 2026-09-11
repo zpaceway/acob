@@ -74,13 +74,13 @@ finally:
     await client.aclose()
 ```
 
-Root installations require `NAME` and always use context
+Root installations require `ACOB_APPLICATION_NAME` and always use context
 `acob-<port>-<name>` for the Compose project, network, volume, container, and
 image resource prefix, managed browser, and default MCP registration label. For
-example, `make install PORT=61554 NAME=alexandro` creates context
+example, `make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro` creates context
 `acob-61554-alexandro`. Names allow
 lowercase letters, digits, and internal hyphens and cannot start or end with a
-hyphen. Use the same `PORT` and `NAME` for lifecycle commands, and use a distinct
+hyphen. Use the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME` for lifecycle commands, and use a distinct
 port for every installation because only one process can bind it. `ACOBClient`
 still selects only by endpoint; a context name adds no protocol routing beyond
 the per-call `bid` target, and untargeted work on each selected stack remains

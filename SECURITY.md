@@ -46,8 +46,8 @@ so untargeted instructions remain claimable by any extension polling it. It must
 not be exposed to a network or treated as an enterprise control plane without
 adapting the architecture.
 
-Root `make install PORT=<port> NAME=<name>` creates a named, port-specific
-Compose project, network, server volume, and managed Chromium profile. `NAME` is
+Root `make install ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>` creates a named, port-specific
+Compose project, network, server volume, and managed Chromium profile. `ACOB_APPLICATION_NAME` is
 required, and the resulting context is `acob-<port>-<name>`. The proxy publishes
 the selected API/MCP port on localhost (`58346` by default). Optional
 passwordless noVNC is disabled by default and, when enabled, is served under

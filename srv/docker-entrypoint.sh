@@ -10,9 +10,9 @@ import os
 import sys
 from urllib.parse import urlparse
 
-url = os.environ.get("ACOB_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
-host = os.environ.get("ACOB_DB_HOST", "").strip()
-port = os.environ.get("ACOB_DB_PORT", "5432").strip() or "5432"
+url = os.environ.get("ACOB_SRV_DATABASE_URL", "")
+host = os.environ.get("ACOB_SRV_DB_HOST", "").strip()
+port = os.environ.get("ACOB_SRV_DB_PORT", "5432").strip() or "5432"
 if url:
     try:
         parsed = urlparse(url)

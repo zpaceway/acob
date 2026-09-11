@@ -31,12 +31,12 @@ def _split_csv(value: str) -> list[str]:
 def _parse_database_url(url: str) -> dict[str, object]:
     parsed = urlparse(url)
     if parsed.scheme not in ("postgres", "postgresql", "postgresql+psycopg"):
-        msg = f"Unsupported DATABASE_URL scheme: {parsed.scheme!r}"
+        msg = f"Unsupported database URL scheme: {parsed.scheme!r}"
         raise ImproperlyConfigured(msg)
     try:
         port = parsed.port
     except ValueError as exc:
-        msg = f"Invalid port in DATABASE_URL: {parsed.netloc!r}"
+        msg = f"Invalid port in database URL: {parsed.netloc!r}"
         raise ImproperlyConfigured(msg) from exc
     query = parse_qs(parsed.query)
     sslmode = query.get("sslmode", [""])[0]
@@ -58,33 +58,29 @@ def _parse_database_url(url: str) -> dict[str, object]:
 
 # DEBUG choice: default "true" preserves the current dev behavior
 # (`make dev`, `manage.py test` work with no env set) while remaining
-# controllable. Compose sets ACOB_DEBUG=false for prod safety.
-# ACOB_DEBUG wins; DJANGO_DEBUG is accepted as a fallback.
-DEBUG = _is_truthy(os.environ.get("ACOB_DEBUG", os.environ.get("DJANGO_DEBUG", "true")))
+# controllable. Compose sets ACOB_SRV_DEBUG=false for prod safety.
+DEBUG = _is_truthy(os.environ.get("ACOB_SRV_DEBUG", "true"))
 
-# SECRET_KEY choice: prefer ACOB_SECRET_KEY, accept DJANGO_SECRET_KEY.
+# SECRET_KEY choice: ACOB_SRV_SECRET_KEY.
 # The committed dev key is a local-only fallback valid solely when
 # DEBUG is true; production (DEBUG false) without an env secret raises
 # ImproperlyConfigured instead of booting with a known key.
 _DEV_SECRET_KEY = "django-insecure-2^1ckbhfvty=g7-)z-rp5r#q4z8@c27czd6p55vn@1utl+1ua-"
-_ENV_SECRET_KEY = os.environ.get("ACOB_SECRET_KEY") or os.environ.get(
-    "DJANGO_SECRET_KEY"
-)
+_ENV_SECRET_KEY = os.environ.get("ACOB_SRV_SECRET_KEY")
 if _ENV_SECRET_KEY:
     SECRET_KEY = _ENV_SECRET_KEY
 elif DEBUG:
     SECRET_KEY = _DEV_SECRET_KEY
 else:
-    msg = "ACOB_SECRET_KEY (or DJANGO_SECRET_KEY) must be set when DEBUG is false."
+    msg = "ACOB_SRV_SECRET_KEY must be set when DEBUG is false."
     raise ImproperlyConfigured(msg)
 
-ALLOWED_HOSTS: list[str] = _split_csv(os.environ.get("ACOB_ALLOWED_HOSTS", "*")) or [
-    "*"
-]
+ALLOWED_HOSTS: list[str] = _split_csv(
+    os.environ.get("ACOB_SRV_ALLOWED_HOSTS", "*")
+) or ["*"]
 
 CSRF_TRUSTED_ORIGINS: list[str] = _split_csv(
-    os.environ.get("ACOB_CSRF_TRUSTED_ORIGINS")
-    or os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+    os.environ.get("ACOB_SRV_CSRF_TRUSTED_ORIGINS", "")
 )
 
 
@@ -134,27 +130,25 @@ WSGI_APPLICATION = "acob.wsgi.application"
 # Local data
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATA_DIR = Path(os.environ.get("ACOB_DATA_DIR", BASE_DIR))
-ACOB_PUBLIC_URL = os.environ.get("ACOB_PUBLIC_URL", "").rstrip("/")
+DATA_DIR = Path(os.environ.get("ACOB_SRV_DATA_DIR", BASE_DIR))
+ACOB_SRV_PUBLIC_URL = os.environ.get("ACOB_SRV_PUBLIC_URL", "").rstrip("/")
 
-# DATABASES choice: single DATABASE_URL wins (ACOB_DATABASE_URL preferred),
-# else postgres from ACOB_DB_HOST + ACOB_DB_NAME/USER/PASSWORD/PORT,
+# DATABASES choice: single ACOB_SRV_DATABASE_URL wins,
+# else postgres from ACOB_SRV_DB_HOST + ACOB_SRV_DB_NAME/USER/PASSWORD/PORT,
 # else SQLite fallback (DATA_DIR/db.sqlite3) for local dev without a DB.
-_DATABASE_URL = os.environ.get("ACOB_DATABASE_URL") or os.environ.get(
-    "DATABASE_URL", ""
-)
-_DB_HOST = os.environ.get("ACOB_DB_HOST", "").strip()
+_DATABASE_URL = os.environ.get("ACOB_SRV_DATABASE_URL", "")
+_DB_HOST = os.environ.get("ACOB_SRV_DB_HOST", "").strip()
 if _DATABASE_URL:
     DATABASES = {"default": _parse_database_url(_DATABASE_URL)}
 elif _DB_HOST:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("ACOB_DB_NAME", "acob"),
-            "USER": os.environ.get("ACOB_DB_USER", "acob"),
-            "PASSWORD": os.environ.get("ACOB_DB_PASSWORD", "acob"),
+            "NAME": os.environ.get("ACOB_SRV_DB_NAME", "acob"),
+            "USER": os.environ.get("ACOB_SRV_DB_USER", "acob"),
+            "PASSWORD": os.environ.get("ACOB_SRV_DB_PASSWORD", "acob"),
             "HOST": _DB_HOST,
-            "PORT": os.environ.get("ACOB_DB_PORT", "5432"),
+            "PORT": os.environ.get("ACOB_SRV_DB_PORT", "5432"),
         }
     }
 else:

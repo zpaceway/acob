@@ -28,11 +28,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "LICENSE", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsx build.ts",
     "prepack": "npm run build",
-    "test": "tsx --test tests/settings.test.ts tests/storage.test.ts tests/keyboard.test.ts tests/timeouts.test.ts tests/validation.test.ts tests/proxy.test.ts tests/console.test.ts tests/cleanup.test.ts tests/tabs.test.ts tests/actions.test.ts tests/input.test.ts tests/bid.test.ts",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-exclude=\"tests/**\" --test-coverage-lines=90 --test-coverage-functions=90 \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -40,9 +46,10 @@
     "@types/chrome": "0.2.2",
     "@types/node": "26.1.2",
     "devtools-protocol": "0.0.1669207",
+    "happy-dom": "^20.14.3",
     "jquery": "4.0.0",
-    "tsx": "4.23.1",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.1",
     "turndown": "7.2.4",
     "typescript": "7.0.2"
   }

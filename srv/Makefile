@@ -20,6 +20,11 @@ test:
 	@echo "Running tests..."
 	uv run manage.py test api tests
 
+coverage:
+	@echo "Running tests with coverage..."
+	uv run coverage run manage.py test api tests
+	uv run coverage report -m
+
 migrations:
 	@echo "Running migrations..."
 	uv run manage.py makemigrations

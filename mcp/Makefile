@@ -1,6 +1,6 @@
 ACOB_MCP_HOST ?= 0.0.0.0
 ACOB_MCP_PORT ?= 58348
-ACOB_ENDPOINT ?= http://127.0.0.1:58347
+ACOB_MCP_ENDPOINT ?= http://127.0.0.1:58347
 
 .PHONY: format check test run
 
@@ -19,6 +19,11 @@ test:
 	@echo "Running tests..."
 	uv run python -m unittest discover -s tests -v
 
+coverage:
+	@echo "Running tests with coverage..."
+	uv run coverage run -m unittest discover -s tests
+	uv run coverage report -m
+
 run:
 	@echo "Starting ACOB MCP server..."
-	ACOB_ENDPOINT=$(ACOB_ENDPOINT) ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server
+	ACOB_MCP_ENDPOINT=$(ACOB_MCP_ENDPOINT) ACOB_MCP_HOST=$(ACOB_MCP_HOST) ACOB_MCP_PORT=$(ACOB_MCP_PORT) uv run --no-sync python -m src.server

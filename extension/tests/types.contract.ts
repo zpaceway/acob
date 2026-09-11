@@ -118,15 +118,19 @@ const baseUrl: string = ACOBSettings.normalizeSetting(
   "https://acob.example/",
 );
 
-declare const instruction: SupportedInstruction;
-if (instruction.action === "click") {
-  const selector: string = instruction.payload.selector;
-  void selector;
+// Type-level narrowing checks; wrapped so the file never dereferences an
+// uninitialized binding at runtime (the runner strips `declare`).
+function narrowInstruction(instruction: SupportedInstruction): void {
+  if (instruction.action === "click") {
+    const selector: string = instruction.payload.selector;
+    void selector;
+  }
+  if (instruction.action === "batch") {
+    const actions: InstructionRequest[] = instruction.payload.actions;
+    void actions;
+  }
 }
-if (instruction.action === "batch") {
-  const actions: InstructionRequest[] = instruction.payload.actions;
-  void actions;
-}
+void narrowInstruction;
 
 const batchRequest: BatchInstructionRequest = {
   action: "batch",

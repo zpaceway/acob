@@ -61,7 +61,7 @@ SERVER_DESCRIPTION = (
 )
 SERVER_INSTRUCTIONS = (
     "ACOB controls the Chromium session connected to the local ACOB installation "
-    "configured by the ACOB_ENDPOINT environment variable. It uses the user's "
+    "configured by the ACOB_MCP_ENDPOINT environment variable. It uses the user's "
     "live tabs and authenticated browser state, so tool calls can cause real "
     "side effects.\n\n"
     "Call api to learn the REST API workflow and obtain request-aware Swagger UI "
@@ -216,12 +216,12 @@ class Settings:
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         values = os.environ if environ is None else environ
         return cls(
-            timeout=_positive_float(values, "ACOB_TIMEOUT", 60.0),
-            poll_interval=_positive_float(values, "ACOB_POLL_INTERVAL", 0.5),
+            timeout=_positive_float(values, "ACOB_MCP_TIMEOUT", 60.0),
+            poll_interval=_positive_float(values, "ACOB_MCP_POLL_INTERVAL", 0.5),
             host=values.get("ACOB_MCP_HOST", "127.0.0.1"),
             port=_port(values.get("ACOB_MCP_PORT", str(DEFAULT_MCP_PORT))),
-            endpoint=_required_url(values, "ACOB_ENDPOINT"),
-            api_same_origin=_boolean(values, "ACOB_API_SAME_ORIGIN"),
+            endpoint=_required_url(values, "ACOB_MCP_ENDPOINT"),
+            api_same_origin=_boolean(values, "ACOB_MCP_API_SAME_ORIGIN"),
         )
 
 

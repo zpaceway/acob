@@ -35,19 +35,19 @@ npm --prefix extension ci
 For the standard isolated full-stack installation, run:
 
 ```bash
-make install PORT=58346 NAME=default
-make install PORT=61554 NAME=alexandro
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
+make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro
 ```
 
-The default proxy port is `58346`, and `NAME` is required. The installation
+The default proxy port is `58346`, and `ACOB_APPLICATION_NAME` is required. The installation
 context is always `acob-<port>-<name>`; the first example uses Compose project
-`acob-58346-default` with a managed browser and ephemeral profile. `NAME`
+`acob-58346-default` with a managed browser and ephemeral profile. `ACOB_APPLICATION_NAME`
 allows lowercase letters, digits, and internal
 hyphens, but cannot start or end with a hyphen. The context prefixes Compose
 network, volume, container, and image resources and is the default MCP
 registration name used by `install-opencode` and `install-claude`.
 
-Pass the same `PORT` and `NAME` to `up`, `down`, `purge`, `logs`, and `ps`.
+Pass the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME` to `up`, `down`, `purge`, `logs`, and `ps`.
 Distinct installations still need distinct ports because only one process can
 bind each host port. Names distinguish user or work contexts only: beyond the
 per-browser `bid` target they add no protocol routing. Each stack has one global

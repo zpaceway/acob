@@ -18,18 +18,20 @@ class Command(BaseCommand):
     @override
     def handle(self, *_args: str, **_options: str) -> None:
         username = (
-            os.environ.get("DJANGO_SUPERUSER_USERNAME", DEFAULT_USERNAME)
+            os.environ.get("ACOB_SRV_SUPERUSER_USERNAME", DEFAULT_USERNAME)
             or DEFAULT_USERNAME
         )
-        email = os.environ.get("DJANGO_SUPERUSER_EMAIL", DEFAULT_EMAIL) or DEFAULT_EMAIL
+        email = (
+            os.environ.get("ACOB_SRV_SUPERUSER_EMAIL", DEFAULT_EMAIL) or DEFAULT_EMAIL
+        )
         password = (
-            os.environ.get("DJANGO_SUPERUSER_PASSWORD", DEFAULT_PASSWORD)
+            os.environ.get("ACOB_SRV_SUPERUSER_PASSWORD", DEFAULT_PASSWORD)
             or DEFAULT_PASSWORD
         )
-        if "DJANGO_SUPERUSER_PASSWORD" not in os.environ:
+        if "ACOB_SRV_SUPERUSER_PASSWORD" not in os.environ:
             self.stdout.write(
                 self.style.WARNING(
-                    "DJANGO_SUPERUSER_PASSWORD is not set; "
+                    "ACOB_SRV_SUPERUSER_PASSWORD is not set; "
                     f"using default password for {username!r}. "
                     "Change it with `manage.py changepassword`.",
                 )

@@ -24,27 +24,56 @@ from the extension's defaults in `src/settings.defaults.ts`
 (see `../extension/README.md`).
 
 To override the baked-in defaults without rebuilding the image, set
-`ACOB_EXTENSION_SETTINGS` to a JSON object when starting the stack:
+per-setting `ACOB_EXTENSION_*` variables when starting the stack:
 
 ```bash
-ACOB_EXTENSION_SETTINGS='{"baseUrl":"http://acob-proxy","allowCleanup":true}' make up PORT=58346 NAME=default
+ACOB_EXTENSION_BASE_URL=http://acob-proxy ACOB_EXTENSION_ALLOW_CLEANUP=true make up ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
 ```
 
-The entrypoint validates the object with `jq` and merges it over the bundled
-`settings.json` before launching Chromium, so a partial object is enough
-(e.g. just `{"baseUrl": ...}`). Every fresh profile picks the merged result
-up, so the override always takes effect on the next container recreate. An
-invalid JSON object
-fails container startup with a clear error.
+Each variable maps to one `settings.json` key (empty means unset):
+
+| Setting key | Environment variable |
+| --- | --- |
+| `baseUrl` | `ACOB_EXTENSION_BASE_URL` |
+| `allowCleanup` | `ACOB_EXTENSION_ALLOW_CLEANUP` |
+| `instructionsPerPoll` | `ACOB_EXTENSION_INSTRUCTIONS_PER_POLL` |
+| `maxConcurrentExecutions` | `ACOB_EXTENSION_MAX_CONCURRENT_EXECUTIONS` |
+| `maxTabs` | `ACOB_EXTENSION_MAX_TABS` |
+| `pollIntervalMs` | `ACOB_EXTENSION_POLL_INTERVAL_MS` |
+| `tabLoadTimeoutMs` | `ACOB_EXTENSION_TAB_LOAD_TIMEOUT_MS` |
+| `httpRequestTimeoutMs` | `ACOB_EXTENSION_HTTP_REQUEST_TIMEOUT_MS` |
+| `javascriptTimeoutMs` | `ACOB_EXTENSION_JAVASCRIPT_TIMEOUT_MS` |
+| `maxScreenshotSizeMiB` | `ACOB_EXTENSION_MAX_SCREENSHOT_SIZE_MIB` |
+| `maxRecordingDurationSec` | `ACOB_EXTENSION_MAX_RECORDING_DURATION_SEC` |
+| `maxRecordingSizeMiB` | `ACOB_EXTENSION_MAX_RECORDING_SIZE_MIB` |
+| `consoleTimeoutSec` | `ACOB_EXTENSION_CONSOLE_TIMEOUT_SEC` |
+| `consoleMaxSizeMiB` | `ACOB_EXTENSION_CONSOLE_MAX_SIZE_MIB` |
+| `resultRetryAttempts` | `ACOB_EXTENSION_RESULT_RETRY_ATTEMPTS` |
+| `resultRetryDelayMs` | `ACOB_EXTENSION_RESULT_RETRY_DELAY_MS` |
+| `popupStatusDurationMs` | `ACOB_EXTENSION_POPUP_STATUS_DURATION_MS` |
+| `debuggerProtocolVersion` | `ACOB_EXTENSION_DEBUGGER_PROTOCOL_VERSION` |
+
+`ACOB_EXTENSION_SETTINGS` (JSON object, e.g.
+`ACOB_EXTENSION_SETTINGS='{"baseUrl":"http://acob-proxy","allowCleanup":true}'`)
+is still accepted and merged first; per-setting variables win over it.
+The entrypoint validates booleans (`true`/`false`) and integers with `jq`
+and merges bundled settings < JSON < per-setting variables before launching
+Chromium, so a partial override is enough. Every fresh profile picks the
+merged result up, so the override always takes effect on the next container
+recreate. An invalid value fails container startup with a clear error.
+
+Browser display and VNC are configured with the `ACOB_BROWSER_*` variables
+(`ACOB_BROWSER_WIDTH`, `ACOB_BROWSER_HEIGHT`,
+`ACOB_BROWSER_VNC_ENABLED`, `ACOB_BROWSER_DISPLAY` like `:99`).
 
 The browser image consumes a built extension directory through Docker's named
 `extension` build context. It does not install Node dependencies or compile the
 extension. The root `make install` and `make up` workflows build
 `extension/dist/` first and pass it to Compose. To use an existing build instead,
-set `EXTENSION_PATH`:
+set `ACOB_EXTENSION_PATH`:
 
 ```bash
-make install PORT=58346 NAME=default EXTENSION_PATH=/path/to/extension
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default ACOB_EXTENSION_PATH=/path/to/extension
 ```
 
 The directory must contain the built extension's `manifest.json`. A custom path
@@ -60,11 +89,15 @@ VNC is disabled by default. Enable the passwordless noVNC debugger when starting
 the stack:
 
 ```bash
-ACOB_VNC_ENABLED=true make up PORT=58346 NAME=default
+ACOB_BROWSER_VNC_ENABLED=true make up ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
 ```
 
-Open `http://127.0.0.1:58346/vnc`. nginx serves noVNC's `vnc_lite.html` and
-proxies its WebSocket to websockify inside the browser container. x11vnc listens
+Open `http://127.0.0.1:58346/vnc`. nginx serves noVNC's full `vnc.html` client
+(toolbar with settings, scaling, quality, clipboard, fullscreen) and
+proxies its WebSocket to websockify inside the browser container. The
+lightweight client remains available at
+`http://127.0.0.1:58346/vnc/vnc_lite.html?autoconnect=true&resize=scale&path=vnc/websockify`.
+x11vnc listens
 only inside that container, and no separate host port is published. Passwordless
 VNC is intended solely for trusted local development; leave it disabled
 otherwise.
@@ -96,10 +129,10 @@ Build the extension, check the startup script, and build the image from this
 directory:
 
 ```bash
-ACOB_BASE_URL=http://acob-proxy npm --prefix ../extension run build
+ACOB_EXTENSION_BASE_URL=http://acob-proxy npm --prefix ../extension run build
 make check
 make build
 ```
 
-Pass `EXTENSION_PATH=/path/to/extension` to `make build` to package another
+Pass `ACOB_EXTENSION_PATH=/path/to/extension` to `make build` to package another
 prebuilt extension directory.

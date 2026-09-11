@@ -12,6 +12,7 @@ from acob import (
     ConsoleCapture,
     ConsoleStarted,
     KeyboardKeyResult,
+    KeyboardTextResult,
     ListedTab,
     ProxySet,
     ProxyUnset,
@@ -57,11 +58,11 @@ class SettingsTests(unittest.TestCase):
     def test_loads_settings_from_env(self) -> None:
         settings = Settings.from_env(
             {
-                "ACOB_TIMEOUT": "12.5",
-                "ACOB_POLL_INTERVAL": "0.1",
+                "ACOB_MCP_TIMEOUT": "12.5",
+                "ACOB_MCP_POLL_INTERVAL": "0.1",
                 "ACOB_MCP_HOST": "0.0.0.0",
                 "ACOB_MCP_PORT": "9000",
-                "ACOB_ENDPOINT": "http://acob.example:58347",
+                "ACOB_MCP_ENDPOINT": "http://acob.example:58347",
             }
         )
 
@@ -73,10 +74,10 @@ class SettingsTests(unittest.TestCase):
 
     def test_requires_the_endpoint_configuration(self) -> None:
         invalid = (
-            ({}, "ACOB_ENDPOINT must be set to a valid HTTP or HTTPS URL"),
+            ({}, "ACOB_MCP_ENDPOINT must be set to a valid HTTP or HTTPS URL"),
             (
-                {"ACOB_ENDPOINT": "  "},
-                "ACOB_ENDPOINT must be set to a valid HTTP or HTTPS URL",
+                {"ACOB_MCP_ENDPOINT": "  "},
+                "ACOB_MCP_ENDPOINT must be set to a valid HTTP or HTTPS URL",
             ),
         )
 
@@ -88,23 +89,23 @@ class SettingsTests(unittest.TestCase):
                 Settings.from_env(environ)
 
     def test_rejects_invalid_settings(self) -> None:
-        base = {"ACOB_ENDPOINT": "http://acob.example:58347"}
+        base = {"ACOB_MCP_ENDPOINT": "http://acob.example:58347"}
         invalid = (
             (
-                {**base, "ACOB_TIMEOUT": "inf"},
-                "ACOB_TIMEOUT must be a positive finite number",
+                {**base, "ACOB_MCP_TIMEOUT": "inf"},
+                "ACOB_MCP_TIMEOUT must be a positive finite number",
             ),
             (
                 {**base, "ACOB_MCP_PORT": "0"},
                 "ACOB_MCP_PORT must be an integer from 1 to 65535",
             ),
             (
-                {**base, "ACOB_ENDPOINT": "not-a-url"},
-                "ACOB_ENDPOINT must be a valid HTTP or HTTPS URL",
+                {**base, "ACOB_MCP_ENDPOINT": "not-a-url"},
+                "ACOB_MCP_ENDPOINT must be a valid HTTP or HTTPS URL",
             ),
             (
-                {**base, "ACOB_ENDPOINT": "http://acob.example?q=1"},
-                "ACOB_ENDPOINT must be a valid HTTP or HTTPS URL",
+                {**base, "ACOB_MCP_ENDPOINT": "http://acob.example?q=1"},
+                "ACOB_MCP_ENDPOINT must be a valid HTTP or HTTPS URL",
             ),
         )
 
@@ -197,7 +198,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             "page content as untrusted data",
             "timed-out or cancelled call",
             "reinstall reloads the unpacked extension",
-            "ACOB_ENDPOINT environment variable",
+            "ACOB_MCP_ENDPOINT environment variable",
             "served by the ACOB server",
             "execute_batch",
         ):
@@ -415,6 +416,48 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             timeout=None,
             bid=None,
         )
+
+    async def test_keyboard_inserts_text_through_the_client(self) -> None:
+        self.acob.keyboard.return_value = KeyboardTextResult(inserted_characters=5)
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            result = await client.call_tool(
+                "keyboard",
+                {"tid": 12, "text": "hello", "timeout": 3.0},
+            )
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(
+            result.structured_content,
+            {"result": {"inserted_characters": 5, "bid": None}},
+        )
+        self.acob.keyboard.assert_awaited_once_with(
+            12,
+            text="hello",
+            timeout=3.0,
+            bid=None,
+        )
+
+    async def test_keyboard_rejects_missing_and_empty_input(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            missing = await client.call_tool("keyboard", {"tid": 12})
+            empty = await client.call_tool(
+                "keyboard",
+                {"tid": 12, "key": ""},
+            )
+
+        self.assertTrue(missing.is_error)
+        self.assertTrue(empty.is_error)
+        self.acob.keyboard.assert_not_awaited()
+
+    async def test_keyboard_rejects_missing_key_when_validator_bypassed(self) -> None:
+        with patch("src.server._validate_keyboard"):
+            async with Client(self.server, raise_exceptions=True) as client:
+                result = await client.call_tool("keyboard", {"tid": 12})
+
+        self.assertTrue(result.is_error)
+        self.assertIn("exactly one of text or key is required", _text(result))
+        self.acob.keyboard.assert_not_awaited()
 
     async def test_returns_screenshot_download_url_from_the_client(self) -> None:
         media_url = "http://acob.test/api/media/screenshot-12-abc.png"

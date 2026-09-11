@@ -7,12 +7,14 @@ custom schema — Django owns all tables via `manage.py migrate`.
 
 | Var | Default | Purpose |
 | --- | --- | --- |
-| `POSTGRES_DB` | `acob` | Database name (also `ACOB_DB_NAME` on `acob-srv`) |
-| `POSTGRES_USER` | `acob` | Role name (also `ACOB_DB_USER` on `acob-srv`) |
-| `POSTGRES_PASSWORD` | `acob` | Role password (also `ACOB_DB_PASSWORD` on `acob-srv`) |
+| `ACOB_DATABASE_PORTGRES_DB` | `acob` | Database name (also `ACOB_SRV_DB_NAME` on `acob-srv`) |
+| `ACOB_DATABASE_PORTGRES_USER` | `acob` | Role name (also `ACOB_SRV_DB_USER` on `acob-srv`) |
+| `ACOB_DATABASE_PORTGRES_PASSWORD` | `acob` | Role password (also `ACOB_SRV_DB_PASSWORD` on `acob-srv`) |
 
-`acob-srv` connects via `ACOB_DB_HOST=acob-db` + `ACOB_DB_PORT=5432`, or via a
-single `ACOB_DATABASE_URL`/`DATABASE_URL` (e.g.
+`compose.yaml` maps these to the `POSTGRES_*` variables the official
+`postgres:17` image entrypoint requires; set only the `ACOB_*` names.
+`acob-srv` connects via `ACOB_SRV_DB_HOST=acob-db` + `ACOB_SRV_DB_PORT=5432`,
+or via a single `ACOB_SRV_DATABASE_URL` (e.g.
 `postgres://acob:acob@acob-db:5432/acob`). Without either, `acob-srv` falls
 back to local SQLite (`DATA_DIR/db.sqlite3`) for dev.
 

@@ -680,8 +680,8 @@ A root task runner should execute component checks, builds, protocol
 conformance, and smoke tests without introducing a root runtime dependency
 graph.
 
-The root installation workflow requires `NAME`; for example,
-`make install PORT=58346 NAME=default` builds a managed Chromium image with the
+The root installation workflow requires `ACOB_APPLICATION_NAME`; for example,
+`make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default` builds a managed Chromium image with the
 extension preinstalled and starts an isolated Compose project, network, and
 volumes from the root `compose.yaml`. The root `compose.yaml` defines four
 services (`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`). That instance's
@@ -689,14 +689,14 @@ proxy binds its localhost port; optional noVNC is served under `/vnc` on that
 same origin only when its process is enabled. Native
 server and MCP development ports remain `58347` and `58348`.
 
-`NAME` distinguishes user or work contexts. For example,
-`make install PORT=61554 NAME=alexandro` uses installation context and Compose
+`ACOB_APPLICATION_NAME` distinguishes user or work contexts. For example,
+`make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro` uses installation context and Compose
 project `acob-61554-alexandro`, prefixes that project's network, volume,
 container, and image resources, and becomes the default MCP registration
 name for the root OpenCode and Claude installers. The context is always
 `acob-<port>-<name>`. Names allow lowercase letters, digits, and internal hyphens
 and cannot start or end with a hyphen. Lifecycle commands must receive the same
-`PORT` and `NAME`. Distinct installations still require distinct ports
+`ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME`. Distinct installations still require distinct ports
 because a host port can have only one listener. A name is a local resource and
 registration label, not protocol routing beyond the per-browser `bid` target;
 untargeted work on each stack remains claimable by any connected browser.

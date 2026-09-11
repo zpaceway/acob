@@ -146,7 +146,7 @@ def documentation(origin: str) -> schemas.ApiDocumentation:
 
 
 def _origin(request: HttpRequest) -> str:
-    # Deliberately independent of ACOB_PUBLIC_URL, which controls media only.
+    # Deliberately independent of ACOB_SRV_PUBLIC_URL, which controls media only.
     return request.build_absolute_uri("/").rstrip("/")
 
 

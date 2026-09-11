@@ -666,8 +666,8 @@ def _host_console(
 
 
 def _absolute_media_url(request: HttpRequest, path: str) -> str:
-    if settings.ACOB_PUBLIC_URL:
-        return f"{settings.ACOB_PUBLIC_URL}{path}"
+    if settings.ACOB_SRV_PUBLIC_URL:
+        return f"{settings.ACOB_SRV_PUBLIC_URL}{path}"
     return request.build_absolute_uri(path)
 
 

@@ -8,7 +8,7 @@ from api.documentation import openapi_document
 
 
 class DocumentationTests(SimpleTestCase):
-    @override_settings(ACOB_PUBLIC_URL="http://media.test:9000")
+    @override_settings(ACOB_SRV_PUBLIC_URL="http://media.test:9000")
     def test_links_follow_each_request_not_media_configuration(self) -> None:
         for host, secure in (
             ("localhost:61554", False),

@@ -71,9 +71,9 @@ adding aliases, shims, or deprecation layers.
 - `srv/api/documentation.py` serves `/api/` discovery, `/api/docs/` Swagger UI
   with locally bundled assets, and `/api/openapi.json`. OpenAPI schemas come
   from Pydantic models; operation descriptions document cross-field validators.
-  Documentation uses the incoming request origin, not `ACOB_PUBLIC_URL`.
+  Documentation uses the incoming request origin, not `ACOB_SRV_PUBLIC_URL`.
   The client `api()` method and MCP `api` tool expose typed discovery. Compose
-  enables `ACOB_API_SAME_ORIGIN` so MCP links follow its HTTP request origin;
+  enables `ACOB_MCP_API_SAME_ORIGIN` so MCP links follow its HTTP request origin;
   standalone MCP defaults to the configured API's documentation links.
 - Strict Pydantic request models in `srv/api/schemas.py` (`ApiModel`:
   `extra="forbid"`, `strict=True`). Instruction requests are a discriminated
@@ -98,7 +98,7 @@ adding aliases, shims, or deprecation layers.
     extension acknowledges it after reloading.
 - `srv/acob/settings.py`: `DATA_UPLOAD_MAX_MEMORY_SIZE` must exceed the
   largest accepted base64 body (1 GiB covers the 512 MiB recording cap and a
-  full-size 20-action batch). Compose sets `ACOB_PUBLIC_URL` so media results
+  full-size 20-action batch). Compose sets `ACOB_SRV_PUBLIC_URL` so media results
   use the host-reachable proxy origin rather than the browser's internal
   service name.
 - Tests: `srv/api/tests.py` (Django TestCase, `post_json`/`post_result`
@@ -146,8 +146,11 @@ adding aliases, shims, or deprecation layers.
   the user to inspect the popup when a configured limit matters.
 - The worker owns the debugger for everything (click, screenshot, JS, and
   recording start/stop); the offscreen document is only a polling/media sink.
-- Unit tests in `extension/tests/` (`node:test`). Type-level contracts are
-  verified in `types.test.ts`. Manifest/offscreen/popup/debugger changes
+- Unit tests in `extension/tests/` (`node:test`, `npm test` runs every
+  `tests/**/*.test.ts`; `npm run test:coverage` enforces >=90% lines and
+  functions over `src/`). Type-level contracts are verified in
+  `tests/types.contract.ts` (typecheck-only, not executed).
+  Manifest/offscreen/popup/debugger changes
   require manual unpacked-extension verification.
 - Version: `package.json` and `manifest.json` must match.
 
@@ -172,7 +175,7 @@ adding aliases, shims, or deprecation layers.
 - `mcp/src/server.py` builds an `MCPServer` with `create_server(settings)`.
   Tools are `@server.tool`-decorated functions nested inside `create_server`;
   the tool name defaults to the function name.
-- One `ACOBClient` is created for the configured `ACOB_ENDPOINT` in the MCP
+- One `ACOBClient` is created for the configured `ACOB_MCP_ENDPOINT` in the MCP
   lifespan and shared by every tool call. Connections do not select an
   executor or queue.
 - `TOOL_ARGUMENT_NAMES` maps every tool to its allowed argument names
@@ -180,15 +183,15 @@ adding aliases, shims, or deprecation layers.
 - `SERVER_VERSION`/`SERVER_TITLE`/`SERVER_DESCRIPTION`/`SERVER_INSTRUCTIONS`
   are the agent-facing surface; instructions emphasize tab discovery,
   side-effect awareness, and untrusted page content.
-- Environment: `ACOB_ENDPOINT` (required), `ACOB_TIMEOUT`, `ACOB_POLL_INTERVAL`,
-  `ACOB_MCP_HOST`, `ACOB_MCP_PORT` (default 58348).
+- Environment: `ACOB_MCP_ENDPOINT` (required), `ACOB_MCP_TIMEOUT`, `ACOB_MCP_POLL_INTERVAL`,
+  `ACOB_MCP_API_SAME_ORIGIN`, `ACOB_MCP_HOST`, `ACOB_MCP_PORT` (default 58348).
 - Tests: `mcp/tests/test_server.py` (auto-specced `ACOBClient`, in-process
   `Client` calls).
 
 ### proxy/ — unified nginx proxy
 
 - `proxy/nginx.conf` fronts both services on a single host port
-  (`PORT`, default `58346`): `/mcp` -> `acob-mcp:58348`,
+  (`ACOB_PROXY_PORT`, default `58346`): `/mcp` -> `acob-mcp:58348`,
   `/` -> `acob-srv:58347`. `client_max_body_size 1024M` covers recordings
   and screenshot batches; buffering is disabled and timeouts are 3600s for
   MCP streaming.
@@ -196,18 +199,18 @@ adding aliases, shims, or deprecation layers.
   `compose.yaml` defines five services (`acob-db`, `acob-srv`, `acob-mcp`, `acob-proxy`,
   `acob-browser`). Compose creates the `acob` network and data volumes inside
   the selected project; neither has a fixed global name.
-- nginx publishes the host port at `127.0.0.1:${PORT}`. `srv`, `mcp`, and the
+- nginx publishes the host port at `127.0.0.1:${ACOB_PROXY_PORT}`. `srv`, `mcp`, and the
   browser only expose their ports to the project-scoped network. Optional
   passwordless noVNC is served under `/vnc` on the same origin.
 - The supported full-stack workflow is the root `Makefile`. `make install
-  PORT=<port> NAME=<name>` uses context/project `acob-<port>-<name>` and builds
-  the managed browser with its extension. `NAME` is required
+  ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>` uses context/project `acob-<port>-<name>` and builds
+  the managed browser with its extension. `ACOB_APPLICATION_NAME` is required
   and allows
   lowercase letters, digits, and internal hyphens and cannot start or end with
   a hyphen. Compose network, volume, container, and image resources use that
   project prefix. Root OpenCode and Claude installers use the context as their
-  default MCP registration name. Lifecycle commands require the same `PORT` and
-  `NAME`. Multiple stacks still require different `PORT` values.
+  default MCP registration name. Lifecycle commands require the same `ACOB_PROXY_PORT` and
+  `ACOB_APPLICATION_NAME`. Multiple stacks still require different `ACOB_PROXY_PORT` values.
 
 ### browser/ — managed Chromium executor
 
@@ -228,8 +231,8 @@ adding aliases, shims, or deprecation layers.
   it at startup without an image rebuild, and always takes effect on the next
   container recreate.
   `browser/Dockerfile` installs `jq` for that merge.
-- `ACOB_VNC_ENABLED=true` starts passwordless x11vnc plus noVNC/websockify.
-  nginx serves the lightweight client and WebSocket under `/vnc`; no separate
+- `ACOB_BROWSER_VNC_ENABLED=true` starts passwordless x11vnc plus noVNC/websockify.
+  nginx serves the full client and WebSocket under `/vnc`; no separate
   VNC host port is published. VNC stays disabled by default.
 
 ## The Cross-Component Protocol Contract
@@ -418,13 +421,13 @@ The supported local deployment is an isolated Compose stack installed through
 the root `Makefile`:
 
 ```bash
-make install PORT=58346 NAME=default
-make install PORT=61554 NAME=alexandro
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
+make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro
 ```
 
-- `PORT` defaults to `58346` and must be unique per running stack.
-- `NAME` is required. The installation context and Compose project are always
-  `acob-<port>-<name>`. `NAME` allows lowercase letters, digits, and internal
+- `ACOB_PROXY_PORT` defaults to `58346` and must be unique per running stack.
+- `ACOB_APPLICATION_NAME` is required. The installation context and Compose project are always
+  `acob-<port>-<name>`. `ACOB_APPLICATION_NAME` allows lowercase letters, digits, and internal
   hyphens and cannot start or end with a hyphen.
 - Compose network, volume, container, and image resources use the project
   prefix. The root `install-opencode` and `install-claude` targets use the
@@ -439,10 +442,10 @@ make install PORT=61554 NAME=alexandro
   Chromium profile is ephemeral (no volume on `/data`), so every reinstall or
   container recreate starts from a fresh profile (and a fresh extension `bid`).
   Lifecycle commands must
-  receive the same `PORT` and `NAME`; `down` preserves both volumes
+  receive the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME`; `down` preserves both volumes
   and `purge` removes them.
 - Run another independent stack with another port, for example `make install
-  PORT=58356 NAME=secondary`. Each stack starts its own managed browser and MCP
+  ACOB_PROXY_PORT=58356 ACOB_APPLICATION_NAME=secondary`. Each stack starts its own managed browser and MCP
   endpoint; untargeted work on one stack remains claimable by any browser on it.
 - Names distinguish user or work contexts but add no protocol routing beyond the
   per-browser `bid` target. Distinct installations still need distinct ports because
@@ -450,7 +453,7 @@ make install PORT=61554 NAME=alexandro
 - Pre-existing unnamed contexts are outside the supported root lifecycle;
   manage them manually with Compose or replace them with a named installation.
 
-External URLs for `PORT=58346`:
+External URLs for `ACOB_PROXY_PORT=58346`:
 
 - API: `http://127.0.0.1:58346/api/...`
 - Media: `http://127.0.0.1:58346/api/media/<file>`
@@ -461,7 +464,7 @@ External URLs for `PORT=58346`:
 1. Run the component's checks and tests, and build the extension
    (`npm --prefix extension run build`) before deploying anything.
 2. Bump versions per the Version bumping rules when the protocol changed.
-3. Reinstall the selected stack with `make install PORT=<port> NAME=<name>`.
+3. Reinstall the selected stack with `make install ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>`.
    Use the same context arguments as the original installation. This rebuilds
    the browser image and restarts services while preserving the `srv-data`
    volume; the browser profile is ephemeral, so it starts fresh.
@@ -479,12 +482,12 @@ External URLs for `PORT=58346`:
 ### Reinstall flow (extension reload)
 
 1. For managed-browser code changes, rebuild and replace the container with
-   `make install PORT=<port> NAME=<name>`; the image owns the extension files.
+   `make install ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>`; the image owns the extension files.
 2. Use the MCP `reinstall` tool or `POST /api/reinstall/` only to restart the
    currently installed extension for recovery. The extension stops active
    JavaScript work, reloads itself, and acknowledges at
    `POST /api/reinstall/acknowledge/` from the new worker.
-3. For native extension development, run `ACOB_BASE_URL=<url> npm --prefix
+3. For native extension development, run `ACOB_EXTENSION_BASE_URL=<url> npm --prefix
    extension run build`, load `extension/dist/`, then use `reinstall` after
    rebuilding so Chromium reads the latest unpacked files.
 4. Confirm recovery with a normal `list` instruction. There is no heartbeat or
@@ -495,11 +498,11 @@ stack, which extension receives the command is intentionally unspecified.
 
 ### Debugging the local stack
 
-- Identify the stack by its context and use `make ps PORT=<port> NAME=<name>`
-  or `make logs PORT=<port> NAME=<name>`. For direct Compose
-  commands, set `PORT=<port>` and use `--project-name <context> --file
+- Identify the stack by its context and use `make ps ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>`
+  or `make logs ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>`. For direct Compose
+  commands, set `ACOB_PROXY_PORT=<port>` and use `--project-name <context> --file
   compose.yaml` so diagnostics do not accidentally target another stack.
-- Set `ACOB_VNC_ENABLED=true` when starting the stack to inspect Chromium at
+- Set `ACOB_BROWSER_VNC_ENABLED=true` when starting the stack to inspect Chromium at
   `http://127.0.0.1:<port>/vnc`. noVNC is passwordless and for trusted local
   debugging only.
 - Inspect nginx, Django, and MCP logs in that project; filter for the action or
@@ -527,7 +530,7 @@ stack, which extension receives the command is intentionally unspecified.
 
 End-to-end browser testing against the local stack:
 
-1. Run `make install PORT=<port> NAME=<name>` to build and start the managed
+1. Run `make install ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>` to build and start the managed
    browser with its bundled extension.
 2. Verify readiness with `list`, then use the MCP/client tool surface (e.g.
    `record`, `console`, `proxy`, `screenshot`) against a live tab; downloads
@@ -537,7 +540,7 @@ End-to-end browser testing against the local stack:
    duration element and tools that probe duration (e.g. vsense) reject it.
 3. Enable local VNC when visual inspection is useful.
 4. Verify isolation, when relevant, by running a second stack on another
-   `PORT` and confirming each managed browser polls only its own proxy.
+   `ACOB_PROXY_PORT` and confirming each managed browser polls only its own proxy.
 
 Behavior that requires manual browser verification (no automated coverage):
 debugger interactions, offscreen document lifecycle, recording encode
@@ -611,6 +614,6 @@ in the live extension after changes.
   mid-flight.
 - `mcp/uv.lock` must be regenerated with `uv lock` after changing
   `mcp/pyproject.toml` (version or `acob-client>=` constraint).
-- Do not run `make install PORT=<port> NAME=<name>` casually against an active
+- Do not run `make install ACOB_PROXY_PORT=<port> ACOB_APPLICATION_NAME=<name>` casually against an active
   stack: it rebuilds images and restarts local services, interrupting browser
   work. Always supply the same context arguments used to create that stack.

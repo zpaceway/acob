@@ -53,7 +53,7 @@ The recommended installation builds and starts a managed Chromium browser plus
 the API and MCP services behind the unified proxy:
 
 ```bash
-make install PORT=58346 NAME=default
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
 ```
 
 This uses context and Compose project `acob-58346-default` and starts an isolated
@@ -67,7 +67,7 @@ that output into the browser image build.
 To package an extension that is already built, pass its directory instead:
 
 ```bash
-make install PORT=58346 NAME=default EXTENSION_PATH=/path/to/extension
+make install ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default ACOB_EXTENSION_PATH=/path/to/extension
 ```
 
 A custom path is used as-is and must contain `manifest.json` with the intended
@@ -77,14 +77,14 @@ object when starting the stack;
 see [`browser/README.md`](browser/README.md). Overrides only seed fresh
 profiles.
 
-`NAME` is required and distinguishes a user or work context. The installation
+`ACOB_APPLICATION_NAME` is required and distinguishes a user or work context. The installation
 context is always `acob-<port>-<name>`:
 
 ```bash
-make install PORT=61554 NAME=alexandro
+make install ACOB_PROXY_PORT=61554 ACOB_APPLICATION_NAME=alexandro
 ```
 
-This uses context and Compose project `acob-61554-alexandro`. `NAME` may contain
+This uses context and Compose project `acob-61554-alexandro`. `ACOB_APPLICATION_NAME` may contain
 lowercase letters, digits, and internal hyphens, but cannot start or end with a
 hyphen. Compose network, volume, container, and image resources use the project
 prefix. The `install-opencode` and `install-claude` targets also use the context
@@ -97,13 +97,13 @@ with that browser's `bid` (see [API](#api)). Instead of sharing one stack,
 install another complete stack on a distinct proxy port:
 
 ```bash
-make install PORT=61001 NAME=secondary
+make install ACOB_PROXY_PORT=61001 ACOB_APPLICATION_NAME=secondary
 ```
 
 That creates Compose project `acob-61001-secondary`, its isolated network,
-volumes, and browser. Use the same `PORT` and `NAME` with root `make up`, `make
+volumes, and browser. Use the same `ACOB_PROXY_PORT` and `ACOB_APPLICATION_NAME` with root `make up`, `make
 down`, `make purge`, `make logs`, and `make ps`. Distinct
-installations still require distinct `PORT` values because only one process can
+installations still require distinct `ACOB_PROXY_PORT` values because only one process can
 bind a host port. Names are labels for user or work contexts; they do not add
 protocol routing beyond the per-browser `bid` target, and untargeted work
 remains claimable by any browser on that stack. See `compose.yaml` for lower-level service details and
@@ -116,7 +116,7 @@ The root `compose.yaml` is the only Compose file. Build the extension before
 starting the full stack directly:
 
 ```bash
-ACOB_BASE_URL=http://acob-proxy npm --prefix extension run build
+ACOB_EXTENSION_BASE_URL=http://acob-proxy npm --prefix extension run build
 docker compose -f compose.yaml up --build
 ```
 
@@ -131,8 +131,8 @@ Individual services can be selected from the root file (for example
 `docker compose -f compose.yaml up --build acob-srv`) or run natively with
 `make -C srv dev` / `make -C mcp run`.
 
-Stop a root-managed stack with `make down PORT=58346 NAME=default`, or remove
-its volumes as well with `make purge PORT=58346 NAME=default`. The proxy setup
+Stop a root-managed stack with `make down ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default`, or remove
+its volumes as well with `make purge ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default`. The proxy setup
 binds
 `127.0.0.1:58346` by default. Native development ports remain `58347` for the
 API and `58348` for MCP.
@@ -148,21 +148,21 @@ is configured — see [`database/README.md`](database/README.md) and
 
 Django admin is enabled at `/admin/` (e.g. `http://127.0.0.1:58346/admin/`
 through the proxy). Native `make -C srv dev` and the container entrypoint both
-run `manage.py ensure_superuser` (idempotent; `DJANGO_SUPERUSER_USERNAME` /
-`DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD`, defaulting to
+run `manage.py ensure_superuser` (idempotent; `ACOB_SRV_SUPERUSER_USERNAME` /
+`ACOB_SRV_SUPERUSER_EMAIL` / `ACOB_SRV_SUPERUSER_PASSWORD`, defaulting to
 `admin` / `admin@example.com` / `changeme` with a warning). Change it later
 with `manage.py changepassword`. Static files are served by Django via
 WhiteNoise from `STATIC_ROOT` (collected at image build and on container
 start), so admin CSS works with no nginx change.
 
-`DEBUG` comes from `ACOB_DEBUG` (fallback `DJANGO_DEBUG`, default `true` for
-native dev); Compose sets `ACOB_DEBUG=false`, and with `DEBUG=false` the server
-refuses to boot without `ACOB_SECRET_KEY` (fallback `DJANGO_SECRET_KEY`).
-`ALLOWED_HOSTS` (`ACOB_ALLOWED_HOSTS`, default `*`) and
+`DEBUG` comes from `ACOB_SRV_DEBUG` (default `true` for
+native dev); Compose sets `ACOB_SRV_DEBUG=false`, and with `DEBUG=false` the server
+refuses to boot without `ACOB_SRV_SECRET_KEY`.
+`ALLOWED_HOSTS` (`ACOB_SRV_ALLOWED_HOSTS`, default `*`) and
 `CSRF_TRUSTED_ORIGINS` are env-driven. Database selection is
-`ACOB_DATABASE_URL` (fallback `DATABASE_URL`) or
-`ACOB_DB_HOST`/`ACOB_DB_NAME`/`ACOB_DB_USER`/`ACOB_DB_PASSWORD`/`ACOB_DB_PORT`
-(Compose: host `acob-db`, port `5432`, credentials from `POSTGRES_*`); with
+`ACOB_SRV_DATABASE_URL` or
+`ACOB_SRV_DB_HOST`/`ACOB_SRV_DB_NAME`/`ACOB_SRV_DB_USER`/`ACOB_SRV_DB_PASSWORD`/`ACOB_SRV_DB_PORT`
+(Compose: host `acob-db`, port `5432`, credentials from `ACOB_DATABASE_PORTGRES_*`); with
 neither, the server falls back to local SQLite.
 
 ## Browser
@@ -176,11 +176,11 @@ Passwordless browser-based VNC debugging is disabled by default. Enable it when
 starting the stack:
 
 ```bash
-ACOB_VNC_ENABLED=true make up PORT=58346 NAME=default
+ACOB_BROWSER_VNC_ENABLED=true make up ACOB_PROXY_PORT=58346 ACOB_APPLICATION_NAME=default
 ```
 
-Open `http://127.0.0.1:58346/vnc` in a browser. nginx serves noVNC's lightweight
-client and proxies its WebSocket over the existing stack port. See
+Open `http://127.0.0.1:58346/vnc` in a browser. nginx serves noVNC's full
+client (settings, scaling, clipboard) and proxies its WebSocket over the existing stack port. See
 [`browser/README.md`](browser/README.md).
 
 Inside the managed browser, `http://localhost:<port>` reaches host dev servers
@@ -310,7 +310,7 @@ SDK and talks to Django through `acob-client`. It has its own dependencies,
 tests, process, and container, but is not an installable Python package.
 
 The MCP adapter runs as a Streamable HTTP server at `/mcp`. Its ACOB API origin
-comes from the `ACOB_ENDPOINT` environment variable. When running via the
+comes from the `ACOB_MCP_ENDPOINT` environment variable. When running via the
 unified proxy the API and MCP share one port (`58346`):
 
 ```json
@@ -325,7 +325,7 @@ unified proxy the API and MCP share one port (`58346`):
 
 Root `make install-opencode` and `make install-claude` targets register this
 endpoint under the installation context name `acob-<port>-<name>` by default.
-Both targets require `NAME`; `MCP_NAME` can override the registration label.
+Both targets require `ACOB_APPLICATION_NAME`; `ACOB_MCP_NAME` can override the registration label.
 The registration name selects no browser or queue; the endpoint's port selects
 the stack.
 
@@ -347,7 +347,7 @@ Run it as a separate service:
 make -C mcp run
 ```
 
-`ACOB_ENDPOINT` is required by the MCP process; `make -C mcp run` supplies the
+`ACOB_MCP_ENDPOINT` is required by the MCP process; `make -C mcp run` supplies the
 native-development default `http://127.0.0.1:58347`.
 
 The recommended Docker workflow is the root `compose.yaml`, which runs all
@@ -396,14 +396,14 @@ the submit/poll/consume workflow.
 
 Documentation uses the incoming request's scheme, host and port for links,
 curl examples and Swagger's API server. It is generated per request, so it
-works across named stacks and custom ports. `ACOB_PUBLIC_URL` only affects
+works across named stacks and custom ports. `ACOB_SRV_PUBLIC_URL` only affects
 capture URLs. Swagger's assets are bundled locally and its external validator
 is disabled. “Try it out” executes real API requests; extension-only routes
 are explicitly marked and must not be used by controllers.
 
-Compose enables `ACOB_API_SAME_ORIGIN` for MCP because API and MCP share the
+Compose enables `ACOB_MCP_API_SAME_ORIGIN` for MCP because API and MCP share the
 proxy origin. Standalone MCP leaves it disabled and returns documentation for
-its configured `ACOB_ENDPOINT`, which may use a different port. Reconnect MCP
+its configured `ACOB_MCP_ENDPOINT`, which may use a different port. Reconnect MCP
 clients after installing an update to discover the `api` tool.
 
 The stack exposes one flat REST surface:

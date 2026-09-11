@@ -24,12 +24,12 @@ COPY entrypoint.sh /usr/local/bin/acob-browser
 
 RUN chmod 0755 /usr/local/bin/acob-browser
 
-ENV ACOB_VNC_ENABLED=false \
-    DISPLAY=:99
+ENV ACOB_BROWSER_VNC_ENABLED=false \
+    ACOB_BROWSER_DISPLAY=:99
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
     CMD pgrep -u acob -x chromium >/dev/null \
-        && { [ "$ACOB_VNC_ENABLED" != "true" ] \
+        && { [ "$ACOB_BROWSER_VNC_ENABLED" != "true" ] \
         || { pgrep -u acob -x x11vnc >/dev/null \
         && pgrep -u acob -f 'websockify.*6080' >/dev/null; }; } \
         || exit 1
