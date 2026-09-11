@@ -1,4 +1,5 @@
 from .client import (
+    BID_PATTERN,
     DEFAULT_ENDPOINT,
     ACOBClient,
     ACOBConnectionError,
@@ -9,6 +10,7 @@ from .client import (
     ACOBTimeoutError,
     ApiDocumentation,
     BatchResultEntry,
+    Bid,
     CleanupResult,
     ClickResult,
     ClosedTab,
@@ -31,9 +33,10 @@ from .client import (
     Tab,
 )
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 __all__ = [
+    "BID_PATTERN",
     "DEFAULT_ENDPOINT",
     "ACOBClient",
     "ACOBConnectionError",
@@ -44,6 +47,7 @@ __all__ = [
     "ACOBTimeoutError",
     "ApiDocumentation",
     "BatchResultEntry",
+    "Bid",
     "CleanupResult",
     "ClickResult",
     "ClosedTab",

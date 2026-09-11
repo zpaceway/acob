@@ -60,9 +60,9 @@ The root installer requires `NAME` and names every installation context
 `acob-<port>-<name>`. Root `install-opencode` and `install-claude` use that same
 context as the default MCP registration name; `MCP_NAME` can override the
 registration label. The name distinguishes a user or work context only. It is
-not sent through MCP or the browser protocol, adds no executor identity or queue
-routing, and every connection to an endpoint still shares that stack's
-promiscuous queue.
+not sent through MCP or the browser protocol and adds no queue routing beyond
+the per-tool `bid` target; untargeted work on that stack still may be claimed
+by any connected browser.
 
 Screenshot URLs are served by the ACOB server itself: it stores each capture
 locally and reports the public download URL in the instruction result. This
@@ -88,7 +88,11 @@ container reaches the API internally at `http://acob-srv:58347`.
 
 The tools are `api`, `list`, `navigate`, `focus`, `close`, `reload`, `scroll`,
 `click`, `keyboard`, `screenshot`, `record`, `console`, `proxy`, `cleanup`,
-`javascript`, `execute_batch`, and `reinstall`. The `screenshot` tool always
+`javascript`, `execute_batch`, and `reinstall`. Every browser tool except `api`
+and `reinstall` accepts an optional `bid` (32 lowercase hex) targeting one
+browser — copy it from the extension popup's read-only Browser ID field; omit
+it for untargeted work claimable by any browser, and read the executor `bid`
+from the response. The `screenshot` tool always
 returns the
 public download URL for the capture; it never streams the image, so the agent
 downloads the capture itself when it needs the pixels. `record` with
@@ -118,7 +122,7 @@ error entry per action.
 
 The read-only `api` tool takes no arguments and returns `base_url`, `swagger_url`,
 `openapi_url`, `instructions_url`, `instruction_url_template`, `batch_url`, and
-a `guide` covering submission, bounded polling, one-use terminal responses,
+a `guide` covering submission, bounded polling, persistent terminal responses,
 batch execution, errors and extension-only routes. Fetch `openapi_url` for exact
 payload schemas or open `swagger_url` for interactive documentation. Discovery
 does not enqueue browser work and does not require an available extension.

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import re
 from collections.abc import Sequence
 from types import TracebackType
 from typing import Annotated, Literal, TypeAlias, TypeVar, cast, overload
@@ -26,6 +27,8 @@ ProxyMethod: TypeAlias = Literal["set", "unset"]
 ProxyScheme: TypeAlias = Literal["http", "https", "socks5"]
 RecordMethod: TypeAlias = Literal["start", "stop"]
 ConsoleMethod: TypeAlias = Literal["start", "capture", "stop"]
+Bid: TypeAlias = str
+BID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 MAX_PROXY_LENGTH = 2048
 
 
@@ -50,6 +53,7 @@ class Tab(_ResultModel):
     title: str | None
     url: str | None
     domain: str | None
+    bid: str | None = None
 
 
 class ListedTab(Tab):
@@ -59,15 +63,18 @@ class ListedTab(Tab):
 class ClosedTab(_ResultModel):
     closed: Literal[True]
     tab: Tab
+    bid: str | None = None
 
 
 class ScrollResult(_ResultModel):
     scrolled: Literal[True]
     y: Annotated[float, Field(allow_inf_nan=False)]
+    bid: str | None = None
 
 
 class CleanupResult(_ResultModel):
     cleaned: Literal[True]
+    bid: str | None = None
 
 
 class ClickResult(_ResultModel):
@@ -75,15 +82,18 @@ class ClickResult(_ResultModel):
     selector: str
     x: float
     y: float
+    bid: str | None = None
 
 
 class KeyboardTextResult(_ResultModel):
     inserted_characters: int
+    bid: str | None = None
 
 
 class KeyboardKeyResult(_ResultModel):
     key: str
     modifiers: list[KeyboardModifier]
+    bid: str | None = None
 
 
 class ReinstallResult(_ResultModel):
@@ -97,10 +107,12 @@ class ReinstallResult(_ResultModel):
 class RecordingStart(_ResultModel):
     started: Literal[True]
     tid: int
+    bid: str | None = None
 
 
 class _RecordingStartMetadata(_ResultModel):
     started: Literal[True]
+    bid: str | None = None
 
 
 class RecordingStop(_ResultModel):
@@ -110,15 +122,18 @@ class RecordingStop(_ResultModel):
     stopped_reason: Literal["user", "max_duration"]
     message: str
     tid: int
+    bid: str | None = None
 
 
 class ConsoleStarted(_ResultModel):
     started: Literal[True]
     tid: int
+    bid: str | None = None
 
 
 class _ConsoleStartedMetadata(_ResultModel):
     started: Literal[True]
+    bid: str | None = None
 
 
 class ConsoleCapture(_ResultModel):
@@ -128,6 +143,7 @@ class ConsoleCapture(_ResultModel):
     size_bytes: int
     truncated: bool
     tid: int
+    bid: str | None = None
 
 
 class _ConsoleCaptureMetadata(_ResultModel):
@@ -136,6 +152,7 @@ class _ConsoleCaptureMetadata(_ResultModel):
     entries: int
     size_bytes: int
     truncated: bool
+    bid: str | None = None
 
 
 class ProxySet(_ResultModel):
@@ -144,6 +161,7 @@ class ProxySet(_ResultModel):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
     authenticated: bool
+    bid: str | None = None
 
 
 class _ProxySetMetadata(_ResultModel):
@@ -152,20 +170,24 @@ class _ProxySetMetadata(_ResultModel):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
     authenticated: bool
+    bid: str | None = None
 
 
 class ProxyUnset(_ResultModel):
     proxied: Literal[False]
+    bid: str | None = None
 
 
 class _ProxyUnsetMetadata(_ResultModel):
     proxied: Literal[False]
+    bid: str | None = None
 
 
 class _ScreenshotMetadata(_ResultModel):
     url: str = Field(min_length=1)
     content_type: Literal["image/png"]
     full_page: bool
+    bid: str | None = None
 
 
 class _RecordingStopMetadata(_ResultModel):
@@ -174,6 +196,7 @@ class _RecordingStopMetadata(_ResultModel):
     duration: float
     stopped_reason: Literal["user", "max_duration"]
     message: str = Field(min_length=1)
+    bid: str | None = None
 
 
 class BatchResultEntry(_ResultModel):
@@ -181,6 +204,7 @@ class BatchResultEntry(_ResultModel):
 
     result: JsonValue = None
     error: str | None = None
+    bid: str | None = None
 
     @model_validator(mode="after")
     def validate_entry(self) -> Self:
@@ -194,6 +218,7 @@ class Screenshot(_ResultModel):
     content_type: Literal["image/png"]
     full_page: bool
     tid: int
+    bid: str | None = None
 
 
 _LISTED_TABS_ADAPTER = TypeAdapter(list[ListedTab])
@@ -305,10 +330,20 @@ class ACOBClient:
         )
         return self._expect_model(result, ApiDocumentation, "api")
 
-    async def submit(self, action: str, /, **payload: JsonValue) -> JsonObject:
+    async def submit(
+        self,
+        action: str,
+        /,
+        *,
+        bid: str | None = None,
+        **payload: JsonValue,
+    ) -> JsonObject:
         """Submit an instruction without waiting for Chromium to execute it."""
+        self._validate_bid(bid)
         body = dict(payload)
         body["action"] = action
+        if bid is not None:
+            body["bid"] = bid
         return await self._request_json(
             "POST",
             f"{self._instructions_url}/",
@@ -322,7 +357,7 @@ class ACOBClient:
         *,
         timeout: float | None = None,
     ) -> JsonObject:
-        """Wait for and return an instruction's one-use terminal response."""
+        """Wait for and return an instruction's persistent terminal response."""
         if (
             isinstance(instruction_id, bool)
             or not isinstance(instruction_id, int)
@@ -377,10 +412,11 @@ class ACOBClient:
         /,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
         **payload: JsonValue,
     ) -> JsonValue:
         """Submit an action, wait for it, and return its browser result."""
-        instruction = await self.submit(action, **payload)
+        instruction = await self.submit(action, bid=bid, **payload)
         instruction_id = instruction.get("id")
         if (
             isinstance(instruction_id, bool)
@@ -392,9 +428,38 @@ class ACOBClient:
         terminal = await self.wait(instruction_id, timeout=timeout)
         if terminal.get("status") == "failed":
             raise ACOBInstructionError(instruction_id, terminal)
-        return terminal.get("result")
+        return self._with_bid(terminal.get("result"), terminal, bid)
 
-    async def submit_batch(self, actions: Sequence[JsonObject], /) -> JsonObject:
+    @staticmethod
+    def _with_bid(
+        result: JsonValue,
+        terminal: JsonObject,
+        bid: str | None,
+    ) -> JsonValue:
+        """Attach the instruction's bid to a dict result when missing.
+
+        New servers report the bid on the terminal instruction response
+        (target while pending, executor after completion); old servers omit
+        it. Fall back to the requested bid so targeted calls still echo.
+        """
+        if not isinstance(result, dict) or "bid" in result:
+            return result
+        terminal_bid = terminal.get("bid")
+        if isinstance(terminal_bid, str) or (
+            terminal_bid is None and "bid" in terminal
+        ):
+            return {**result, "bid": terminal_bid}
+        if bid is not None:
+            return {**result, "bid": bid}
+        return result
+
+    async def submit_batch(
+        self,
+        actions: Sequence[JsonObject],
+        /,
+        *,
+        bid: str | None = None,
+    ) -> JsonObject:
         """Submit a batch of instructions that run sequentially in the browser.
 
         Each entry is a complete instruction request, e.g.
@@ -407,10 +472,13 @@ class ACOBClient:
         for action in actions:
             if not isinstance(action, dict):
                 raise TypeError("each action must be an instruction object")
+        self._validate_bid(bid)
         body: JsonObject = {
             "action": "batch",
             "actions": [dict(action) for action in actions],
         }
+        if bid is not None:
+            body["bid"] = bid
         return await self._request_json(
             "POST",
             f"{self._instructions_url}/batch/",
@@ -424,6 +492,7 @@ class ACOBClient:
         /,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> list[BatchResultEntry]:
         """Submit a batch and wait for every action to finish.
 
@@ -431,7 +500,7 @@ class ACOBClient:
         one ``BatchResultEntry`` per action, in order. A failed action does
         not stop the rest of the batch; check each entry's ``error`` field.
         """
-        instruction = await self.submit_batch(actions)
+        instruction = await self.submit_batch(actions, bid=bid)
         instruction_id = instruction.get("id")
         if (
             isinstance(instruction_id, bool)
@@ -444,20 +513,36 @@ class ACOBClient:
         if terminal.get("status") == "failed":
             raise ACOBInstructionError(instruction_id, terminal)
         try:
-            return _BATCH_RESULTS_ADAPTER.validate_python(
+            entries = _BATCH_RESULTS_ADAPTER.validate_python(
                 terminal.get("result"),
                 strict=True,
             )
         except ValidationError as error:
             raise ACOBProtocolError("batch returned an invalid result") from error
+        resolved_bid = terminal.get("bid") if "bid" in terminal else bid
+        if resolved_bid is not None and not isinstance(resolved_bid, str):
+            resolved_bid = bid
+        for entry in entries:
+            if entry.bid is None:
+                entry.bid = resolved_bid
+        return entries
 
-    async def list(self, *, timeout: float | None = None) -> list[ListedTab]:
+    async def list(
+        self,
+        *,
+        timeout: float | None = None,
+        bid: str | None = None,
+    ) -> list[ListedTab]:
         """List Chromium tabs."""
-        result = await self.execute("list", timeout=timeout)
+        result = await self.execute("list", timeout=timeout, bid=bid)
         try:
-            return _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
+            tabs = _LISTED_TABS_ADAPTER.validate_python(result, strict=True)
         except ValidationError as error:
             raise ACOBProtocolError("list returned an invalid result") from error
+        for tab in tabs:
+            if tab.bid is None:
+                tab.bid = bid
+        return tabs
 
     async def navigate(
         self,
@@ -465,13 +550,14 @@ class ACOBClient:
         *,
         tid: int | None = None,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> Tab:
         """Navigate a tab, or create an inactive tab when tid is omitted."""
         payload: JsonObject = {"url": url}
         if tid is not None:
             payload["tid"] = tid
         return self._expect_model(
-            await self.execute("navigate", timeout=timeout, **payload),
+            await self.execute("navigate", timeout=timeout, bid=bid, **payload),
             Tab,
             "navigate",
         )
@@ -481,10 +567,11 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> Tab:
         """Activate a Chromium tab and focus its browser window."""
         return self._expect_model(
-            await self.execute("focus", tid=tid, timeout=timeout),
+            await self.execute("focus", tid=tid, timeout=timeout, bid=bid),
             Tab,
             "focus",
         )
@@ -494,10 +581,11 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ClosedTab:
         """Close a Chromium tab."""
         return self._expect_model(
-            await self.execute("close", tid=tid, timeout=timeout),
+            await self.execute("close", tid=tid, timeout=timeout, bid=bid),
             ClosedTab,
             "close",
         )
@@ -507,10 +595,11 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> Tab:
         """Reload a Chromium tab and wait for it to load."""
         return self._expect_model(
-            await self.execute("reload", tid=tid, timeout=timeout),
+            await self.execute("reload", tid=tid, timeout=timeout, bid=bid),
             Tab,
             "reload",
         )
@@ -521,10 +610,11 @@ class ACOBClient:
         y: float,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ScrollResult:
         """Scroll a Chromium tab vertically by y CSS pixels."""
         return self._expect_model(
-            await self.execute("scroll", tid=tid, y=y, timeout=timeout),
+            await self.execute("scroll", tid=tid, y=y, timeout=timeout, bid=bid),
             ScrollResult,
             "scroll",
         )
@@ -533,6 +623,7 @@ class ACOBClient:
         self,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> CleanupResult:
         """Clear all browser data (cookies, storage, history, cache).
 
@@ -541,7 +632,7 @@ class ACOBClient:
         setting is enabled in its popup; otherwise the instruction fails.
         """
         return self._expect_model(
-            await self.execute("cleanup", timeout=timeout),
+            await self.execute("cleanup", timeout=timeout, bid=bid),
             CleanupResult,
             "cleanup",
         )
@@ -552,6 +643,7 @@ class ACOBClient:
         selector: str,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ClickResult:
         """Click the center of the element matching a CSS selector."""
         return self._expect_model(
@@ -560,6 +652,7 @@ class ACOBClient:
                 tid=tid,
                 selector=selector,
                 timeout=timeout,
+                bid=bid,
             ),
             ClickResult,
             "click",
@@ -574,6 +667,7 @@ class ACOBClient:
         key: None = None,
         modifiers: None = None,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> KeyboardTextResult: ...
 
     @overload
@@ -585,9 +679,10 @@ class ACOBClient:
         key: str,
         modifiers: Sequence[KeyboardModifier] | None = None,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> KeyboardKeyResult: ...
 
-    async def keyboard(
+    async def keyboard(  # noqa: PLR0913
         self,
         tid: int,
         *,
@@ -595,6 +690,7 @@ class ACOBClient:
         key: str | None = None,
         modifiers: Sequence[KeyboardModifier] | None = None,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> KeyboardTextResult | KeyboardKeyResult:
         """Insert text or dispatch one key to the focused page control."""
         payload: JsonObject = {"tid": tid}
@@ -604,7 +700,7 @@ class ACOBClient:
             payload["key"] = key
         if modifiers is not None:
             payload["modifiers"] = list(modifiers)
-        result = await self.execute("keyboard", timeout=timeout, **payload)
+        result = await self.execute("keyboard", timeout=timeout, bid=bid, **payload)
         if text is not None:
             return self._expect_model(result, KeyboardTextResult, "keyboard")
         return self._expect_model(result, KeyboardKeyResult, "keyboard")
@@ -615,6 +711,7 @@ class ACOBClient:
         *,
         full_page: bool = True,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> Screenshot:
         """Capture a tab and return its public download URL.
 
@@ -628,6 +725,7 @@ class ACOBClient:
                 tid=tid,
                 full_page=full_page,
                 timeout=timeout,
+                bid=bid,
             ),
             _ScreenshotMetadata,
             "screenshot",
@@ -638,6 +736,7 @@ class ACOBClient:
             content_type=result.content_type,
             full_page=result.full_page,
             tid=tid,
+            bid=result.bid if result.bid is not None else bid,
         )
 
     @overload
@@ -648,6 +747,7 @@ class ACOBClient:
         *,
         full_page: bool = False,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> RecordingStart: ...
 
     @overload
@@ -657,6 +757,7 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> RecordingStop: ...
 
     async def record(
@@ -666,6 +767,7 @@ class ACOBClient:
         *,
         full_page: bool = False,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> RecordingStart | RecordingStop:
         """Start or stop a video recording of a tab, keyed by tab.
 
@@ -686,13 +788,20 @@ class ACOBClient:
                     tid=tid,
                     full_page=full_page,
                     timeout=timeout,
+                    bid=bid,
                 ),
                 _RecordingStartMetadata,
                 "record",
             )
-            return RecordingStart(started=result.started, tid=tid)
+            return RecordingStart(
+                started=result.started,
+                tid=tid,
+                bid=result.bid if result.bid is not None else bid,
+            )
         result_stop = self._expect_model(
-            await self.execute("record", method="stop", tid=tid, timeout=timeout),
+            await self.execute(
+                "record", method="stop", tid=tid, timeout=timeout, bid=bid
+            ),
             _RecordingStopMetadata,
             "record",
         )
@@ -704,6 +813,7 @@ class ACOBClient:
             stopped_reason=result_stop.stopped_reason,
             message=result_stop.message,
             tid=tid,
+            bid=result_stop.bid if result_stop.bid is not None else bid,
         )
 
     @overload
@@ -713,6 +823,7 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ConsoleStarted: ...
 
     @overload
@@ -722,6 +833,7 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ConsoleCapture: ...
 
     async def console(
@@ -730,6 +842,7 @@ class ACOBClient:
         tid: int,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ConsoleStarted | ConsoleCapture:
         """Start, snapshot, or stop console message capture for a tab.
 
@@ -748,17 +861,23 @@ class ACOBClient:
                     method="start",
                     tid=tid,
                     timeout=timeout,
+                    bid=bid,
                 ),
                 _ConsoleStartedMetadata,
                 "console",
             )
-            return ConsoleStarted(started=result.started, tid=tid)
+            return ConsoleStarted(
+                started=result.started,
+                tid=tid,
+                bid=result.bid if result.bid is not None else bid,
+            )
         result_capture = self._expect_model(
             await self.execute(
                 "console",
                 method=method,
                 tid=tid,
                 timeout=timeout,
+                bid=bid,
             ),
             _ConsoleCaptureMetadata,
             "console",
@@ -771,6 +890,7 @@ class ACOBClient:
             size_bytes=result_capture.size_bytes,
             truncated=result_capture.truncated,
             tid=tid,
+            bid=result_capture.bid if result_capture.bid is not None else bid,
         )
 
     @overload
@@ -780,6 +900,7 @@ class ACOBClient:
         *,
         proxy: str,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ProxySet: ...
 
     @overload
@@ -788,6 +909,7 @@ class ACOBClient:
         method: Literal["unset"],
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ProxyUnset: ...
 
     async def proxy(
@@ -796,6 +918,7 @@ class ACOBClient:
         *,
         proxy: str | None = None,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> ProxySet | ProxyUnset:
         """Set or unset the browser-wide egress proxy.
 
@@ -812,7 +935,9 @@ class ACOBClient:
             if len(proxy) > MAX_PROXY_LENGTH:
                 raise ValueError("proxy string is too long")
             result = self._expect_model(
-                await self.execute("proxy", method="set", proxy=proxy, timeout=timeout),
+                await self.execute(
+                    "proxy", method="set", proxy=proxy, timeout=timeout, bid=bid
+                ),
                 _ProxySetMetadata,
                 "proxy",
             )
@@ -822,15 +947,19 @@ class ACOBClient:
                 host=result.host,
                 port=result.port,
                 authenticated=result.authenticated,
+                bid=result.bid if result.bid is not None else bid,
             )
         if proxy is not None:
             raise ValueError("proxy must not be provided when method is 'unset'")
         result_unset = self._expect_model(
-            await self.execute("proxy", method="unset", timeout=timeout),
+            await self.execute("proxy", method="unset", timeout=timeout, bid=bid),
             _ProxyUnsetMetadata,
             "proxy",
         )
-        return ProxyUnset(proxied=result_unset.proxied)
+        return ProxyUnset(
+            proxied=result_unset.proxied,
+            bid=result_unset.bid if result_unset.bid is not None else bid,
+        )
 
     async def javascript(
         self,
@@ -838,6 +967,7 @@ class ACOBClient:
         script: str,
         *,
         timeout: float | None = None,
+        bid: str | None = None,
     ) -> JsonValue:
         """Evaluate JavaScript in a tab and return its value."""
         return await self.execute(
@@ -845,6 +975,7 @@ class ACOBClient:
             tid=tid,
             script=script,
             timeout=timeout,
+            bid=bid,
         )
 
     async def reinstall(self) -> ReinstallResult:
@@ -930,6 +1061,13 @@ class ACOBClient:
     def _validate_tid(tid: int) -> None:
         if isinstance(tid, bool) or not isinstance(tid, int) or tid <= 0:
             raise ValueError("tid must be a positive integer")
+
+    @staticmethod
+    def _validate_bid(bid: str | None) -> None:
+        if bid is None:
+            return
+        if not isinstance(bid, str) or BID_PATTERN.fullmatch(bid) is None:
+            raise ValueError("bid must be 32 lowercase hex characters")
 
     @staticmethod
     def _expect_model(

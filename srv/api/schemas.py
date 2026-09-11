@@ -22,6 +22,7 @@ NonEmptyString = Annotated[
 NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
 Tid = Annotated[int, Field(gt=0)]
 ScrollY = Annotated[float, Field(allow_inf_nan=False)]
+Bid = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 MAX_SCREENSHOT_BASE64_LENGTH = 30 * 1024 * 1024
 MAX_RECORDING_BASE64_LENGTH = 512 * 1024 * 1024
 # Console buffers are capped raw (10 MiB max setting); base64 inflates by 4/3.
@@ -72,12 +73,14 @@ class JavaScriptInstruction(ApiModel):
     action: Literal["javascript"]
     tid: Tid
     script: NonEmptyString
+    bid: Bid | None = None
 
 
 class ClickInstruction(ApiModel):
     action: Literal["click"]
     tid: Tid
     selector: NonEmptyString
+    bid: Bid | None = None
 
 
 class KeyboardInstruction(ApiModel):
@@ -88,6 +91,7 @@ class KeyboardInstruction(ApiModel):
     modifiers: list[Literal["alt", "ctrl", "meta", "shift"]] = Field(
         default_factory=list
     )
+    bid: Bid | None = None
 
     @model_validator(mode="after")
     def validate_input(self) -> Self:
@@ -110,6 +114,7 @@ class ScreenshotInstruction(ApiModel):
     action: Literal["screenshot"]
     tid: Tid
     full_page: bool = True
+    bid: Bid | None = None
 
 
 def _parse_proxy_string(value: str) -> tuple[str, str, int, bool]:
@@ -161,6 +166,7 @@ class ProxyInstruction(ApiModel):
     action: Literal["proxy"]
     method: Literal["set", "unset"]
     proxy: ProxyString | None = None
+    bid: Bid | None = None
 
     @model_validator(mode="after")
     def validate_proxy(self) -> Self:
@@ -178,6 +184,7 @@ class RecordInstruction(ApiModel):
     method: Literal["start", "stop"]
     tid: Tid
     full_page: bool = False
+    bid: Bid | None = None
 
     @model_validator(mode="after")
     def validate_record(self) -> Self:
@@ -190,41 +197,49 @@ class ConsoleInstruction(ApiModel):
     action: Literal["console"]
     method: Literal["start", "capture", "stop"]
     tid: Tid
+    bid: Bid | None = None
 
 
 class ListInstruction(ApiModel):
     action: Literal["list"]
+    bid: Bid | None = None
 
 
 class CleanupInstruction(ApiModel):
     action: Literal["cleanup"]
+    bid: Bid | None = None
 
 
 class CloseInstruction(ApiModel):
     action: Literal["close"]
     tid: Tid
+    bid: Bid | None = None
 
 
 class FocusInstruction(ApiModel):
     action: Literal["focus"]
     tid: Tid
+    bid: Bid | None = None
 
 
 class NavigateInstruction(ApiModel):
     action: Literal["navigate"]
     url: NonEmptyString
     tid: Tid | None = None
+    bid: Bid | None = None
 
 
 class ReloadInstruction(ApiModel):
     action: Literal["reload"]
     tid: Tid
+    bid: Bid | None = None
 
 
 class ScrollInstruction(ApiModel):
     action: Literal["scroll"]
     tid: Tid
     y: ScrollY
+    bid: Bid | None = None
 
 
 InstructionRequest = Annotated[
@@ -255,6 +270,7 @@ class BatchInstructionRequest(ApiModel):
         min_length=1,
         max_length=MAX_BATCH_ACTIONS,
     )
+    bid: Bid | None = None
 
 
 class ScreenshotResult(ApiModel):
@@ -333,6 +349,7 @@ class CleanupResult(ApiModel):
 class InstructionResultRequest(ApiModel):
     result: JsonValue = None
     error: NonEmptyString | None = None
+    bid: Bid | None = None
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:
@@ -350,6 +367,7 @@ batch_results_adapter: TypeAdapter[BatchResultList] = TypeAdapter(BatchResultLis
 
 class NextInstructionsQuery(ApiModel):
     limit: int = Field(default=1, ge=1, le=MAX_INSTRUCTION_CLAIM_LIMIT)
+    bid: Bid | None = None
 
 
 class ReinstallAcknowledgement(ApiModel):
@@ -378,6 +396,7 @@ class InstructionResponse(ApiModel):
     # Stored instructions can outlive the request schema that accepted them.
     action: str
     payload: dict[str, JsonValue]
+    bid: Bid | None = None
     status: Literal["pending", "processing", "completed", "failed"]
     result: JsonValue = None
     error: str | None = None
@@ -391,6 +410,7 @@ class InstructionResponse(ApiModel):
                 "id": instruction.id,
                 "action": instruction.action,
                 "payload": instruction.payload,
+                "bid": instruction.bid,
                 "status": instruction.status,
                 "result": instruction.result,
                 "error": instruction.error or None,

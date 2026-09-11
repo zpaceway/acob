@@ -18,7 +18,7 @@ import {
   runInBrowserInputQueue,
 } from "./input.js";
 import { executeProxy } from "./proxy.js";
-import { instructionApiUrl } from "./lifecycle.js";
+import { instructionResultUrl } from "./lifecycle.js";
 import { state } from "./state.js";
 import {
   createTabWithinLimit,
@@ -29,6 +29,7 @@ import {
 } from "./tabs.js";
 import { assertSupportedInstruction } from "./validation.js";
 import type {
+  Bid,
   ClaimedInstruction,
   Configuration,
   ExtensionInstructionResult,
@@ -287,8 +288,9 @@ export async function sendResult(
   instructionId: number,
   body: InstructionResultRequest,
   configuration: Configuration,
+  bid: Bid,
 ): Promise<void> {
-  const apiUrl = instructionApiUrl(configuration);
+  const resultUrl = instructionResultUrl(configuration, instructionId);
   for (
     let attempt = 1;
     attempt <= configuration.resultRetryAttempts;
@@ -298,10 +300,10 @@ export async function sendResult(
       return;
     }
     try {
-      const response = await fetch(`${apiUrl}/${instructionId}/result/`, {
+      const response = await fetch(resultUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, bid }),
         signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
       });
 
@@ -326,8 +328,16 @@ export async function sendResult(
 export async function executeInstruction(
   instruction: ClaimedInstruction,
   configuration: Configuration,
+  bid: Bid,
 ): Promise<void> {
   if (state.reinstallScheduled) {
+    return;
+  }
+  if (
+    instruction.bid !== undefined &&
+    instruction.bid !== null &&
+    instruction.bid !== bid
+  ) {
     return;
   }
   let body: InstructionResultRequest;
@@ -343,5 +353,5 @@ export async function executeInstruction(
   if (state.reinstallScheduled) {
     return;
   }
-  await sendResult(instruction.id, body, configuration);
+  await sendResult(instruction.id, body, configuration, bid);
 }

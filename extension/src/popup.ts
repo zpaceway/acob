@@ -1,3 +1,4 @@
+import { getOrCreateBid, rotateBid } from "./bid.js";
 import { ACOBSettings } from "./settings.js";
 import type {
   GetConfigurationMessage,
@@ -27,6 +28,8 @@ const configurationFields = requireElement(
 );
 const status = requireElement("#status", HTMLParagraphElement);
 const settingInputs = new Map<SettingName, HTMLInputElement>();
+let bidInput: HTMLInputElement | null = null;
+let currentBid = "";
 let statusDurationMs =
   ACOBSettings.definitions.popupStatusDurationMs.defaultValue;
 
@@ -127,6 +130,67 @@ function buildCheckboxField(name: SettingName): void {
   settingInputs.set(name, input);
 }
 
+function buildBidField(): void {
+  const label = document.createElement("label");
+  label.htmlFor = "bid";
+  label.textContent = "Browser ID (bid)";
+  label.className = "mb-[7px] block text-[13px] font-semibold text-label";
+
+  const row = document.createElement("div");
+  row.className = "flex gap-2";
+
+  const input = document.createElement("input");
+  input.id = "bid";
+  input.name = "bid";
+  input.type = "text";
+  input.readOnly = true;
+  input.spellcheck = false;
+  input.className =
+    "h-[42px] w-full rounded-[7px] border border-field-border bg-field px-[11px] text-white outline-none focus:border-acid focus:ring-3 focus:ring-acid/10 read-only:font-mono read-only:text-xs read-only:text-acid";
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "Copy";
+  copyButton.className =
+    "h-[42px] shrink-0 cursor-pointer rounded-[7px] border border-secondary-border bg-secondary px-[12px] text-xs font-bold text-ink hover:brightness-125";
+
+  const rotateButton = document.createElement("button");
+  rotateButton.type = "button";
+  rotateButton.textContent = "Rotate";
+  rotateButton.className =
+    "h-[42px] shrink-0 cursor-pointer rounded-[7px] border border-secondary-border bg-secondary px-[12px] text-xs font-bold text-ink hover:brightness-125";
+
+  copyButton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(currentBid);
+      showStatus("Browser ID copied");
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  rotateButton.addEventListener("click", async () => {
+    try {
+      currentBid = await rotateBid();
+      input.value = currentBid;
+      showStatus("Browser ID rotated");
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  row.append(input, copyButton, rotateButton);
+
+  const hint = document.createElement("p");
+  hint.className =
+    "mt-1.5 mb-[18px] min-h-[18px] text-[11px] leading-normal text-muted";
+  hint.textContent =
+    "Unique per-browser identity used for targeted instructions. Read-only; use Rotate to generate a new one.";
+
+  configurationFields.append(label, row, hint);
+  bidInput = input;
+}
+
 function inputValue(
   name: SettingName,
   input: HTMLInputElement,
@@ -169,6 +233,10 @@ async function loadConfiguration(): Promise<void> {
     setInputValue(input, configuration[name]);
   }
   statusDurationMs = configuration.popupStatusDurationMs;
+  currentBid = await getOrCreateBid();
+  if (bidInput) {
+    bidInput.value = currentBid;
+  }
 }
 
 form.addEventListener("submit", async (event) => {
@@ -208,6 +276,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 buildConfigurationFields();
+buildBidField();
 loadConfiguration().catch((error) => {
   status.textContent = error instanceof Error ? error.message : String(error);
 });

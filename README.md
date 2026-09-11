@@ -17,7 +17,7 @@ its source, dependencies, tooling, and documentation in its own directory.
 | [`client/`](client/README.md) | Independently installable Python API client. |
 | [`extension/`](extension/README.md) | Manifest V3 Chromium extension and TypeScript package. |
 | [`mcp/`](mcp/README.md) | Standalone Model Context Protocol service. |
-| [`srv/`](srv/README.md) | Django instruction API and SQLite queue. |
+| [`srv/`](srv/README.md) | Django instruction API and instruction queue (Postgres in Compose, SQLite fallback for local dev). |
 | [`proxy/`](proxy/README.md) | nginx image for single-port routing of API + MCP. |
 | [`web/`](web/README.md) | Buildless static marketing website. |
 
@@ -32,8 +32,8 @@ by each component and can be run with `make -C <directory>` or
 ## Local setup
 
 The server requires Python 3.14 or newer and
-[`uv`](https://docs.astral.sh/uv/). Install its dependencies, prepare SQLite,
-and start Django:
+[`uv`](https://docs.astral.sh/uv/). Install its dependencies, apply migrations,
+and start Django (SQLite fallback, no external DB needed):
 
 ```bash
 uv --directory srv sync
@@ -57,8 +57,8 @@ make install PORT=58346 NAME=default
 ```
 
 This uses context and Compose project `acob-58346-default` and starts an isolated
-Compose project with its own network, server-data volume, and persistent browser
-profile. The proxy publishes the API and MCP port on `127.0.0.1`. The browser
+Compose project with its own network, `srv-data` (media) and `db-data`
+(Postgres) volumes, and an ephemeral browser profile. The proxy publishes the API and MCP port on `127.0.0.1`. The browser
 runs Chromium as a non-root process on an Xvfb virtual display and loads the
 ACOB extension from its image automatically. The install target builds
 `extension/dist/` with `http://acob-proxy` as its initial server URL and passes
@@ -90,9 +90,11 @@ hyphen. Compose network, volume, container, and image resources use the project
 prefix. The `install-opencode` and `install-claude` targets also use the context
 as their default MCP registration name.
 
-Each stack has one global instruction queue and one managed browser. Do not
-point another extension at that stack because either executor may claim pending
-work. Instead, install another complete stack on a distinct proxy port:
+Each stack has one global instruction queue and one managed browser. Untargeted
+instructions (no `bid`) may be claimed by any connected browser, so for
+deterministic ownership run one extension per stack or target each instruction
+with that browser's `bid` (see [API](#api)). Instead of sharing one stack,
+install another complete stack on a distinct proxy port:
 
 ```bash
 make install PORT=61001 NAME=secondary
@@ -103,8 +105,8 @@ volumes, and browser. Use the same `PORT` and `NAME` with root `make up`, `make
 down`, `make purge`, `make logs`, and `make ps`. Distinct
 installations still require distinct `PORT` values because only one process can
 bind a host port. Names are labels for user or work contexts; they do not add
-protocol routing or executor identity, and the queue remains promiscuous within
-each stack. See `compose.yaml` for lower-level service details and
+protocol routing beyond the per-browser `bid` target, and untargeted work
+remains claimable by any browser on that stack. See `compose.yaml` for lower-level service details and
 [`proxy/README.md`](proxy/README.md) for nginx routing details.
 
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
@@ -130,10 +132,38 @@ Individual services can be selected from the root file (for example
 `make -C srv dev` / `make -C mcp run`.
 
 Stop a root-managed stack with `make down PORT=58346 NAME=default`, or remove
-its volume as well with `make purge PORT=58346 NAME=default`. The proxy setup
+its volumes as well with `make purge PORT=58346 NAME=default`. The proxy setup
 binds
 `127.0.0.1:58346` by default. Native development ports remain `58347` for the
 API and `58348` for MCP.
+
+Compose runs five services (`acob-db`, `acob-srv`, `acob-mcp`, `acob-proxy`,
+`acob-browser`). `acob-db` is Postgres 17 with a project-scoped `db-data`
+volume; `acob-srv` waits for it, runs migrations, collects static files, and
+ensures a default admin. Media uploads persist in the project-scoped `srv-data`
+volume. `down` preserves both volumes; `purge` removes them. SQLite
+(`DATA_DIR/db.sqlite3`) remains only as a local-dev fallback when no Postgres
+is configured — see [`database/README.md`](database/README.md) and
+[`srv/README.md`](srv/README.md).
+
+Django admin is enabled at `/admin/` (e.g. `http://127.0.0.1:58346/admin/`
+through the proxy). Native `make -C srv dev` and the container entrypoint both
+run `manage.py ensure_superuser` (idempotent; `DJANGO_SUPERUSER_USERNAME` /
+`DJANGO_SUPERUSER_EMAIL` / `DJANGO_SUPERUSER_PASSWORD`, defaulting to
+`admin` / `admin@example.com` / `changeme` with a warning). Change it later
+with `manage.py changepassword`. Static files are served by Django via
+WhiteNoise from `STATIC_ROOT` (collected at image build and on container
+start), so admin CSS works with no nginx change.
+
+`DEBUG` comes from `ACOB_DEBUG` (fallback `DJANGO_DEBUG`, default `true` for
+native dev); Compose sets `ACOB_DEBUG=false`, and with `DEBUG=false` the server
+refuses to boot without `ACOB_SECRET_KEY` (fallback `DJANGO_SECRET_KEY`).
+`ALLOWED_HOSTS` (`ACOB_ALLOWED_HOSTS`, default `*`) and
+`CSRF_TRUSTED_ORIGINS` are env-driven. Database selection is
+`ACOB_DATABASE_URL` (fallback `DATABASE_URL`) or
+`ACOB_DB_HOST`/`ACOB_DB_NAME`/`ACOB_DB_USER`/`ACOB_DB_PASSWORD`/`ACOB_DB_PORT`
+(Compose: host `acob-db`, port `5432`, credentials from `POSTGRES_*`); with
+neither, the server falls back to local SQLite.
 
 ## Browser
 
@@ -175,9 +205,14 @@ newer:
 3. Select **Load unpacked** and choose `extension/dist/`.
 
 The extension source is strict TypeScript under `extension/src/`. It polls the
-single global queue at its configured stack endpoint; the protocol has no
-extension selector or identity field. Separate proxy ports and stack instances,
-not request routing fields, provide isolation. Extension settings remain local
+single global queue at its configured stack endpoint, identifying itself with
+its per-browser `bid` (32 lowercase hex, generated on install, stored in
+`chrome.storage.local`, shown read-only in the popup with Copy/Rotate). Every
+instruction request accepts an optional `bid` target; untargeted instructions
+are claimable by any browser while targeted ones only run on the matching
+browser, and every instruction response carries the target `bid` while pending
+and the executor `bid` after completion. Terminal instruction responses persist
+and repeated reads return the same envelope. Extension settings remain local
 to the extension and are known and controlled through its popup; they are not
 reported through a public API. See [`extension/README.md`](extension/README.md)
 for architecture, settings, permissions, package exports, and manual
@@ -221,7 +256,7 @@ python -m pip install ./client
 ```
 
 It exports the asynchronous `ACOBClient`, which submits instructions, waits for
-their one-use terminal responses without blocking the event loop, and returns
+their persistent terminal responses without blocking the event loop, and returns
 their browser results:
 
 ```python
@@ -259,7 +294,11 @@ command from the new worker. Processing instructions interrupted by the
 restart fail explicitly instead of remaining stuck indefinitely.
 
 `ACOBClient()` defaults to the proxy at `http://127.0.0.1:58346`. Pass only
-`endpoint="http://127.0.0.1:61001"` to target another local stack. Independent
+`endpoint="http://127.0.0.1:61001"` to target another local stack. Pass
+`bid="<32 lowercase hex>"` to any action (or `submit`/`execute`/`execute_batch`)
+to target one browser — copy it from the extension popup's read-only Browser ID
+field; omit it for untargeted work and read the executor `bid` from the result.
+Independent
 actions can be launched together with `asyncio.gather()`. See
 [`client/README.md`](client/README.md) for every action, parallel execution,
 low-level queue access, timeout behavior, and error types.
@@ -325,6 +364,8 @@ development, run `acob-srv` or another reachable ACOB API independently with
 MCP tools mirror the Python client's high-level methods: `api`, `list`, `navigate`,
 `focus`, `close`, `reload`, `scroll`, `click`, `keyboard`, `screenshot`,
 `record`, `proxy`, `cleanup`, `console`, `javascript`, and `reinstall`.
+Every browser tool except `api` and `reinstall` accepts an optional `bid`
+(32 lowercase hex) to target one browser; responses carry the executor `bid`.
 Structured results use SDK-generated output schemas. `screenshot` always
 returns the public download URL served by the ACOB server itself; neither the
 client nor the MCP server downloads the image, so the agent fetches the
@@ -372,11 +413,11 @@ The stack exposes one flat REST surface:
 | `GET` | `/api/` | Request-aware API links and usage guide. |
 | `GET` | `/api/docs/` | Locally hosted Swagger UI. |
 | `GET` | `/api/openapi.json` | OpenAPI 3.1 schemas and operation documentation. |
-| `POST` | `/api/instructions/` | Validate and enqueue one instruction. |
-| `POST` | `/api/instructions/batch/` | Validate and enqueue one sequential batch. |
-| `GET` | `/api/instructions/next/` | Claim pending work from the global queue. |
-| `GET` | `/api/instructions/<id>/` | Read instruction status or consume its terminal response. |
-| `POST` | `/api/instructions/<id>/result/` | Complete claimed work. |
+| `POST` | `/api/instructions/` | Validate and enqueue one instruction (optional `bid` target). |
+| `POST` | `/api/instructions/batch/` | Validate and enqueue one sequential batch (optional top-level `bid`). |
+| `GET` | `/api/instructions/next/` | Claim pending work from the global queue (`?bid=` + `?limit=`). |
+| `GET` | `/api/instructions/<id>/` | Read instruction status or terminal result (persistent; always includes `bid`). |
+| `POST` | `/api/instructions/<id>/result/` | Complete claimed work (executor `bid` in body or `?bid=`). |
 | `POST` | `/api/reinstall/` | Request a stack-global extension reinstall. |
 | `POST` | `/api/reinstall/acknowledge/` | Acknowledge reinstall from the restarted extension. |
 | `GET` | `/api/media/<filename>` | Download a hosted capture. |
@@ -412,6 +453,19 @@ Supported instructions:
 {"action":"console","method":"capture","tid":123}
 {"action":"console","method":"stop","tid":123}
 {"action":"javascript","tid":123,"script":"document.title"}
+```
+
+Every instruction request accepts an optional `bid` field: 32 lowercase hex
+(`uuid4().hex` without dashes, `^[0-9a-f]{32}$`). `batch` accepts it top-level
+for the whole cascade. `bid` is the target while the instruction is pending and
+the executor after it completes, and every instruction response always includes
+`bid` (`null` when untargeted/unclaimed). Copy the value from the extension
+popup's read-only Browser ID field (Rotate generates a new one):
+
+```json
+{"action":"list","bid":"0123456789abcdef0123456789abcdef"}
+{"action":"click","tid":123,"selector":"button","bid":"0123456789abcdef0123456789abcdef"}
+{"action":"batch","bid":"0123456789abcdef0123456789abcdef","actions":[{"action":"list"}]}
 ```
 
 `list` returns each tab's `tid`, window ID, domain, URL, title, active state,
@@ -463,7 +517,7 @@ The server stores the capture locally under its media root and serves the
 bytes at `/api/media/<filename>`; the instruction result carries only that
 URL. Clients and the MCP server relay the URL without downloading it; fetching
 the image is left to the user or agent. Media reads do not delete files;
-Compose persists them in the server-data volume until it is purged. When
+Compose persists them in the `srv-data` volume until it is purged. When
 storing the capture fails, the instruction completes as failed with a clear
 error. Encoded captures are limited to 30 MiB; larger captures complete as
 failed instructions rather than being submitted.
@@ -677,13 +731,18 @@ instruction, so actions submitted outside a batch still run in parallel with
 each other. Recordings are keyed by tab, so a batch can start recordings on
 different tabs; starting twice on the same tab fails the second entry.
 
-Any polling extension can claim queued work with
-`GET /api/instructions/next/?limit=4`. `limit` is optional, defaults to 1, and
-accepts values from 1 through 20. A successful response is an array of up to
-`limit` instructions whose status has been changed to `processing`; an empty
-queue returns `204 No Content`. While a reinstall is pending, the response is
-a single `reinstall` command instead of queued work. This claim route is
-promiscuous by design: it has no executor selection or affinity.
+Any polling extension claims queued work with
+`GET /api/instructions/next/?bid=<bid>&limit=4`. `limit` is optional, defaults
+to 1, and accepts values from 1 through 20; `bid` is the claimant's browser ID
+(32 lowercase hex). A claimant with a `bid` receives untargeted instructions
+plus ones targeted at it; a claimant without a `bid` receives only untargeted
+work. A successful response is an array of up to `limit` instructions whose
+status has been changed to `processing`; an empty queue returns `204 No
+Content`. While a reinstall is pending, the response is a single `reinstall`
+command instead of queued work. The extension sends its `bid` on every poll and
+submits it in the result body (`bid` body field or `?bid=` query), so
+untargeted completions record which browser executed them; a targeted
+instruction keeps its target `bid`.
 
 Use the ID returned when creating an instruction to retrieve its status and result:
 
@@ -691,7 +750,11 @@ Use the ID returned when creating an instruction to retrieve its status and resu
 curl "http://127.0.0.1:58347/api/instructions/1/"
 ```
 
-Reads are non-destructive while the instruction is `pending` or `processing`. The first detail request after it becomes `completed` or `failed` returns the terminal response and deletes the instruction. Every later request for that ID returns 404. Capture the complete terminal response from the polling request; do not issue another request to fetch its result.
+Reads are always non-destructive. Terminal (`completed`/`failed`) instructions
+persist: repeated detail requests return the same envelope. Only `pending`
+instructions are claimable, so completed work is never re-gathered. The response
+always includes `bid`: the target while pending, the executor after completion
+(`null` when untargeted/unclaimed).
 
 Invalid requests return an `Invalid request` error with a `details` list containing the field, message, and validation type for each problem.
 
@@ -708,12 +771,13 @@ An extension completes claimed work with
 `POST /api/instructions/<id>/result/`. Media remains available at
 `/api/media/<filename>`.
 
-ACOB's shipped architecture is local-only. It has no authentication, executor
-identity, queue affinity, or claim leases, and one stack must not be used as a
-network or enterprise control plane unchanged. Such use requires an adapted
-deployment and protocol with authentication and authorization, explicit
-executor identity and affinity, leases, secure transport, and appropriate
-auditing and policy controls.
+ACOB's shipped architecture is local-only. It has no authentication or claim
+leases, and one stack must not be used as a network or enterprise control plane
+unchanged; per-browser `bid` targeting is a routing hint, not an identity or
+authorization boundary, and untargeted work remains claimable by any connected
+browser. Such use requires an adapted deployment and protocol with
+authentication and authorization, explicit executor identity and affinity,
+leases, secure transport, and appropriate auditing and policy controls.
 
 ## Contributing and security
 

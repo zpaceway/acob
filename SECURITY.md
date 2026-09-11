@@ -40,8 +40,9 @@ extension uses Chromium's debugger API and host access for all URLs. The HTTP
 API can enqueue JavaScript, input, navigation, and screenshot instructions.
 
 The shipped architecture is local-only. It has no API authentication, executor
-identity, queue affinity, or claim leases. A stack has one global promiscuous
-queue, so any extension polling it may claim any pending instruction. It must
+identity, or claim leases. A stack has one global queue with per-browser `bid`
+targeting, but `bid` is a routing hint rather than an authorization boundary,
+so untargeted instructions remain claimable by any extension polling it. It must
 not be exposed to a network or treated as an enterprise control plane without
 adapting the architecture.
 

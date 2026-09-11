@@ -31,9 +31,11 @@ migrate:
 dev:
 	@echo "Starting development server..."
 	$(MAKE) migrate
+	-uv run manage.py ensure_superuser
 	uv run manage.py runserver $(ACOB_SRV_HOST):$(ACOB_SRV_PORT)
 
 run:
 	@echo "Starting ASGI server..."
 	$(MAKE) migrate
+	-uv run --no-sync manage.py ensure_superuser
 	uv run --no-sync uvicorn acob.asgi:application --host $(ACOB_SRV_HOST) --port $(ACOB_SRV_PORT)

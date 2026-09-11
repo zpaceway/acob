@@ -79,11 +79,10 @@ class InstructionApiTests(TestCase):
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], [])
         self.assertEqual(detail.headers["Cache-Control"], "no-store")
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
-        self.assertEqual(
-            self.client.get(self.instruction_path(f"{instruction_id}/")).status_code,
-            404,
-        )
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        reread = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(reread.status_code, 200)
+        self.assertEqual(reread.json()["result"], [])
         empty_queue = self.client.get(self.instruction_path("next/"))
         self.assertEqual(empty_queue.status_code, 204)
         self.assertEqual(empty_queue.headers["Cache-Control"], "no-store")
@@ -289,7 +288,10 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], completed.json()["result"])
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        reread = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(reread.status_code, 200)
+        self.assertEqual(reread.json()["result"], completed.json()["result"])
 
     def test_batch_reports_per_action_errors_without_stopping(self) -> None:
         created = self.post_json(
@@ -563,7 +565,10 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction.id}/"))
         self.assertEqual(detail.json()["error"], "Browser is unavailable")
-        self.assertFalse(Instruction.objects.filter(id=instruction.id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction.id).exists())
+        reread = self.client.get(self.instruction_path(f"{instruction.id}/"))
+        self.assertEqual(reread.status_code, 200)
+        self.assertEqual(reread.json()["error"], "Browser is unavailable")
 
     def test_rejects_invalid_instruction(self) -> None:
         response = self.post_json(
@@ -917,7 +922,13 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertEqual(
+            self.client.get(self.instruction_path(f"{instruction_id}/")).json()[
+                "result"
+            ],
+            result,
+        )
 
     def test_screenshot_fails_when_media_cannot_be_stored(self) -> None:
         created = self.post_json(
@@ -944,7 +955,13 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["error"], response["error"])
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertEqual(
+            self.client.get(self.instruction_path(f"{instruction_id}/")).json()[
+                "error"
+            ],
+            response["error"],
+        )
 
     def test_rejects_invalid_screenshot_result(self) -> None:
         created = self.post_json(
@@ -1106,7 +1123,13 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertEqual(
+            self.client.get(self.instruction_path(f"{instruction_id}/")).json()[
+                "result"
+            ],
+            result,
+        )
 
     def test_record_stop_fails_when_media_unstorable(self) -> None:
         created = self.post_json(
@@ -1537,7 +1560,13 @@ class InstructionApiTests(TestCase):
 
         detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
         self.assertEqual(detail.json()["result"], result)
-        self.assertFalse(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+        self.assertEqual(
+            self.client.get(self.instruction_path(f"{instruction_id}/")).json()[
+                "result"
+            ],
+            result,
+        )
 
     def test_console_stop_result_stored_locally(self) -> None:
         document = b'[{"type":"error","text":"boom"}]'
@@ -1786,6 +1815,258 @@ class InstructionApiTests(TestCase):
             {"token": token},
         )
         self.assertEqual(repeated.status_code, 204)
+
+
+class BidTargetingTests(TestCase):
+    BID_A = "a" * 32
+    BID_B = "b" * 32
+    BID_C = "c" * 32
+
+    def instruction_path(self, suffix: str = "") -> str:
+        return f"/api/instructions/{suffix}"
+
+    def batch_path(self, suffix: str = "") -> str:
+        return f"/api/instructions/batch/{suffix}"
+
+    def post_json(self, path: str, data: object) -> _MonkeyPatchedWSGIResponse:
+        return self.client.post(
+            path,
+            data=json.dumps(data),
+            content_type="application/json",
+        )
+
+    def post_result(
+        self, instruction_id: int, data: object, query: str = ""
+    ) -> _MonkeyPatchedWSGIResponse:
+        return self.post_json(
+            self.instruction_path(f"{instruction_id}/result/{query}"),
+            data,
+        )
+
+    def test_create_persists_bid_and_response_always_has_bid(self) -> None:
+        untargeted = self.post_json(self.instruction_path(), {"action": "list"})
+        self.assertEqual(untargeted.status_code, 201)
+        self.assertIn("bid", untargeted.json())
+        self.assertIsNone(untargeted.json()["bid"])
+        self.assertEqual(untargeted.json()["payload"], {})
+
+        targeted = self.post_json(
+            self.instruction_path(),
+            {"action": "list", "bid": self.BID_A},
+        )
+        self.assertEqual(targeted.status_code, 201)
+        self.assertEqual(targeted.json()["bid"], self.BID_A)
+        self.assertEqual(targeted.json()["payload"], {})
+        self.assertNotIn("bid", targeted.json()["payload"])
+
+        untargeted_row = Instruction.objects.get(id=untargeted.json()["id"])
+        targeted_row = Instruction.objects.get(id=targeted.json()["id"])
+        self.assertIsNone(untargeted_row.bid)
+        self.assertEqual(targeted_row.bid, self.BID_A)
+
+    def test_rejects_invalid_bid(self) -> None:
+        for bad in ("ABC", "z" * 32, "A" * 32, "short", "a" * 31 + "-"):
+            with self.subTest(bad=bad):
+                response = self.post_json(
+                    self.instruction_path(),
+                    {"action": "list", "bid": bad},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"], "Invalid request")
+
+        batch_bad = self.post_json(
+            self.batch_path(),
+            {"action": "batch", "actions": [{"action": "list"}], "bid": "not-hex"},
+        )
+        self.assertEqual(batch_bad.status_code, 400)
+
+        claim_bad = self.client.get(self.instruction_path("next/?bid=not-hex"))
+        self.assertEqual(claim_bad.status_code, 400)
+        self.assertEqual(claim_bad.json()["error"], "Invalid request")
+
+    def test_untargeted_claimant_does_not_steal_targeted(self) -> None:
+        targeted = self.post_json(
+            self.instruction_path(),
+            {"action": "list", "bid": self.BID_A},
+        )
+        instruction_id = targeted.json()["id"]
+
+        empty = self.client.get(self.instruction_path("next/"))
+        self.assertEqual(empty.status_code, 204)
+
+        wrong = self.client.get(
+            self.instruction_path(f"next/?bid={self.BID_B}"),
+        )
+        self.assertEqual(wrong.status_code, 204)
+
+        row = Instruction.objects.get(id=instruction_id)
+        self.assertEqual(row.status, Instruction.Status.PENDING)
+
+        claimed = self.client.get(
+            self.instruction_path(f"next/?bid={self.BID_A}"),
+        )
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(claimed.json()[0]["id"], instruction_id)
+        self.assertEqual(claimed.json()[0]["bid"], self.BID_A)
+
+    def test_targeted_claim_returns_untargeted_plus_matching(self) -> None:
+        first = self.post_json(self.instruction_path(), {"action": "list"})
+        second = self.post_json(
+            self.instruction_path(),
+            {"action": "list", "bid": self.BID_A},
+        )
+        self.post_json(
+            self.instruction_path(),
+            {"action": "list", "bid": self.BID_B},
+        )
+        first_id = first.json()["id"]
+        second_id = second.json()["id"]
+
+        claimed = self.client.get(
+            self.instruction_path(f"next/?bid={self.BID_A}&limit=10"),
+        )
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(
+            [entry["id"] for entry in claimed.json()],
+            [first_id, second_id],
+        )
+        self.assertIsNone(claimed.json()[0]["bid"])
+        self.assertEqual(claimed.json()[1]["bid"], self.BID_A)
+
+        # Only the B-targeted instruction remains; untargeted claimants see nothing.
+        self.assertEqual(
+            self.client.get(self.instruction_path("next/")).status_code, 204
+        )
+        remaining = self.client.get(
+            self.instruction_path(f"next/?bid={self.BID_B}"),
+        )
+        self.assertEqual(remaining.status_code, 200)
+        self.assertEqual(remaining.json()[0]["bid"], self.BID_B)
+        self.assertEqual(
+            self.client.get(
+                self.instruction_path(f"next/?bid={self.BID_C}")
+            ).status_code,
+            204,
+        )
+
+    def test_complete_records_executor_bid_from_body(self) -> None:
+        created = self.post_json(self.instruction_path(), {"action": "list"})
+        instruction_id = created.json()["id"]
+        self.assertIsNone(created.json()["bid"])
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": [], "bid": self.BID_A},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["bid"], self.BID_A)
+
+        row = Instruction.objects.get(id=instruction_id)
+        self.assertEqual(row.bid, self.BID_A)
+        detail = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(detail.json()["bid"], self.BID_A)
+
+    def test_complete_records_executor_bid_from_query_param(self) -> None:
+        created = self.post_json(self.instruction_path(), {"action": "list"})
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": []},
+            query=f"?bid={self.BID_B}",
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["bid"], self.BID_B)
+        self.assertEqual(Instruction.objects.get(id=instruction_id).bid, self.BID_B)
+
+    def test_complete_keeps_target_bid_when_executor_differs(self) -> None:
+        created = self.post_json(
+            self.instruction_path(),
+            {"action": "list", "bid": self.BID_A},
+        )
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path(f"next/?bid={self.BID_A}"))
+
+        completed = self.post_result(
+            instruction_id,
+            {"result": [], "bid": self.BID_B},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.json()["bid"], self.BID_A)
+        self.assertEqual(Instruction.objects.get(id=instruction_id).bid, self.BID_A)
+
+    def test_complete_rejects_invalid_query_bid(self) -> None:
+        created = self.post_json(self.instruction_path(), {"action": "list"})
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+
+        rejected = self.post_result(
+            instruction_id,
+            {"result": []},
+            query="?bid=not-hex",
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+    def test_batch_bid_persisted_and_claim_filtered(self) -> None:
+        created = self.post_json(
+            self.batch_path(),
+            {
+                "action": "batch",
+                "actions": [{"action": "list"}],
+                "bid": self.BID_A,
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["bid"], self.BID_A)
+        self.assertEqual(
+            Instruction.objects.get(id=created.json()["id"]).bid, self.BID_A
+        )
+
+        self.assertEqual(
+            self.client.get(self.instruction_path("next/")).status_code, 204
+        )
+        claimed = self.client.get(
+            self.instruction_path(f"next/?bid={self.BID_A}"),
+        )
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(claimed.json()[0]["bid"], self.BID_A)
+
+    def test_terminal_responses_persist_and_are_never_requeued(self) -> None:
+        created = self.post_json(self.instruction_path(), {"action": "list"})
+        instruction_id = created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        completed = self.post_result(instruction_id, {"result": []})
+        self.assertEqual(completed.json()["status"], "completed")
+
+        first = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        second = self.client.get(self.instruction_path(f"{instruction_id}/"))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json(), second.json())
+        self.assertTrue(Instruction.objects.filter(id=instruction_id).exists())
+
+        failed_created = self.post_json(self.instruction_path(), {"action": "list"})
+        failed_id = failed_created.json()["id"]
+        self.client.get(self.instruction_path("next/"))
+        self.post_result(failed_id, {"error": "boom"})
+        failed_first = self.client.get(self.instruction_path(f"{failed_id}/"))
+        failed_second = self.client.get(self.instruction_path(f"{failed_id}/"))
+        self.assertEqual(failed_first.status_code, 200)
+        self.assertEqual(failed_second.json(), failed_first.json())
+        self.assertTrue(Instruction.objects.filter(id=failed_id).exists())
+
+        # Completed/failed rows are never claimed again.
+        self.assertEqual(
+            self.client.get(self.instruction_path("next/")).status_code, 204
+        )
+        self.assertEqual(
+            self.client.get(
+                self.instruction_path(f"next/?bid={self.BID_A}")
+            ).status_code,
+            204,
+        )
 
 
 class MediaStorageTests(TestCase):

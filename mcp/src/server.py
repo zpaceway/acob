@@ -51,7 +51,7 @@ from pydantic import (
 )
 from starlette.requests import Request
 
-SERVER_VERSION = "0.16.0"
+SERVER_VERSION = "0.17.0"
 SERVER_TITLE = "ACOB: Control the User's Chromium Browser"
 SERVER_DESCRIPTION = (
     "Operate the user's existing Chromium session through typed tools for tab "
@@ -70,6 +70,13 @@ SERVER_INSTRUCTIONS = (
     "Begin with list and identify the target from its title, URL, "
     "and domain before using a tab ID. Never guess a tab ID or alter an unrelated "
     "tab. Await navigation and use the returned tid before dependent actions.\n\n"
+    "Target a specific browser with the optional bid argument (32 lowercase hex "
+    "characters, e.g. the extension's browser ID shown read-only in its popup). "
+    "Untargeted calls (no bid) may be claimed and executed by any connected "
+    "browser; targeted calls only run on the matching browser. Every browser "
+    "response carries the bid of the browser that executed it, so a targeted "
+    "call echoes its bid and an untargeted call reports whichever browser "
+    "claimed it.\n\n"
     "Prefer list, navigate, focus, close, reload, scroll, click, and keyboard for "
     "normal browser interaction. Use screenshot to inspect visual state; it "
     "returns the public download URL served by the ACOB server, so "
@@ -130,21 +137,21 @@ NAMED_KEYS = {
 
 TOOL_ARGUMENT_NAMES = {
     "api": frozenset(),
-    "list": frozenset({"timeout"}),
-    "navigate": frozenset({"tid", "url", "timeout"}),
-    "focus": frozenset({"tid", "timeout"}),
-    "close": frozenset({"tid", "timeout"}),
-    "reload": frozenset({"tid", "timeout"}),
-    "scroll": frozenset({"tid", "y", "timeout"}),
-    "click": frozenset({"tid", "selector", "timeout"}),
-    "keyboard": frozenset({"tid", "text", "key", "modifiers", "timeout"}),
-    "screenshot": frozenset({"tid", "full_page", "timeout"}),
-    "record": frozenset({"method", "tid", "full_page", "timeout"}),
-    "console": frozenset({"method", "tid", "timeout"}),
-    "proxy": frozenset({"method", "proxy", "timeout"}),
-    "cleanup": frozenset({"timeout"}),
-    "javascript": frozenset({"tid", "script", "timeout"}),
-    "execute_batch": frozenset({"actions", "timeout"}),
+    "list": frozenset({"timeout", "bid"}),
+    "navigate": frozenset({"tid", "url", "timeout", "bid"}),
+    "focus": frozenset({"tid", "timeout", "bid"}),
+    "close": frozenset({"tid", "timeout", "bid"}),
+    "reload": frozenset({"tid", "timeout", "bid"}),
+    "scroll": frozenset({"tid", "y", "timeout", "bid"}),
+    "click": frozenset({"tid", "selector", "timeout", "bid"}),
+    "keyboard": frozenset({"tid", "text", "key", "modifiers", "timeout", "bid"}),
+    "screenshot": frozenset({"tid", "full_page", "timeout", "bid"}),
+    "record": frozenset({"method", "tid", "full_page", "timeout", "bid"}),
+    "console": frozenset({"method", "tid", "timeout", "bid"}),
+    "proxy": frozenset({"method", "proxy", "timeout", "bid"}),
+    "cleanup": frozenset({"timeout", "bid"}),
+    "javascript": frozenset({"tid", "script", "timeout", "bid"}),
+    "execute_batch": frozenset({"actions", "timeout", "bid"}),
     "reinstall": frozenset(),
 }
 
@@ -164,6 +171,16 @@ NonEmptyText = Annotated[str, StringConstraints(strict=True, min_length=1)]
 ToolTimeout = Annotated[
     StrictFloat,
     Field(gt=0, allow_inf_nan=False, description="Call timeout in seconds."),
+]
+Bid = Annotated[
+    str,
+    Field(
+        pattern=r"^[0-9a-f]{32}$",
+        description=(
+            "Browser ID (32 lowercase hex). Targets one browser; "
+            "omit to let any connected browser claim the work."
+        ),
+    ),
 ]
 ScrollY = Annotated[
     StrictFloat,
@@ -285,9 +302,10 @@ def create_server(
     async def list(
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> builtins.list[ListedTab]:
         """List Chromium tabs."""
-        return await _client(ctx).list(timeout=timeout)
+        return await _client(ctx).list(timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(open_world_hint=True),
@@ -297,12 +315,14 @@ def create_server(
         ctx: Context[AppContext],
         tid: PositiveTid | None = None,
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> Tab:
         """Navigate a tab, or open an inactive tab when tid is omitted."""
         return await _client(ctx).navigate(
             url,
             tid=tid,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -312,11 +332,13 @@ def create_server(
         tid: PositiveTid,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> Tab:
         """Activate a Chromium tab and focus its browser window."""
         return await _client(ctx).focus(
             tid,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -330,11 +352,13 @@ def create_server(
         tid: PositiveTid,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> ClosedTab:
         """Close a Chromium tab."""
         return await _client(ctx).close(
             tid,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -348,11 +372,13 @@ def create_server(
         tid: PositiveTid,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> Tab:
         """Reload a Chromium tab and wait for it to load."""
         return await _client(ctx).reload(
             tid,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -363,12 +389,14 @@ def create_server(
         y: ScrollY,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> ScrollResult:
         """Scroll a Chromium tab vertically by y CSS pixels."""
         return await _client(ctx).scroll(
             tid,
             y,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -379,12 +407,14 @@ def create_server(
         selector: NonEmptyString,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> ClickResult:
         """Send real mouse input to the center of a CSS-selected element."""
         return await _client(ctx).click(
             tid,
             selector,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -397,12 +427,13 @@ def create_server(
         key: NonEmptyString | None = None,
         modifiers: builtins.list[KeyboardModifier] | None = None,
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> KeyboardTextResult | KeyboardKeyResult:
         """Insert text or dispatch one key to the focused page control."""
         _validate_keyboard(text, key, modifiers)
         acob = _client(ctx)
         if text is not None:
-            return await acob.keyboard(tid, text=text, timeout=timeout)
+            return await acob.keyboard(tid, text=text, timeout=timeout, bid=bid)
         if key is None:
             raise ValueError("exactly one of text or key is required")
         return await acob.keyboard(
@@ -410,6 +441,7 @@ def create_server(
             key=key,
             modifiers=modifiers,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -421,6 +453,7 @@ def create_server(
         ctx: Context[AppContext],
         full_page: StrictBool = True,
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> Screenshot:
         """Capture a Chromium tab and return its public download URL served
         by the ACOB server."""
@@ -428,6 +461,7 @@ def create_server(
             tid,
             full_page=full_page,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -440,6 +474,7 @@ def create_server(
         ctx: Context[AppContext],
         full_page: StrictBool = False,
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> RecordingStart | RecordingStop:
         """Start or stop a video recording of a tab, keyed by tab.
 
@@ -455,8 +490,9 @@ def create_server(
                 tid,
                 full_page=full_page,
                 timeout=timeout,
+                bid=bid,
             )
-        return await _client(ctx).record("stop", tid, timeout=timeout)
+        return await _client(ctx).record("stop", tid, timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(open_world_hint=True),
@@ -467,6 +503,7 @@ def create_server(
         *,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> ConsoleStarted | ConsoleCapture:
         """Start, snapshot, or stop console message capture for a tab.
 
@@ -477,8 +514,8 @@ def create_server(
         snapshot URL."""
         _validate_console(method)
         if method == "start":
-            return await _client(ctx).console("start", tid, timeout=timeout)
-        return await _client(ctx).console(method, tid, timeout=timeout)
+            return await _client(ctx).console("start", tid, timeout=timeout, bid=bid)
+        return await _client(ctx).console(method, tid, timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -492,6 +529,7 @@ def create_server(
         ctx: Context[AppContext],
         proxy: ProxyString | None = None,
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> ProxySet | ProxyUnset:
         """Set or unset the browser-wide egress proxy.
 
@@ -505,8 +543,9 @@ def create_server(
                 "set",
                 proxy=proxy,
                 timeout=timeout,
+                bid=bid,
             )
-        return await _client(ctx).proxy("unset", timeout=timeout)
+        return await _client(ctx).proxy("unset", timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -518,6 +557,7 @@ def create_server(
     async def cleanup(
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> CleanupResult:
         """Clear all browser data except the ACOB extension itself.
 
@@ -527,7 +567,7 @@ def create_server(
         site data across the whole browser profile; use when sites block
         navigation. Browser-global and destructive: quiesce other work first.
         """
-        return await _client(ctx).cleanup(timeout=timeout)
+        return await _client(ctx).cleanup(timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(open_world_hint=True),
@@ -537,12 +577,14 @@ def create_server(
         script: NonEmptyString,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> JsonValue:
         """Evaluate JavaScript in a Chromium tab and return its JSON value."""
         return await _client(ctx).javascript(
             tid,
             script,
             timeout=timeout,
+            bid=bid,
         )
 
     @server.tool(
@@ -552,6 +594,7 @@ def create_server(
         actions: BatchActions,
         ctx: Context[AppContext],
         timeout: ToolTimeout | None = None,
+        bid: Bid | None = None,
     ) -> builtins.list[BatchResultEntry]:
         """Submit a list of instructions that the browser runs sequentially.
 
@@ -561,7 +604,7 @@ def create_server(
         or error entry per action; a failed action does not stop the rest
         of the batch. Instructions submitted outside a batch still run in
         parallel."""
-        return await _client(ctx).execute_batch(actions, timeout=timeout)
+        return await _client(ctx).execute_batch(actions, timeout=timeout, bid=bid)
 
     @server.tool(
         annotations=ToolAnnotations(

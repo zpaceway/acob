@@ -32,6 +32,9 @@ class Instruction(models.Model):
 
     action = models.CharField(max_length=16, choices=Action)
     payload = models.JSONField(default=dict)
+    bid = models.CharField(  # noqa: DJ001
+        max_length=32, null=True, blank=True, db_index=True
+    )
     status = models.CharField(
         max_length=16,
         choices=Status,

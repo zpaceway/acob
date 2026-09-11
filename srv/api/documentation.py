@@ -26,18 +26,23 @@ GUIDE = [
     (
         'POST JSON {"action":"list"} to instructions_url. HTTP 201 means queued, '
         "not executed. Save the returned id; identify tabs by title, URL and domain "
-        "before using a tid. Never guess tab IDs."
+        'before using a tid. Never guess tab IDs. Include optional "bid" (32 '
+        "lowercase hex, uuid4 hex without dashes) to target one browser; omit it "
+        "for untargeted work claimable by any browser. Responses always include "
+        "bid (null when untargeted/unclaimed)."
     ),
     (
         "Replace {instruction_id} in instruction_url_template with that id. Poll GET "
         "with a bounded deadline and a short delay (for example 0.5 seconds) while "
-        "status is pending or processing. The first completed or failed response "
-        "is returned and deleted. Save result/error immediately; another GET is 404."
+        "status is pending or processing. Completed and failed responses persist "
+        "and repeated GETs return the same envelope."
     ),
     (
         "Never poll /api/instructions/next/ as a controller: it claims work and is "
         "reserved for the extension, as are result submission and reinstall "
-        "acknowledgement."
+        "acknowledgement. Executors poll with ?bid=<their bid> to receive "
+        "untargeted work plus work targeted at them; a missing bid receives only "
+        "untargeted work."
     ),
     (
         'POST {"action":"batch","actions":[...]} to batch_url for 1 to 20 complete '
@@ -56,8 +61,12 @@ GUIDE = [
         "not queryable here."
     ),
     (
-        "A local stack has one global queue; use one extension per stack. There is no "
-        "authentication, executor identity or queue affinity. Proxy and cleanup affect "
+        "A local stack has one shared queue with per-browser targeting via bid. "
+        "Untargeted (bid null) instructions are claimable by any browser; targeted "
+        "instructions are only returned to the matching bid. A claimant without a "
+        "bid receives only untargeted work. Completion records the executor bid "
+        "when the instruction was untargeted, so the response bid is populated "
+        "after execution. There is no authentication. Proxy and cleanup affect "
         "the whole browser; cleanup needs local authorization. Consequential actions "
         "require user authorization. Reinstall interrupts active work."
     ),
@@ -249,15 +258,15 @@ def openapi_document(origin: str) -> dict[str, Any]:
         },
         "/api/instructions/{instruction_id}/": {
             "get": operation(
-                "Read status or consume terminal result",
+                "Read status or terminal result",
                 "Controller",
                 {
                     "200": response(
-                        "Pending/processing is repeatable; completed/failed "
-                        "is deleted after this read",
+                        "Pending, processing, completed or failed; "
+                        "terminal responses persist and are repeatable",
                         envelope,
                     ),
-                    "404": response("Unknown or already consumed instruction", error),
+                    "404": response("Unknown instruction", error),
                 },
             )
         },
@@ -276,7 +285,7 @@ def openapi_document(origin: str) -> dict[str, Any]:
                         },
                     ),
                     "204": {"description": "No pending work"},
-                    "400": response("Invalid limit", error),
+                    "400": response("Invalid limit or bid", error),
                 },
             )
         },
@@ -286,7 +295,7 @@ def openapi_document(origin: str) -> dict[str, Any]:
                 "Extension",
                 {
                     "200": response(
-                        "Terminal instruction; does not consume it", envelope
+                        "Terminal instruction; reads do not delete it", envelope
                     ),
                     "404": response("Unknown instruction", error),
                     "409": response("Instruction is not processing", error),
@@ -372,6 +381,34 @@ def openapi_document(origin: str) -> dict[str, Any]:
             "schema": schemas.NextInstructionsQuery.model_json_schema()["properties"][
                 "limit"
             ],
+        },
+        {
+            "name": "bid",
+            "in": "query",
+            "required": False,
+            "description": (
+                "Claimant browser id (32 lowercase hex). "
+                "With bid, returns untargeted plus matching work; "
+                "without bid, returns only untargeted work."
+            ),
+            "schema": schemas.NextInstructionsQuery.model_json_schema()["properties"][
+                "bid"
+            ],
+        },
+    ]
+    paths["/api/instructions/{instruction_id}/result/"]["post"]["parameters"] = [
+        {
+            "name": "bid",
+            "in": "query",
+            "required": False,
+            "description": (
+                "Executor browser id (32 lowercase hex). "
+                "Body bid takes precedence; stored when the instruction "
+                "was untargeted."
+            ),
+            "schema": schemas.InstructionResultRequest.model_json_schema()[
+                "properties"
+            ]["bid"],
         }
     ]
     paths["/api/instructions/"]["post"]["requestBody"]["content"]["application/json"][
@@ -385,7 +422,10 @@ def openapi_document(origin: str) -> dict[str, Any]:
         "Screenshots use ScreenshotResult; recording stops use RecordStopUploadResult; "
         "console snapshots use ConsoleCaptureUploadResult. Upload data is base64; "
         "the server replaces it with a URL. Batch results contain one result/error "
-        "entry per action. Terminal instructions return their existing envelope."
+        "entry per action. Terminal instructions return their existing envelope. "
+        "Include the executor bid in the body or as ?bid=; it is stored when the "
+        "instruction was untargeted and the response bid is always populated "
+        "after execution."
     )
     for upload in (
         schemas.ScreenshotResult,
@@ -425,7 +465,7 @@ def openapi_document(origin: str) -> dict[str, Any]:
                     (
                         "Save the returned id, then GET "
                         f"`{origin}/api/instructions/{{instruction_id}}/` "
-                        "until terminal. Save that response: it is delivered once."
+                        "until terminal. Terminal responses persist and are repeatable."
                     ),
                     "## Python client",
                     (

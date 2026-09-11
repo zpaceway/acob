@@ -234,10 +234,12 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         for name, tool in tools.items():
             with self.subTest(tool=name):
                 self.assertFalse(tool.input_schema["additionalProperties"])
-        self.assertEqual(set(tools["list"].input_schema["properties"]), {"timeout"})
+        self.assertEqual(
+            set(tools["list"].input_schema["properties"]), {"timeout", "bid"}
+        )
         self.assertEqual(
             set(tools["navigate"].input_schema["properties"]),
-            {"tid", "url", "timeout"},
+            {"tid", "url", "timeout", "bid"},
         )
         self.assertEqual(tools["navigate"].input_schema["required"], ["url"])
         self.assertEqual(
@@ -246,7 +248,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["screenshot"].input_schema["properties"]),
-            {"tid", "full_page", "timeout"},
+            {"tid", "full_page", "timeout", "bid"},
         )
         self.assertEqual(
             set(tools["screenshot"].input_schema["required"]),
@@ -254,7 +256,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["record"].input_schema["properties"]),
-            {"method", "tid", "full_page", "timeout"},
+            {"method", "tid", "full_page", "timeout", "bid"},
         )
         self.assertEqual(
             set(tools["record"].input_schema["required"]),
@@ -262,7 +264,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["console"].input_schema["properties"]),
-            {"method", "tid", "timeout"},
+            {"method", "tid", "timeout", "bid"},
         )
         self.assertEqual(
             set(tools["console"].input_schema["required"]),
@@ -270,7 +272,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["proxy"].input_schema["properties"]),
-            {"method", "proxy", "timeout"},
+            {"method", "proxy", "timeout", "bid"},
         )
         self.assertEqual(
             set(tools["proxy"].input_schema["required"]),
@@ -278,12 +280,12 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(tools["cleanup"].input_schema["properties"]),
-            {"timeout"},
+            {"timeout", "bid"},
         )
         self.assertEqual(tools["cleanup"].input_schema.get("required", []), [])
         self.assertEqual(
             set(tools["execute_batch"].input_schema["properties"]),
-            {"actions", "timeout"},
+            {"actions", "timeout", "bid"},
         )
         self.assertEqual(tools["execute_batch"].input_schema["required"], ["actions"])
         self.assertNotIn("tabs", tools)
@@ -311,12 +313,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "selector": "button",
                 "x": 10.5,
                 "y": 20.5,
+                "bid": None,
             },
         )
         self.acob.click.assert_awaited_once_with(
             12,
             "button",
             timeout=4.5,
+            bid=None,
         )
 
     async def test_rejects_coerced_and_unknown_arguments(self) -> None:
@@ -372,16 +376,17 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(closed.structured_content["closed"])
         self.assertEqual(reloaded.structured_content["tid"], 12)
         self.assertEqual(scrolled.structured_content["y"], 500)
-        self.acob.list.assert_awaited_once_with(timeout=None)
+        self.acob.list.assert_awaited_once_with(timeout=None, bid=None)
         self.acob.navigate.assert_awaited_once_with(
             "https://example.com/new",
             tid=12,
             timeout=None,
+            bid=None,
         )
-        self.acob.focus.assert_awaited_once_with(12, timeout=None)
-        self.acob.close.assert_awaited_once_with(12, timeout=None)
-        self.acob.reload.assert_awaited_once_with(12, timeout=None)
-        self.acob.scroll.assert_awaited_once_with(12, 500, timeout=None)
+        self.acob.focus.assert_awaited_once_with(12, timeout=None, bid=None)
+        self.acob.close.assert_awaited_once_with(12, timeout=None, bid=None)
+        self.acob.reload.assert_awaited_once_with(12, timeout=None, bid=None)
+        self.acob.scroll.assert_awaited_once_with(12, 500, timeout=None, bid=None)
 
     async def test_keyboard_enforces_exclusive_input(self) -> None:
         self.acob.keyboard.return_value = KeyboardKeyResult(
@@ -408,6 +413,7 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             key="Enter",
             modifiers=["ctrl"],
             timeout=None,
+            bid=None,
         )
 
     async def test_returns_screenshot_download_url_from_the_client(self) -> None:
@@ -433,12 +439,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 "content_type": "image/png",
                 "full_page": True,
                 "tid": 12,
+                "bid": None,
             },
         )
         self.acob.screenshot.assert_awaited_once_with(
             12,
             full_page=True,
             timeout=None,
+            bid=None,
         )
 
     async def test_starts_and_stops_recordings_through_the_client(self) -> None:
@@ -456,13 +464,14 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(started.is_error)
         self.assertEqual(
             started.structured_content,
-            {"result": {"started": True, "tid": 12}},
+            {"result": {"started": True, "tid": 12, "bid": None}},
         )
         self.acob.record.assert_awaited_once_with(
             "start",
             12,
             full_page=True,
             timeout=None,
+            bid=None,
         )
 
     async def test_stops_recordings_through_the_client(self) -> None:
@@ -491,10 +500,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                         "Recording stopped because the maximum duration was reached"
                     ),
                     "tid": 12,
+                    "bid": None,
                 }
             },
         )
-        self.acob.record.assert_awaited_once_with("stop", 12, timeout=None)
+        self.acob.record.assert_awaited_once_with("stop", 12, timeout=None, bid=None)
 
     async def test_record_rejects_stop_with_full_page(self) -> None:
         async with Client(self.server, raise_exceptions=True) as client:
@@ -520,12 +530,13 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(started.is_error)
         self.assertEqual(
             started.structured_content,
-            {"result": {"started": True, "tid": 12}},
+            {"result": {"started": True, "tid": 12, "bid": None}},
         )
         self.acob.console.assert_awaited_once_with(
             "start",
             12,
             timeout=None,
+            bid=None,
         )
 
     async def test_captures_console_snapshot_through_the_client(self) -> None:
@@ -554,10 +565,13 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                     "size_bytes": 1234,
                     "truncated": False,
                     "tid": 12,
+                    "bid": None,
                 }
             },
         )
-        self.acob.console.assert_awaited_once_with("capture", 12, timeout=None)
+        self.acob.console.assert_awaited_once_with(
+            "capture", 12, timeout=None, bid=None
+        )
 
     async def test_stops_console_capture_through_the_client(self) -> None:
         self.acob.console.return_value = ConsoleCapture(
@@ -583,10 +597,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                     "size_bytes": 2048,
                     "truncated": True,
                     "tid": 12,
+                    "bid": None,
                 }
             },
         )
-        self.acob.console.assert_awaited_once_with("stop", 12, timeout=None)
+        self.acob.console.assert_awaited_once_with("stop", 12, timeout=None, bid=None)
 
     async def test_console_rejects_invalid_method(self) -> None:
         async with Client(self.server, raise_exceptions=True) as client:
@@ -622,11 +637,12 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                     "host": "127.0.0.1",
                     "port": 8080,
                     "authenticated": False,
+                    "bid": None,
                 }
             },
         )
         self.acob.proxy.assert_awaited_once_with(
-            "set", proxy="http://127.0.0.1:8080", timeout=None
+            "set", proxy="http://127.0.0.1:8080", timeout=None, bid=None
         )
 
     async def test_unsets_proxy_through_the_client(self) -> None:
@@ -637,9 +653,10 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(unset_result.is_error)
         self.assertEqual(
-            unset_result.structured_content, {"result": {"proxied": False}}
+            unset_result.structured_content,
+            {"result": {"proxied": False, "bid": None}},
         )
-        self.acob.proxy.assert_awaited_once_with("unset", timeout=None)
+        self.acob.proxy.assert_awaited_once_with("unset", timeout=None, bid=None)
 
     async def test_proxy_rejects_unset_with_proxy_string(self) -> None:
         async with Client(self.server, raise_exceptions=True) as client:
@@ -658,8 +675,8 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             result = await client.call_tool("cleanup", {})
 
         self.assertFalse(result.is_error)
-        self.assertEqual(result.structured_content, {"cleaned": True})
-        self.acob.cleanup.assert_awaited_once_with(timeout=None)
+        self.assertEqual(result.structured_content, {"cleaned": True, "bid": None})
+        self.acob.cleanup.assert_awaited_once_with(timeout=None, bid=None)
 
     async def test_cleanup_rejects_unknown_arguments(self) -> None:
         async with Client(self.server, raise_exceptions=True) as client:
@@ -733,10 +750,11 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
             result.structured_content,
             {
                 "result": [
-                    {"error": None, "result": []},
+                    {"error": None, "result": [], "bid": None},
                     {
                         "error": "No element matches selector: button",
                         "result": None,
+                        "bid": None,
                     },
                 ]
             },
@@ -747,7 +765,54 @@ class MCPServerTests(unittest.IsolatedAsyncioTestCase):
                 {"action": "click", "tid": 12, "selector": "button"},
             ],
             timeout=None,
+            bid=None,
         )
+
+    async def test_bid_passes_through_to_the_client(self) -> None:
+        target = "e" * 32
+        tab = Tab(
+            tid=12,
+            window_id=1,
+            active=True,
+            title="Example",
+            url="https://example.com",
+            domain="example.com",
+            bid=target,
+        )
+        self.acob.focus.return_value = tab
+        self.acob.cleanup.return_value = CleanupResult(cleaned=True, bid=target)
+
+        async with Client(self.server, raise_exceptions=True) as client:
+            focused = await client.call_tool("focus", {"tid": 12, "bid": target})
+            cleaned = await client.call_tool("cleanup", {"bid": target})
+            batched = await client.call_tool(
+                "execute_batch",
+                {
+                    "actions": [{"action": "list"}],
+                    "bid": target,
+                },
+            )
+
+        self.assertFalse(focused.is_error)
+        self.assertEqual(focused.structured_content["bid"], target)
+        self.assertFalse(cleaned.is_error)
+        self.acob.focus.assert_awaited_once_with(12, timeout=None, bid=target)
+        self.acob.cleanup.assert_awaited_once_with(timeout=None, bid=target)
+        self.acob.execute_batch.assert_awaited_once_with(
+            [{"action": "list"}], timeout=None, bid=target
+        )
+        self.assertFalse(batched.is_error)
+
+    async def test_bid_rejects_malformed_values(self) -> None:
+        async with Client(self.server, raise_exceptions=True) as client:
+            invalid = await client.call_tool("focus", {"tid": 12, "bid": "not-a-bid"})
+
+        self.assertTrue(invalid.is_error)
+        self.acob.focus.assert_not_awaited()
+
+    async def test_instructions_document_bid_affinity(self) -> None:
+        self.assertIn("bid", SERVER_INSTRUCTIONS)
+        self.assertIn("Untargeted", SERVER_INSTRUCTIONS)
 
     async def test_client_failures_become_visible_tool_errors(self) -> None:
         self.acob.click.side_effect = RuntimeError("browser is unavailable")

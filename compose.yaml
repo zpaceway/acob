@@ -1,13 +1,48 @@
 services:
+  acob-db:
+    build: ./database
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-acob}
+      POSTGRES_USER: ${POSTGRES_USER:-acob}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acob}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - acob
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-acob} -d $${POSTGRES_DB:-acob}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   acob-srv:
     build: ./srv
     expose:
       - "58347"
+    depends_on:
+      acob-db:
+        condition: service_healthy
     environment:
       ACOB_DATA_DIR: /data
       ACOB_PUBLIC_URL: http://127.0.0.1:${PORT:-58346}
       ACOB_SRV_HOST: 0.0.0.0
       ACOB_SRV_PORT: 58347
+      # Postgres wiring (matches database/ defaults). Override via
+      # POSTGRES_* or set ACOB_DATABASE_URL/DATABASE_URL instead.
+      ACOB_DB_HOST: acob-db
+      ACOB_DB_PORT: 5432
+      ACOB_DB_NAME: ${POSTGRES_DB:-acob}
+      ACOB_DB_USER: ${POSTGRES_USER:-acob}
+      ACOB_DB_PASSWORD: ${POSTGRES_PASSWORD:-acob}
+      # Prod safety: DEBUG off in Compose. Local `make -C srv dev` still
+      # defaults to true when ACOB_DEBUG is unset.
+      ACOB_DEBUG: ${ACOB_DEBUG:-false}
+      # Dev-only default: change in production via ACOB_SECRET_KEY env.
+      # The server refuses to boot with DEBUG=false and no env secret.
+      ACOB_SECRET_KEY: ${ACOB_SECRET_KEY:-dev-only-change-me-in-production}
+      ACOB_ALLOWED_HOSTS: ${ACOB_ALLOWED_HOSTS:-*}
     volumes:
       - srv-data:/data
     networks:
@@ -65,3 +100,4 @@ networks:
 
 volumes:
   srv-data: {}
+  db-data: {}

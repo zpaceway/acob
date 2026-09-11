@@ -1,13 +1,14 @@
 import base64
 import binascii
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Exists
+from django.db.models import Exists, Q
 from django.http import (
     FileResponse,
     HttpRequest,
@@ -106,12 +107,13 @@ def create_instruction(request: HttpRequest) -> JsonResponse:
 
     payload = request_model.model_dump(
         mode="json",
-        exclude={"action"},
+        exclude={"action", "bid"},
         exclude_none=True,
     )
     instruction = Instruction.objects.create(
         action=request_model.action,
         payload=payload,
+        bid=request_model.bid,
     )
     return instruction_response(instruction, status=201)
 
@@ -127,12 +129,13 @@ def create_batch_instruction(request: HttpRequest) -> JsonResponse:
 
     payload = request_model.model_dump(
         mode="json",
-        exclude={"action"},
+        exclude={"action", "bid"},
         exclude_none=True,
     )
     instruction = Instruction.objects.create(
         action=Instruction.Action.BATCH,
         payload=payload,
+        bid=request_model.bid,
     )
     return instruction_response(instruction, status=201)
 
@@ -146,20 +149,7 @@ def instruction_detail(
     if instruction is None:
         return error_response("Instruction not found", status=404)
 
-    response = instruction_response(instruction)
-    if instruction.status not in {
-        Instruction.Status.COMPLETED,
-        Instruction.Status.FAILED,
-    }:
-        return response
-
-    deleted, _ = Instruction.objects.filter(
-        id=instruction.id,
-        status=instruction.status,
-    ).delete()
-    if not deleted:
-        return error_response("Instruction not found", status=404)
-    return response
+    return instruction_response(instruction)
 
 
 @require_http_methods(["GET"])
@@ -184,6 +174,10 @@ def next_instructions(request: HttpRequest) -> HttpResponse:
 
     instructions: list[Instruction] = []
     no_pending_reinstall = ~Exists(Reinstall.objects.all())
+    if query.bid is None:
+        bid_filter = Q(bid__isnull=True)
+    else:
+        bid_filter = Q(bid__isnull=True) | Q(bid=query.bid)
     while len(instructions) < query.limit:
         if Reinstall.objects.exists():
             break
@@ -191,6 +185,7 @@ def next_instructions(request: HttpRequest) -> HttpResponse:
             Instruction.objects.filter(
                 status=Instruction.Status.PENDING,
             )
+            .filter(bid_filter)
             .values("id")
             .first()
         )
@@ -202,6 +197,7 @@ def next_instructions(request: HttpRequest) -> HttpResponse:
                 id=candidate["id"],
                 status=Instruction.Status.PENDING,
             )
+            .filter(bid_filter)
             .filter(no_pending_reinstall)
             .update(
                 status=Instruction.Status.PROCESSING,
@@ -219,6 +215,34 @@ def next_instructions(request: HttpRequest) -> HttpResponse:
     return response
 
 
+BID_PATTERN = re.compile(r"[0-9a-f]{32}")
+
+
+def _executor_bid(
+    request: HttpRequest,
+    result_request: InstructionResultRequest,
+) -> tuple[str | None, JsonResponse | None]:
+    """Resolve the executor bid from body or ?bid=, validating the query value."""
+    query_bid_raw = request.GET.get("bid")
+    query_bid: str | None = None
+    if query_bid_raw is not None:
+        if BID_PATTERN.fullmatch(query_bid_raw) is None:
+            return None, model_response(
+                ValidationErrorResponse(
+                    details=[
+                        ValidationIssue(
+                            field="bid",
+                            message="String should match pattern '^[0-9a-f]{32}$'",
+                            type="string_pattern_mismatch",
+                        )
+                    ]
+                ),
+                status=400,
+            )
+        query_bid = query_bid_raw
+    return result_request.bid or query_bid, None
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def complete_instruction(
@@ -233,6 +257,10 @@ def complete_instruction(
         result_request = InstructionResultRequest.model_validate_json(request.body)
     except ValidationError as error:
         return validation_error_response(error)
+
+    executor_bid, bid_error = _executor_bid(request, result_request)
+    if bid_error is not None:
+        return bid_error
 
     if instruction.status in {
         Instruction.Status.COMPLETED,
@@ -270,16 +298,22 @@ def complete_instruction(
         Instruction.Status.FAILED if instruction_error else Instruction.Status.COMPLETED
     )
     completed_at = timezone.now()
+    # Record the executor bid when the instruction was untargeted; a targeted
+    # instruction keeps its original target bid regardless of the executor.
+    claimed_bid = instruction.bid if instruction.bid is not None else executor_bid
     with transaction.atomic():
+        update_kwargs: dict[str, Any] = {
+            "result": result,
+            "error": instruction_error or "",
+            "status": final_status,
+            "updated_at": completed_at,
+        }
+        if instruction.bid is None and executor_bid is not None:
+            update_kwargs["bid"] = executor_bid
         completed = Instruction.objects.filter(
             id=instruction_id,
             status=Instruction.Status.PROCESSING,
-        ).update(
-            result=result,
-            error=instruction_error or "",
-            status=final_status,
-            updated_at=completed_at,
-        )
+        ).update(**update_kwargs)
 
     if not completed:
         current = Instruction.objects.filter(id=instruction_id).first()
@@ -291,6 +325,7 @@ def complete_instruction(
     instruction.error = instruction_error or ""
     instruction.status = final_status
     instruction.updated_at = completed_at
+    instruction.bid = claimed_bid
     return instruction_response(instruction)
 
 

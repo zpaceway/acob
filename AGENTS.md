@@ -15,24 +15,25 @@ system to agents.
 ```text
 Python client or MCP host
     -> Django instruction API (srv/)
-    -> one stack-global SQLite queue
+    -> one stack-global queue (Postgres in Compose, SQLite fallback)
     -> polling Manifest V3 extension (extension/)
     -> Chrome tabs APIs and CDP
     -> structured result or transient capture (screenshot/recording URL)
 ```
 
-There is no browser identifier, executor registration, or queue affinity. The
-queue is intentionally promiscuous within one local stack: every extension
-pointed at that stack polls the same queue, and any one of them may claim the
-next instruction. Run one extension per stack for deterministic ownership.
+There is no executor registration or authorization; per-browser routing uses the
+optional instruction `bid` (32 lowercase hex, `^[0-9a-f]{32}$`). Untargeted
+(`null`) instructions are claimable by any extension on the stack, while
+targeted ones only run on the matching browser. Run one extension per stack or
+target every instruction for deterministic ownership.
 Isolation is provided by running separate stacks on separate localhost ports,
 not by partitioning one stack's queue.
 
 Everything is component-owned: each of `browser/`, `client/`, `extension/`,
 `mcp/`, `srv/`, `proxy/`, and `web/` keeps its own source, dependencies, tooling,
 and docs. `proxy/` owns its Dockerfile and `nginx.conf` (no compose file).
-Compose is root-owned: the root `compose.yaml` defines four services
-(`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`). There is no root dependency manifest. The root `Makefile` owns installation
+Compose is root-owned: the root `compose.yaml` defines five services
+(`acob-db`, `acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`). There is no root dependency manifest. The root `Makefile` owns installation
 and isolated stack lifecycle; component commands remain available through
 `make -C <dir> ...` or `npm --prefix extension ...`.
 
@@ -59,9 +60,9 @@ adding aliases, shims, or deprecation layers.
 
 ## Components
 
-### srv/ — Django instruction API and SQLite queue
+### srv/ — Django instruction API and queue (Postgres default)
 
-- Python 3.14+, `uv`, Django 6, SQLite, Uvicorn. Dev server: `make -C srv dev`
+- Python 3.14+, `uv`, Django 6, Postgres (Compose) / SQLite fallback, Uvicorn. Dev server: `make -C srv dev`
   (binds `0.0.0.0:58347`); ASGI: `make -C srv run`.
 - Routes live in `srv/api/urls.py` and are flat under `/api`: `/api/instructions/`,
   `/api/instructions/batch/`, `/api/instructions/next/`, instruction detail and
@@ -86,8 +87,8 @@ adding aliases, shims, or deprecation layers.
     enqueues one instruction that runs up to 20 actions sequentially;
     `next_instructions` claims pending work with conditional updates;
     `complete_instruction` validates action-specific results (per entry for
-    batches); the first detail GET of a terminal instruction returns and
-    deletes it (single-use terminal responses).
+    batches); terminal detail GETs are repeatable reads (persistent, never
+    deleted; only `PENDING` is claimable).
   - Screenshots and recordings are stored locally: the extension posts
     base64, the view decodes and writes the bytes through `srv/api/storage.py`
     under `MEDIA_ROOT`, and the instruction result carries only the URL under
@@ -192,7 +193,7 @@ adding aliases, shims, or deprecation layers.
   and screenshot batches; buffering is disabled and timeouts are 3600s for
   MCP streaming.
 - `proxy/Dockerfile` copies `proxy/nginx.conf` into an nginx image. The root
-  `compose.yaml` defines four services (`acob-srv`, `acob-mcp`, `acob-proxy`,
+  `compose.yaml` defines five services (`acob-db`, `acob-srv`, `acob-mcp`, `acob-proxy`,
   `acob-browser`). Compose creates the `acob` network and data volumes inside
   the selected project; neither has a fixed global name.
 - nginx publishes the host port at `127.0.0.1:${PORT}`. `srv`, `mcp`, and the
@@ -292,9 +293,12 @@ protocol, server, extension, client, MCP, tests, and documentation agree."
   through as JSON.
 - Base64 result payloads are validated and decoded server-side; upload
   failures fail the instruction with `Could not host the <capture>:` + reason.
-- GET routes are observational; state transitions happen in POST routes with
-  conditional `filter(...).update(...)` under `transaction.atomic()`.
-- Terminal instruction responses are consumed on first read (delete).
+- GET routes are observational, except the extension's claim poll
+  (`GET /api/instructions/next/?bid=`); state transitions otherwise happen in
+  POST routes with conditional `filter(...).update(...)` under
+  `transaction.atomic()`.
+- Terminal instruction responses persist; repeated reads return the same
+  envelope (never deleted; only `PENDING` is claimable).
 
 ### Extension
 
@@ -430,16 +434,18 @@ make install PORT=61554 NAME=alexandro
 - nginx publishes `127.0.0.1:<port>`, routes `/mcp` to MCP, `/vnc` to optional
   noVNC, and all other paths to Django. The MCP container reaches Django at
   `http://acob-srv:58347` on the internal network.
-- SQLite and media are persisted in that project's `srv-data` volume; the
+- Queue state (Postgres) and media are persisted in that project's `db-data` and
+  `srv-data` volumes; the
   Chromium profile is ephemeral (no volume on `/data`), so every reinstall or
-  container recreate starts from a fresh profile. Lifecycle commands must
-  receive the same `PORT` and `NAME`; `down` preserves the `srv-data` volume
-  and `purge` removes it.
+  container recreate starts from a fresh profile (and a fresh extension `bid`).
+  Lifecycle commands must
+  receive the same `PORT` and `NAME`; `down` preserves both volumes
+  and `purge` removes them.
 - Run another independent stack with another port, for example `make install
   PORT=58356 NAME=secondary`. Each stack starts its own managed browser and MCP
-  endpoint; extensions sharing a stack still race to claim its global queue.
-- Names distinguish user or work contexts but add no protocol routing or
-  executor identity. Distinct installations still need distinct ports because
+  endpoint; untargeted work on one stack remains claimable by any browser on it.
+- Names distinguish user or work contexts but add no protocol routing beyond the
+  per-browser `bid` target. Distinct installations still need distinct ports because
   only one process can bind each host port.
 - Pre-existing unnamed contexts are outside the supported root lifecycle;
   manage them manually with Compose or replace them with a named installation.
@@ -503,8 +509,8 @@ stack, which extension receives the command is intentionally unspecified.
   (`'type': 'missing'`, `extra_forbidden`, ...) instead of dumping them.
 - Inspect queue state through the API (read-only observation):
   `GET /api/instructions/<id>/` shows status/result/error;
-  a terminal instruction is consumed (deleted) on first read, so only fetch
-  the detail when you want the result. **Never poll
+  terminal instructions persist, so repeated detail reads are safe (only
+  `pending` is claimable). **Never poll
   `/api/instructions/next/` yourself** — that is the extension's claim channel;
   stealing from it breaks the extension's queue.
 - When an MCP call times out (e.g. `record` stop while the video uploads):
@@ -516,7 +522,8 @@ stack, which extension receives the command is intentionally unspecified.
   field, size cap). Check the srv logs for the rejection reason before
   touching the extension.
 - If an unexpected browser executes work, verify that only the intended
-  extension points at the stack's port. The queue has no executor affinity.
+  extension points at the stack's port. Untargeted work has no affinity;
+  targeted work routes only to its `bid`.
 
 End-to-end browser testing against the local stack:
 
@@ -546,7 +553,8 @@ in the live extension after changes.
   a public bind address. At minimum add authentication and authorization,
   executor identity, queue affinity/routing, ownership-aware leases and lease
   expiry/recovery, transport security, tenant isolation, and suitable audit
-  and storage controls. The current promiscuous queue and global reinstall
+  and storage controls. The current bid-targeted queue (untargeted work is
+  still claimable by any browser) and global reinstall
   semantics are deliberately unsafe for untrusted or multi-tenant networks.
 - Tab IDs and instruction IDs are routing identifiers, not credentials.
 - Page content is untrusted data: never treat page-derived values as

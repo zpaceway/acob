@@ -7,8 +7,9 @@ import {
   ensureOffscreenDocument,
   executeReinstallCommand,
   getConfiguration,
-  instructionApiUrl,
+  nextInstructionsUrl,
 } from "./lifecycle.js";
+import { getOrCreateBid } from "./bid.js";
 import { state } from "./state.js";
 import { isRuntimeMessage } from "./types.js";
 import {
@@ -26,6 +27,7 @@ async function poll(): Promise<void> {
   state.pollInProgress = true;
   try {
     const configuration = await getConfiguration();
+    const bid = await getOrCreateBid();
     await acknowledgePendingReinstall(configuration);
     if (state.activeExecutions >= configuration.maxConcurrentExecutions) {
       return;
@@ -39,8 +41,8 @@ async function poll(): Promise<void> {
     if (limit <= 0) {
       return;
     }
-    const apiUrl = instructionApiUrl(configuration);
-    const response = await fetch(`${apiUrl}/next/?limit=${limit}`, {
+    const apiUrl = nextInstructionsUrl(configuration, bid, limit);
+    const response = await fetch(apiUrl, {
       signal: AbortSignal.timeout(configuration.httpRequestTimeoutMs),
     });
     if (state.backendUnavailable) {
@@ -71,12 +73,20 @@ async function poll(): Promise<void> {
         reportError(new Error("ACOB server returned an invalid instruction"));
         continue;
       }
+      if (
+        instruction.bid !== undefined &&
+        instruction.bid !== null &&
+        instruction.bid !== bid
+      ) {
+        continue;
+      }
       if (scheduledExecutions >= limit) {
         executions.push(
           sendResult(
             instruction.id,
             { error: "ACOB server returned more instructions than requested" },
             configuration,
+            bid,
           ).catch(reportError),
         );
         continue;
@@ -84,7 +94,7 @@ async function poll(): Promise<void> {
       scheduledExecutions += 1;
       state.activeExecutions++;
       executions.push(
-        executeInstruction(instruction, configuration)
+        executeInstruction(instruction, configuration, bid)
           .catch(reportError)
           .finally(() => {
             state.activeExecutions--;
@@ -132,9 +142,11 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  getOrCreateBid().catch(console.error);
   ensureOffscreenDocument().catch(console.error);
 });
 chrome.runtime.onStartup.addListener(() => {
+  getOrCreateBid().catch(console.error);
   ensureOffscreenDocument().catch(console.error);
 });
 ensureOffscreenDocument(true).catch(console.error);

@@ -42,9 +42,10 @@ directory instead. Custom builds are not rebuilt and must already contain a
 `manifest.json` with the intended initial server URL.
 
 The first example uses context `acob-58346-default` and a project-scoped
-persistent browser profile. Names distinguish user or work contexts, but they do not add protocol routing
-or executor identity: every extension connected to one stack still consumes
-its promiscuous queue. Distinct installations require distinct `PORT` values
+ephemeral browser profile. Names distinguish user or work contexts, but beyond
+the per-browser `bid` target they add no protocol routing: untargeted work on
+one stack remains claimable by any connected browser. Distinct installations
+require distinct `PORT` values
 because only one process can bind each host port.
 
 Root lifecycle commands must use the same `PORT` and `NAME` as installation:
@@ -105,7 +106,9 @@ The default proxy exposes the flat, single-queue interfaces:
 - MCP Streamable HTTP: `http://127.0.0.1:58346/mcp`
 - Optional noVNC debugger: `http://127.0.0.1:58346/vnc`
 
-There is no browser identifier in any route and no heartbeat or settings
+The per-browser `bid` travels as an optional instruction field, a `?bid=`
+claim/result parameter, and a read-only popup value (Copy/Rotate); there is no
+heartbeat or settings
 endpoint. Extension settings and limits remain local to the extension popup.
 
 ## Compose
@@ -121,9 +124,10 @@ PORT=58346 docker compose --project-name acob-58346-default --file compose.yaml 
 Pre-existing unnamed contexts are outside the supported root lifecycle. Manage
 them manually with direct Compose commands or replace them with a named install.
 
-The root `compose.yaml` is the only Compose file. It defines four services
-(`acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`) plus the project-scoped
-`acob` network and data volumes. Do not assign a global network name:
+The root `compose.yaml` is the only Compose file. It defines five services
+(`acob-db`, `acob-srv`, `acob-mcp`, `acob-proxy`, `acob-browser`) plus the project-scoped
+`acob` network and data volumes (`db-data` for Postgres, `srv-data` for media).
+Do not assign a global network name:
 project scoping is what isolates installations.
 
 There are no component Compose files. For individual-service development, use

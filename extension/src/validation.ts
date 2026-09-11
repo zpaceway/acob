@@ -1,6 +1,6 @@
 import { MODIFIER_BITS } from "./keys.js";
 import { state } from "./state.js";
-import { isKeyboardKey, MAX_BATCH_ACTIONS } from "./types.js";
+import { isBid, isKeyboardKey, MAX_BATCH_ACTIONS } from "./types.js";
 import type {
   ClaimedInstruction,
   KeyboardModifier,
@@ -50,12 +50,18 @@ function hasValidModifiers(
 }
 
 export function isClaimedInstruction(value: unknown): value is ClaimedInstruction {
-  return (
-    isRecord(value) &&
-    isPositiveInteger(value.id) &&
-    typeof value.action === "string" &&
-    Object.hasOwn(value, "payload")
-  );
+  if (
+    !(
+      isRecord(value) &&
+      isPositiveInteger(value.id) &&
+      typeof value.action === "string" &&
+      Object.hasOwn(value, "payload")
+    )
+  ) {
+    return false;
+  }
+  const bid = (value as Record<string, unknown>).bid;
+  return bid === undefined || bid === null || isBid(bid);
 }
 
 function isProxyString(value: unknown): value is string {
@@ -189,6 +195,13 @@ function isSupportedActionPayload(
 function instructionValidationError(
   value: ClaimedInstruction,
 ): string | null {
+  if (
+    value.bid !== undefined &&
+    value.bid !== null &&
+    !isBid(value.bid)
+  ) {
+    return `Unsupported or invalid instruction: ${value.action}: bid must be a 32-character lowercase hex string`;
+  }
   if (!isRecord(value.payload)) {
     return `Unsupported or invalid instruction: ${value.action}: payload must be an object`;
   }
@@ -210,7 +223,14 @@ function instructionValidationError(
     if (!isRecord(entry) || typeof entry.action !== "string") {
       return `Unsupported or invalid instruction: batch action ${index} must be an object with a string action`;
     }
-    const { action: entryAction, ...entryPayload } = entry;
+    const { action: entryAction, bid: entryBid, ...entryPayload } = entry;
+    if (
+      entryBid !== undefined &&
+      entryBid !== null &&
+      !isBid(entryBid)
+    ) {
+      return `Unsupported or invalid instruction: batch action ${index} (${entryAction}): bid must be a 32-character lowercase hex string`;
+    }
     if (!isSupportedActionPayload(entryAction, entryPayload)) {
       return `Unsupported or invalid instruction: batch action ${index} (${entryAction})`;
     }

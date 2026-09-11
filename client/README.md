@@ -56,8 +56,10 @@ asyncio.run(main())
 ```
 
 The endpoint defaults to the unified proxy at `http://127.0.0.1:58346`.
-`ACOBClient` has no browser selector: its only optional positional argument is
-the stack endpoint. Configure a different stack and result-wait deadline when
+`ACOBClient` selects a stack only by endpoint; per-browser targeting is the
+optional `bid` argument on every action call (32 lowercase hex,
+`^[0-9a-f]{32}$`, validated client-side — copy it from the extension popup's
+read-only Browser ID field). Configure a different stack and result-wait deadline when
 needed:
 
 ```python
@@ -80,8 +82,9 @@ example, `make install PORT=61554 NAME=alexandro` creates context
 lowercase letters, digits, and internal hyphens and cannot start or end with a
 hyphen. Use the same `PORT` and `NAME` for lifecycle commands, and use a distinct
 port for every installation because only one process can bind it. `ACOBClient`
-still selects only by endpoint; a context name adds no protocol routing or
-identity, and each selected stack retains its promiscuous queue.
+still selects only by endpoint; a context name adds no protocol routing beyond
+the per-call `bid` target, and untargeted work on each selected stack remains
+claimable by any connected browser.
 
 `timeout` is the default result-wait deadline after submission and also caps
 individual HTTP requests. An action-level timeout overrides the result-wait
@@ -135,7 +138,18 @@ that browser instruction to finish is acceptable.
 
 Action methods map directly to API actions and payload fields. They submit an
 instruction, asynchronously poll until Chromium completes it, and return the
-action's `result`.
+action's `result`. Every method (plus `submit`/`execute` and
+`submit_batch`/`execute_batch`) accepts optional `bid=` to target one browser;
+omit it for untargeted work claimable by any browser. Every response model
+carries the instruction's `bid` (the target while pending, the executor after
+completion; `None` when untargeted) — read it on the result (e.g. `tab.bid`,
+`screenshot.bid`):
+
+```python
+tab = await client.navigate("https://example.com", bid="0123456789abcdef0123456789abcdef")
+tabs = await client.list()  # untargeted; any connected browser may claim it
+print(tab.bid)
+```
 
 Structured results are validated Pydantic models. `list()` returns
 `list[ListedTab]`; `navigate()`, `focus()`, and `reload()` return `Tab`;
@@ -296,9 +310,11 @@ terminal_response = await client.wait(instruction["id"])
 result = await client.execute("list")
 ```
 
-`wait()` returns the complete terminal response because that response is
-single-use. Do not call `wait()` concurrently more than once for the same
-instruction. `execute()` and the action helpers raise `ACOBInstructionError`
+`wait()` returns the complete terminal response; terminal responses persist, so
+repeated `wait()` calls for the same instruction return the same envelope.
+`submit()` and `execute()` accept `bid=`; `submit_batch()` and
+`execute_batch()` accept a top-level `bid=` for the whole cascade.
+`execute()` and the action helpers raise `ACOBInstructionError`
 when Chromium reports a failed instruction. HTTP validation errors raise
 `ACOBHTTPError`; connection, protocol, and timeout failures derive from
 `ACOBError`.

@@ -2,7 +2,7 @@ import { loadConfiguration } from "./storage.js";
 import { state } from "./state.js";
 import { reloadTab } from "./tabs.js";
 import { withTimeout } from "./timeouts.js";
-import type { Configuration } from "./types.js";
+import type { Bid, Configuration } from "./types.js";
 
 const PENDING_REINSTALL_TOKEN_KEY = "pendingReinstallToken";
 
@@ -25,6 +25,23 @@ export async function getConfiguration(): Promise<Configuration> {
 export function instructionApiUrl(configuration: Configuration): string {
   const baseUrl = configuration.baseUrl.replace(/\/+$/, "");
   return `${baseUrl}/api/instructions`;
+}
+
+export function nextInstructionsUrl(
+  configuration: Configuration,
+  bid: Bid,
+  limit: number,
+): string {
+  const apiUrl = instructionApiUrl(configuration);
+  return `${apiUrl}/next/?bid=${encodeURIComponent(bid)}&limit=${limit}`;
+}
+
+export function instructionResultUrl(
+  configuration: Configuration,
+  instructionId: number,
+): string {
+  const apiUrl = instructionApiUrl(configuration);
+  return `${apiUrl}/${instructionId}/result/`;
 }
 
 function reinstallUrl(configuration: Configuration): string {

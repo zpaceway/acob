@@ -35,7 +35,7 @@ workflow language.
 ```text
 Python client or MCP host
     -> Django instruction API
-    -> one global SQLite queue per local stack
+    -> one global queue per local stack (Postgres in Compose, SQLite fallback)
     -> polling Manifest V3 extension
     -> Chrome tabs APIs and Chromium DevTools Protocol
     -> structured result or transient screenshot or recording
@@ -44,17 +44,20 @@ Python client or MCP host
 ### Server
 
 - Strict Pydantic request models reject unknown fields and coercion.
-- Each stack has one global promiscuous queue; any polling extension can claim
-  any pending instruction.
+- Each stack has one global queue with per-browser `bid` targeting; untargeted
+  instructions are claimable by any polling extension, targeted ones only by
+  the matching browser.
 - Instructions move through `pending`, `processing`, `completed`, and `failed`.
 - Claims use conditional pending-to-processing updates and bounded batches.
 - Completions use conditional processing-to-terminal updates.
-- Terminal instruction responses are consumed on the first terminal read.
-- Screenshots use local download records that are deleted when served.
+- Terminal instruction responses persist; repeated reads return the same envelope.
+- Screenshots use local download records served at `/api/media/<file>`; reads
+  do not delete files.
 - Screenshot payloads and scroll results receive action-specific validation.
 - Extension recovery delivers its reinstall command through the instruction
   queue with a token and acknowledgement handshake.
-- Local development and container workflows use Django, SQLite, and Uvicorn.
+- Local development and container workflows use Django, Postgres, and Uvicorn;
+  native development without a configured DB falls back to SQLite.
 - Request-aware API discovery at `/api/`, locally hosted Swagger UI at
   `/api/docs/`, and OpenAPI 3.1 at `/api/openapi.json` document the implemented
   queue contract using validation-model schemas and the incoming origin.
@@ -128,7 +131,8 @@ Python client or MCP host
   enterprise use requires adaptation rather than configuration alone.
 - Tab IDs, operation IDs, and element references are routing identifiers, not
   credentials.
-- A stack has no executor selection or affinity; isolation is a deployment
+- A stack routes by per-browser `bid` target; beyond that, isolation is a
+  deployment
   boundary created by separate stack instances and proxy ports.
 - Controller, executor, and operator authority are separate.
 - Extension-owned policy cannot be relaxed by an instruction.
@@ -189,7 +193,7 @@ Python client or MCP host
 | Priority | Gap | Consequence |
 | --- | --- | --- |
 | P0 | No API authentication or role separation | Any network caller that reaches the server can request browser actions. |
-| P0 | Local-only protocol has no executor identity, affinity, or leases | Multiple polling extensions can claim each other's work; network or enterprise use is unsafe without architectural adaptation. |
+| P0 | Local-only protocol has `bid` targeting but no authentication, executor identity, or leases | Untargeted work is still claimable by any polling extension and `bid` is not an authorization boundary; network or enterprise use is unsafe without architectural adaptation. |
 | P0 | Development network and Django defaults | Debug responses, an embedded secret, and broad hosts are unsafe outside a trusted workstation even though installed stacks bind only the proxy to loopback. |
 | P0 | GET routes claim or consume state | Retries, previews, concurrent readers, and interrupted transfers can mutate or lose data. |
 | P0 | No claim leases, cancellation, acknowledgement, or expiry | Processing work can remain stuck and terminal delivery can be lost. |
@@ -207,7 +211,7 @@ Python client or MCP host
 | P1 | No deterministic forms, waits, or dialog handling | Common workflows require fragile sequencing and page-specific code. |
 | P1 | Page helper injection writes page globals | Library setup can interfere with application-owned names. |
 | P1 | No bounded console, network, or navigation evidence | Failures are difficult to explain without arbitrary scripts or external tools. |
-| P1 | Screenshot storage is not a general artifact channel | Binary data is copied through JSON and SQLite without acknowledgement or checksums. |
+| P1 | Screenshot storage is not a general artifact channel | Binary data is copied through JSON and the database without acknowledgement or checksums. |
 | P1 | No managed upload or download model | File movement has no policy, quota, lifecycle, or safe path abstraction. |
 | P2 | Version and artifact verification is manual | Packages and generated artifacts can drift from source contracts. |
 | P2 | Website behavior has no automated checks | Accessibility, keyboard interaction, links, and product claims can regress. |
@@ -630,7 +634,7 @@ MCP, documentation, containers, and release artifacts.
 | Layer | Required Coverage |
 | --- | --- |
 | Protocol | Golden valid and invalid fixtures, finite numbers, unknown fields, size limits, and cross-language conformance. |
-| Server | Concurrent claims, leases, completion, acknowledgement, cancellation, expiry, cleanup, quotas, and SQLite contention with separate connections. |
+| Server | Concurrent claims, leases, completion, acknowledgement, cancellation, expiry, cleanup, quotas, and database contention (Postgres in Compose, SQLite fallback) with separate connections. |
 | Extension unit | Injectable Chrome and CDP adapters, lane scheduling, outbox, backoff, policy, references, redaction, deadlines, and error classification. |
 | Chromium integration | Every action, real pointer and keyboard behavior, semantic inspection, frames, shadow roots, dialogs, traces, files, and worker restart. |
 | Failure injection | Lost responses, server outage, worker suspension, browser restart, tab closure, navigation, debugger conflict, lease expiry, and interrupted artifacts. |
@@ -694,8 +698,8 @@ name for the root OpenCode and Claude installers. The context is always
 and cannot start or end with a hyphen. Lifecycle commands must receive the same
 `PORT` and `NAME`. Distinct installations still require distinct ports
 because a host port can have only one listener. A name is a local resource and
-registration label, not protocol routing or executor identity; each stack keeps
-one promiscuous queue.
+registration label, not protocol routing beyond the per-browser `bid` target;
+untargeted work on each stack remains claimable by any connected browser.
 
 ## Non-Goals
 

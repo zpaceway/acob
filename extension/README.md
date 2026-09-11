@@ -52,9 +52,9 @@ The context prefixes Compose network, volume, container, and image resources
 and is the default MCP registration name used by root `install-opencode` and
 `install-claude`. Use the same `PORT` and `NAME` for lifecycle commands.
 Different installations still require different ports because only one process
-can bind a host port. Names label user or work contexts; they do not add
-protocol routing or executor identity, and extensions sharing one stack still
-consume its promiscuous queue.
+can bind a host port. Names label user or work contexts; beyond the
+per-browser `bid` target they add no protocol routing, and untargeted work on
+one stack remains claimable by any connected browser.
 
 ## JavaScript Timeouts
 
@@ -93,6 +93,31 @@ a failed action does not stop the rest of the batch. The worker holds a
 keep-alive timer for the whole batch. Recordings are keyed by tab, so a
 batch can start and stop recordings on different tabs; starting twice on the
 same tab fails the second entry with a clear error.
+
+## Browser ID (bid)
+
+Every browser owns a `bid`: 32 lowercase hex (`uuid4().hex` without dashes,
+`^[0-9a-f]{32}$`, validated by `isBid()` in `src/types.ts`).
+
+- `src/bid.ts` `getOrCreateBid()` generates it on first run and persists it in
+  `chrome.storage.local` (key `"bid"`); `rotateBid()` replaces it. It survives
+  restarts but not profile wipes — the managed browser uses an ephemeral
+  profile, so each container recreate generates a fresh `bid`.
+- The popup shows it read-only with Copy and Rotate buttons plus a hint; it is
+  never directly editable and is never reported to the server except through
+  the queue protocol below.
+- Polling sends it on every claim: `lifecycle.ts` `nextInstructionsUrl()`
+  builds `/api/instructions/next/?bid=<bid>&limit=<n>`; `background.ts` claims
+  with it and `offscreen.ts` ensures it exists at startup.
+- Results carry it: `execution.ts` `sendResult()` submits `{...body, bid}`, so
+  untargeted completions record the executor. `executeInstruction()` (and the
+  background claim loop) ignores instructions targeted at a different `bid`.
+- `validation.ts` accepts an optional `bid` on every claimed instruction (and
+  per batch entry); a malformed `bid` fails the claim with a clear error.
+
+Target an instruction by copying the popup value into the request's `bid`
+(client `bid=` / MCP `bid` / raw JSON `"bid"`). Omit `bid` for untargeted work
+claimable by any browser.
 
 ## Recordings, Proxy, And Browser Settings
 
@@ -199,11 +224,13 @@ validation and the remaining tab, timeout, screenshot, recording, console, and
 retry limits. These settings remain local to the extension; the server, Python
 client, and MCP service do not expose a settings endpoint or method.
 
-All extensions connected to one server consume its same global queue. Use the
+All extensions connected to one server consume its same global queue with
+per-browser `bid` targeting: each browser receives untargeted work plus work
+targeted at its own `bid`, and ignores the rest. Use the
 root `make install PORT=... NAME=...` workflow when separate local installations
 are needed; `NAME` is required, and each managed browser belongs to its own
-distinct-port stack. Run one extension per stack when deterministic queue
-ownership matters.
+distinct-port stack. Run one extension per stack (or target every instruction
+with `bid`) when deterministic queue ownership matters.
 
 ## Permissions And Safety
 

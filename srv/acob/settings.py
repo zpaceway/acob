@@ -12,21 +12,80 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _is_truthy(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes")
+
+
+def _split_csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _parse_database_url(url: str) -> dict[str, object]:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("postgres", "postgresql", "postgresql+psycopg"):
+        msg = f"Unsupported DATABASE_URL scheme: {parsed.scheme!r}"
+        raise ImproperlyConfigured(msg)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        msg = f"Invalid port in DATABASE_URL: {parsed.netloc!r}"
+        raise ImproperlyConfigured(msg) from exc
+    query = parse_qs(parsed.query)
+    sslmode = query.get("sslmode", [""])[0]
+    config: dict[str, object] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(parsed.path.lstrip("/") or "acob"),
+        "USER": unquote(parsed.username or "acob"),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname or "acob-db",
+        "PORT": str(port) if port else "5432",
+    }
+    if sslmode:
+        config["OPTIONS"] = {"sslmode": sslmode}
+    return config
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-2^1ckbhfvty=g7-)z-rp5r#q4z8@c27czd6p55vn@1utl+1ua-"
+# DEBUG choice: default "true" preserves the current dev behavior
+# (`make dev`, `manage.py test` work with no env set) while remaining
+# controllable. Compose sets ACOB_DEBUG=false for prod safety.
+# ACOB_DEBUG wins; DJANGO_DEBUG is accepted as a fallback.
+DEBUG = _is_truthy(os.environ.get("ACOB_DEBUG", os.environ.get("DJANGO_DEBUG", "true")))
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# SECRET_KEY choice: prefer ACOB_SECRET_KEY, accept DJANGO_SECRET_KEY.
+# The committed dev key is a local-only fallback valid solely when
+# DEBUG is true; production (DEBUG false) without an env secret raises
+# ImproperlyConfigured instead of booting with a known key.
+_DEV_SECRET_KEY = "django-insecure-2^1ckbhfvty=g7-)z-rp5r#q4z8@c27czd6p55vn@1utl+1ua-"
+_ENV_SECRET_KEY = os.environ.get("ACOB_SECRET_KEY") or os.environ.get(
+    "DJANGO_SECRET_KEY"
+)
+if _ENV_SECRET_KEY:
+    SECRET_KEY = _ENV_SECRET_KEY
+elif DEBUG:
+    SECRET_KEY = _DEV_SECRET_KEY
+else:
+    msg = "ACOB_SECRET_KEY (or DJANGO_SECRET_KEY) must be set when DEBUG is false."
+    raise ImproperlyConfigured(msg)
 
-ALLOWED_HOSTS: list[str] = ["*"]
+ALLOWED_HOSTS: list[str] = _split_csv(os.environ.get("ACOB_ALLOWED_HOSTS", "*")) or [
+    "*"
+]
+
+CSRF_TRUSTED_ORIGINS: list[str] = _split_csv(
+    os.environ.get("ACOB_CSRF_TRUSTED_ORIGINS")
+    or os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+)
 
 
 # Application definition
@@ -43,6 +102,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -76,12 +136,34 @@ WSGI_APPLICATION = "acob.wsgi.application"
 
 DATA_DIR = Path(os.environ.get("ACOB_DATA_DIR", BASE_DIR))
 ACOB_PUBLIC_URL = os.environ.get("ACOB_PUBLIC_URL", "").rstrip("/")
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": DATA_DIR / "db.sqlite3",
+
+# DATABASES choice: single DATABASE_URL wins (ACOB_DATABASE_URL preferred),
+# else postgres from ACOB_DB_HOST + ACOB_DB_NAME/USER/PASSWORD/PORT,
+# else SQLite fallback (DATA_DIR/db.sqlite3) for local dev without a DB.
+_DATABASE_URL = os.environ.get("ACOB_DATABASE_URL") or os.environ.get(
+    "DATABASE_URL", ""
+)
+_DB_HOST = os.environ.get("ACOB_DB_HOST", "").strip()
+if _DATABASE_URL:
+    DATABASES = {"default": _parse_database_url(_DATABASE_URL)}
+elif _DB_HOST:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("ACOB_DB_NAME", "acob"),
+            "USER": os.environ.get("ACOB_DB_USER", "acob"),
+            "PASSWORD": os.environ.get("ACOB_DB_PASSWORD", "acob"),
+            "HOST": _DB_HOST,
+            "PORT": os.environ.get("ACOB_DB_PORT", "5432"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": DATA_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -120,7 +202,19 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
+# Prod static choice: WhiteNoise serves /static/ directly from Django,
+# so no nginx location change is needed (the generic / proxy already
+# reaches acob-srv). STATIC_ROOT is collected at image build time.
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Screenshots and recordings are posted as base64 JSON by the extension.
 # The 1 GiB limit covers a full-size 512 MiB encoded recording and a

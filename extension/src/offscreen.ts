@@ -3,6 +3,7 @@ import {
   handleRecordingFrame,
   startRecordingSink,
 } from "./recording.js";
+import { getOrCreateBid } from "./bid.js";
 import { ACOBSettings } from "./settings.js";
 import { isRuntimeMessage } from "./types.js";
 import type {
@@ -83,4 +84,5 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+getOrCreateBid().catch(console.error);
 requestInstructions();

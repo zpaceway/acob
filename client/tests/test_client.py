@@ -395,32 +395,36 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execute.call_args_list,
             [
-                call("list", timeout=None),
+                call("list", timeout=None, bid=None),
                 call(
                     "navigate",
                     timeout=None,
+                    bid=None,
                     url="https://example.com",
                 ),
                 call(
                     "navigate",
                     timeout=None,
+                    bid=None,
                     url="https://example.org",
                     tid=10,
                 ),
-                call("focus", tid=10, timeout=None),
-                call("close", tid=10, timeout=None),
-                call("reload", tid=10, timeout=None),
-                call("scroll", tid=10, y=500, timeout=None),
+                call("focus", tid=10, timeout=None, bid=None),
+                call("close", tid=10, timeout=None, bid=None),
+                call("reload", tid=10, timeout=None, bid=None),
+                call("scroll", tid=10, y=500, timeout=None, bid=None),
                 call(
                     "click",
                     tid=10,
                     selector="button[type=submit]",
                     timeout=None,
+                    bid=None,
                 ),
-                call("keyboard", timeout=None, tid=10, text="ACOB"),
+                call("keyboard", timeout=None, bid=None, tid=10, text="ACOB"),
                 call(
                     "keyboard",
                     timeout=None,
+                    bid=None,
                     tid=10,
                     key="Enter",
                     modifiers=["ctrl", "shift"],
@@ -430,9 +434,178 @@ class ACOBClientTests(unittest.IsolatedAsyncioTestCase):
                     tid=10,
                     script="document.title",
                     timeout=None,
+                    bid=None,
                 ),
             ],
         )
+
+    async def test_submit_includes_bid_and_rejects_invalid_bids(self) -> None:
+        client = self.make_client()
+        target = "a" * 32
+        requests = self.add_responses(client, [(201, {"id": 1, "status": "pending"})])
+
+        await client.submit("list", bid=target)
+
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "list", "bid": target},
+        )
+
+        invalid: list[Any] = [
+            "",
+            "xyz",
+            "A" * 32,
+            "a" * 31,
+            "a" * 33,
+            "g" * 32,
+            123,
+            True,
+            "a-".ljust(32, "a"),
+        ]
+        for bad in invalid:
+            with self.subTest(bid=bad), self.assertRaises(ValueError):
+                await client.submit("list", bid=bad)
+        self.assertEqual(len(requests), 1)
+
+    async def test_targeted_action_echoes_bid_in_request_and_response(self) -> None:
+        target = "b" * 32
+        client = self.make_client()
+        requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 4, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 4,
+                        "status": "completed",
+                        "result": {
+                            "clicked": True,
+                            "selector": "button",
+                            "x": 10.5,
+                            "y": 20.5,
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = await client.click(12, "button", bid=target)
+
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {"action": "click", "tid": 12, "selector": "button", "bid": target},
+        )
+        self.assertIsInstance(result, ClickResult)
+        self.assertEqual(result.bid, target)
+
+    async def test_executor_bid_from_terminal_wins_over_requested(self) -> None:
+        executor = "c" * 32
+        client = self.make_client()
+        self.add_responses(
+            client,
+            [
+                (201, {"id": 5, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 5,
+                        "status": "completed",
+                        "result": {"scrolled": True, "y": 500.0},
+                        "bid": executor,
+                    },
+                ),
+            ],
+        )
+
+        result = await client.scroll(12, 500)
+
+        self.assertIsInstance(result, ScrollResult)
+        self.assertEqual(result.bid, executor)
+
+    async def test_response_models_default_to_no_bid_for_old_servers(self) -> None:
+        client = self.make_client()
+        self.add_responses(
+            client,
+            [
+                (201, {"id": 6, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 6,
+                        "status": "completed",
+                        "result": {"scrolled": True, "y": 10.0},
+                    },
+                ),
+            ],
+        )
+
+        result = await client.scroll(12, 10)
+
+        self.assertIsNone(result.bid)
+
+    async def test_list_and_batch_enrich_results_with_bid(self) -> None:
+        target = "d" * 32
+        tab = {
+            "tid": 12,
+            "window_id": 3,
+            "active": True,
+            "focused": True,
+            "title": "Example",
+            "url": "https://example.com/",
+            "domain": "example.com",
+        }
+        client = self.make_client()
+        list_requests = self.add_responses(
+            client,
+            [
+                (201, {"id": 7, "status": "pending"}),
+                (200, {"id": 7, "status": "completed", "result": [tab]}),
+            ],
+        )
+        tabs = await client.list(bid=target)
+        self.assertEqual(tabs[0].bid, target)
+        self.assertEqual(
+            json.loads(list_requests[0].content),
+            {"action": "list", "bid": target},
+        )
+
+        batch_client = self.make_client()
+        batch_requests = self.add_responses(
+            batch_client,
+            [
+                (201, {"id": 8, "status": "pending"}),
+                (
+                    200,
+                    {
+                        "id": 8,
+                        "status": "completed",
+                        "result": [{"result": []}],
+                        "bid": target,
+                    },
+                ),
+            ],
+        )
+        entries = await batch_client.execute_batch([{"action": "list"}], bid=target)
+        self.assertEqual(entries[0].bid, target)
+        self.assertEqual(
+            json.loads(batch_requests[0].content),
+            {
+                "action": "batch",
+                "actions": [{"action": "list"}],
+                "bid": target,
+            },
+        )
+
+    async def test_action_methods_reject_invalid_bids_without_http(self) -> None:
+        client = self.make_client()
+        requests = self.add_responses(client, [])
+
+        with self.assertRaises(ValueError):
+            await client.focus(1, bid="not-a-bid")
+        with self.assertRaises(ValueError):
+            await client.screenshot(1, bid="E" * 32)
+        self.assertEqual(requests, [])
 
     async def test_waits_for_independent_instructions_concurrently(self) -> None:
         client = self.make_client()

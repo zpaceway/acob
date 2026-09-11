@@ -1,0 +1,7 @@
+-- ACOB Postgres init script.
+-- Nothing custom is required: the official postgres image creates
+-- POSTGRES_DB / POSTGRES_USER from the environment on first start,
+-- and Django creates all tables via `manage.py migrate`.
+-- Keep this file as a placeholder for future extensions
+-- (e.g. CREATE EXTENSION ...). It runs once on volume init
+-- from /docker-entrypoint-initdb.d/.

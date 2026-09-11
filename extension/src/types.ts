@@ -168,6 +168,21 @@ export function keyboardCharacter(value: string): KeyboardCharacter {
   return value as KeyboardCharacter;
 }
 
+declare const bidBrand: unique symbol;
+export type Bid = string & {
+  readonly [bidBrand]: true;
+};
+
+const BID_RE = /^[0-9a-f]{32}$/;
+
+export function isBid(value: unknown): value is Bid {
+  return typeof value === "string" && BID_RE.test(value);
+}
+
+export function generateBid(): Bid {
+  return crypto.randomUUID().replace(/-/g, "") as Bid;
+}
+
 export type ListTabsPayload = Record<string, never>;
 
 export type CleanupPayload = Record<string, never>;
@@ -303,6 +318,7 @@ export type SupportedInstruction<
     id: number;
     action: CurrentAction;
     payload: InstructionPayloadMap[CurrentAction];
+    bid?: Bid | null;
   };
 }[Action];
 
@@ -310,6 +326,7 @@ export interface ClaimedInstruction {
   id: number;
   action: string;
   payload: unknown;
+  bid?: Bid | null;
 }
 
 // Delivered by the claim route in place of queued work, so it carries no
@@ -328,42 +345,52 @@ export interface Instruction {
   error: string | null;
   created_at: string;
   updated_at: string;
+  bid: Bid | null;
 }
 
 export interface ListTabsInstructionRequest {
   action: "list";
+  bid?: Bid;
 }
 
 export interface CleanupInstructionRequest {
   action: "cleanup";
+  bid?: Bid;
 }
 
 export interface CloseTabInstructionRequest extends CloseTabPayload {
   action: "close";
+  bid?: Bid;
 }
 
 export interface FocusTabInstructionRequest extends FocusTabPayload {
   action: "focus";
+  bid?: Bid;
 }
 
 export interface NavigateTabInstructionRequest extends NavigateTabPayload {
   action: "navigate";
+  bid?: Bid;
 }
 
 export interface ReloadTabInstructionRequest extends ReloadTabPayload {
   action: "reload";
+  bid?: Bid;
 }
 
 export interface ScrollInstructionRequest extends ScrollPayload {
   action: "scroll";
+  bid?: Bid;
 }
 
 export interface ClickInstructionRequest extends ClickPayload {
   action: "click";
+  bid?: Bid;
 }
 
 export interface JavaScriptInstructionRequest extends JavaScriptPayload {
   action: "javascript";
+  bid?: Bid;
 }
 
 export type KeyboardInstructionRequest =
@@ -373,6 +400,7 @@ export type KeyboardInstructionRequest =
       text: string;
       key?: never;
       modifiers?: [];
+      bid?: Bid;
     }
   | {
       action: "keyboard";
@@ -380,12 +408,14 @@ export type KeyboardInstructionRequest =
       text?: never;
       key: KeyboardKey;
       modifiers?: KeyboardModifier[];
+      bid?: Bid;
     };
 
 export interface ScreenshotInstructionRequest {
   action: "screenshot";
   tid: number;
   full_page?: boolean;
+  bid?: Bid;
 }
 
 export type ProxyInstructionRequest =
@@ -393,10 +423,12 @@ export type ProxyInstructionRequest =
       action: "proxy";
       method: "set";
       proxy: string;
+      bid?: Bid;
     }
   | {
       action: "proxy";
       method: "unset";
+      bid?: Bid;
     };
 
 export type RecordInstructionRequest =
@@ -405,11 +437,13 @@ export type RecordInstructionRequest =
       method: "start";
       tid: number;
       full_page?: boolean;
+      bid?: Bid;
     }
   | {
       action: "record";
       method: "stop";
       tid: number;
+      bid?: Bid;
     };
 
 export type ConsoleInstructionRequest =
@@ -417,21 +451,25 @@ export type ConsoleInstructionRequest =
       action: "console";
       method: "start";
       tid: number;
+      bid?: Bid;
     }
   | {
       action: "console";
       method: "capture";
       tid: number;
+      bid?: Bid;
     }
   | {
       action: "console";
       method: "stop";
       tid: number;
+      bid?: Bid;
     };
 
 export interface BatchInstructionRequest {
   action: "batch";
   actions: InstructionRequest[];
+  bid?: Bid;
 }
 
 export type InstructionRequest =
