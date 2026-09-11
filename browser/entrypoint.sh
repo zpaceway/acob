@@ -206,6 +206,18 @@ case "$display_number" in
     ;;
 esac
 
+# Chromium (and any X client) locates Xvfb through DISPLAY. Export it so the
+# chromium child below connects to the display Xvfb just started. Without this,
+# chromium exits with "Missing X server or $DISPLAY" and Compose restarts the
+# container into a crash loop.
+export DISPLAY="$display"
+
+# A container restart reuses the same filesystem, so a previous Xvfb run can
+# leave a stale lock and socket behind. A fresh Xvfb then fails with "Server is
+# already active for display", while the wait loop below would mistake the
+# stale socket for a ready display. No X server runs yet, so both are stale.
+rm -f "/tmp/.X${display_number}-lock" "/tmp/.X11-unix/X${display_number}"
+
 gosu acob Xvfb "$display" -screen 0 "${width}x${height}x24" -nolisten tcp -ac &
 xvfb_pid=$!
 
@@ -238,7 +250,7 @@ if [ "${ACOB_BROWSER_VNC_ENABLED:-false}" = "true" ]; then
     127.0.0.1:5900 &
 fi
 
-exec gosu acob chromium \
+exec gosu acob env DISPLAY="$display" chromium \
   --user-data-dir=/data \
   --no-sandbox \
   --host-resolver-rules="MAP localhost host.docker.internal" \
