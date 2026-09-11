@@ -1,4 +1,5 @@
 import { MODIFIER_BITS } from "./keys.js";
+import { parseExplicitPort } from "./proxyUrl.js";
 import { state } from "./state.js";
 import { isBid, isKeyboardKey, MAX_BATCH_ACTIONS } from "./types.js";
 import type {
@@ -77,7 +78,7 @@ function isProxyString(value: unknown): value is string {
     if (!parsed.hostname) {
       return false;
     }
-    const port = parsed.port ? Number(parsed.port) : NaN;
+    const port = parseExplicitPort(value, parsed);
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
       return false;
     }

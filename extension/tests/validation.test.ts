@@ -85,6 +85,21 @@ test("reports malformed batch entries", () => {
 test("accepts proxy set and unset", () => {
   assert.equal(
     isSupportedInstruction(
+      instruction("proxy", { method: "set", proxy: "http://proxy.example:80" }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
+      instruction("proxy", {
+        method: "set",
+        proxy: "https://proxy.example:443",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSupportedInstruction(
       instruction("proxy", { method: "set", proxy: "http://127.0.0.1:8080" }),
     ),
     true,

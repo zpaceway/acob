@@ -4,6 +4,13 @@ import test from "node:test";
 import { parseProxyString } from "../src/proxy.js";
 
 test("parses http/https/socks5 proxy strings", () => {
+  assert.deepEqual(parseProxyString("http://proxy.example:80"), {
+    scheme: "http",
+    host: "proxy.example",
+    port: 80,
+    username: null,
+    password: null,
+  });
   assert.deepEqual(parseProxyString("http://127.0.0.1:8080"), {
     scheme: "http",
     host: "127.0.0.1",
@@ -15,6 +22,13 @@ test("parses http/https/socks5 proxy strings", () => {
     scheme: "https",
     host: "proxy.example",
     port: 8443,
+    username: null,
+    password: null,
+  });
+  assert.deepEqual(parseProxyString("https://proxy.example:443"), {
+    scheme: "https",
+    host: "proxy.example",
+    port: 443,
     username: null,
     password: null,
   });

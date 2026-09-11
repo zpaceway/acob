@@ -1,4 +1,5 @@
 import { state } from "./state.js";
+import { parseExplicitPort } from "./proxyUrl.js";
 import type {
   Configuration,
   ProxyResult,
@@ -33,7 +34,7 @@ export function parseProxyString(value: string): ParsedProxy {
   if (!parsed.hostname) {
     throw new Error("Invalid proxy string: host is required");
   }
-  const port = parsed.port ? Number(parsed.port) : NaN;
+  const port = parseExplicitPort(value, parsed);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
     throw new Error("Invalid proxy string: port must be 1-65535");
   }
